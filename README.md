@@ -6,19 +6,19 @@ Deck is a local-first stream-deck-style editor and phone-preview foundation. The
 
 ## Design checkpoint
 
-The original dashboard-style UI was rejected. The current coordinator-led pass uses a graphite workspace, a single page/action sidebar, a deck-centered editor, quieter properties, and bottom page navigation on phones. The self-hosted Geist font is licensed under the [SIL Open Font License](src/assets/Geist-OFL.txt). Existing deck data and native actions are unchanged.
+The current coordinator-led pass uses one compact toolbar, neutral controls, selected-control settings beneath the deck, and on-demand action/page dialogs. A non-blocking first-run guide walks through adding, configuring, and safely previewing a control. Hex informed the restraint and interaction principles; its interface was not copied. The self-hosted Geist font is licensed under the [SIL Open Font License](src/assets/Geist-OFL.txt). Existing deck data and native execution guards are unchanged.
 
-This is a direction for review, not an approved final design. See [desktop and phone screenshots](docs/design.md).
+The layout direction is approved; the implemented pass is ready for feedback, not an approved final design. See [desktop, onboarding, and phone screenshots](docs/design.md).
 
 ## What is in this slice
 
 - Compact dark-first desktop editor with an optional light theme and five accent tokens.
-- Left navigation, deck page list, editable control canvas, searchable categorized action library, and a selected-control inspector.
+- Page switcher and page manager, editable control canvas, searchable on-demand action picker, and a selected-control inspector beneath the deck.
 - OBS scene, microphone mute, media play/pause, and volume controls. The microphone scope is the **default system input**, explicitly labelled as distinct from an OBS input. The dial is deferred.
 - In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
 - Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
-- One preview status indicator (`Preview / No actions sent` in the browser), plus a disabled **Connect phone** button until the implemented service has UI wiring.
+- One preview status indicator (`Preview / No actions sent` in the browser). Phone pairing remains unavailable in the UI; onboarding and Settings state that explicitly.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
 - Phone preview route at `#/phone` using the same components and saved deck in the same origin. It is not a paired remote controller.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
@@ -51,7 +51,7 @@ npm run smoke
 
 `npm run build` also runs the TypeScript check before the production Vite build. The production bundle is written to `dist/`.
 
-`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). It exercises add page/control, rename/edit, reorder, refresh persistence, same-origin cross-tab sync, phone page switching and volume, dark/light, portrait and landscape layouts, the offline shell, and a two-build service-worker update lifecycle. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
+`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 108 checks exercise onboarding, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
 
 ### Production build preview
 

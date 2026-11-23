@@ -87,7 +87,7 @@ export function Inspector({
   return (
     <details className="panel" open>
       <summary className="panel-head">
-        <span>Properties</span>
+        <span>Selected control</span>
         <span className="panel-hint">{control ? control.label : "No selection"}</span>
       </summary>
       <div className="panel-body">

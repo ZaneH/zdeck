@@ -1,29 +1,46 @@
-# Design review: control surface
+# Design review: a clean local editor
 
-**Status: awaiting user feedback.** This coordinator-led pass replaces the original dashboard styling. It does not add phone pairing or imply a live desktop connection.
+**Status:** the user approved this layout direction; the implemented pass is ready for visual feedback, not declared final.
 
-- Graphite surfaces and quiet seams instead of nested rounded panels and cyan glow.
-- One page/action strip, a central deck, and adjacent properties. Reorder controls appear on selection, hover, or keyboard focus.
-- Warm scene cues, coral microphone cues, a round transport symbol, and a full-width phone volume slider. Colors identify action families, not simulated live state.
-- Self-hosted Geist with system fallback; [font license](../src/assets/Geist-OFL.txt). No external font requests or new UI dependencies.
-- One preview indicator, less repeated copy, bottom phone navigation, reduced-motion support, and 44px touch targets.
+## Direction
 
-These are screenshots of the implemented browser UI, not mockups. Captured with isolated headless Chrome profiles at 1440×1000 and 390×844. The volume image uses the smoke test's 70% local preview; it is not an observed system volume.
+[Hex](https://github.com/anomalyco/hex) is a reference for restraint and usability, not a template to copy. We inspected its committed light/dark screenshots, onboarding, and [design rules](https://github.com/anomalyco/hex/blob/e5f6dac8f9c92876bf449be0b50b24c1878f952b/docs/design-system.md). No Hex code, branding, or assets are included.
+
+- One toolbar: page switcher, page management, Add control, Preview, Settings.
+- Neutral controls with clear labels; no mandatory category colors, decorative numbers, console styling, or floating device frame.
+- Selected-control settings directly beneath the deck. Reordering lives here, rather than on every key.
+- Searchable action picker and page manager appear only when requested.
+- A non-blocking first-run guide: add an action, configure it, try a safe local preview. Existing saved workspaces do not start the guide. Dismissal without saving any browser changes lasts for the current session; this is not a resumable tour.
+- Native modal dialogs provide background inertness, Escape, and focus return. The action picker explicitly focuses search on each opening. Chrome can hand Tab to browser chrome between cycles; the tests distinguish that from entering the inert background app.
+
+Dark tokens: background `#18191b`, controls `#212326`, borders `#34373b`, secondary text `#b2b6bc`, primary text `#f1f2f3`. Accent remains configurable and is used sparingly for selection/focus. Light mode uses neutral gray/white surfaces. One self-hosted typeface, [Geist (OFL)](../src/assets/Geist-OFL.txt); ordinary 12–14px UI text, with larger titles only where useful. No new dependencies or external font requests.
 
 ## Desktop editor
 
-![Desktop editor](design/desktop.png)
+![Dark desktop editor](design/desktop.png)
 
-## Phone deck
+![Light desktop editor](design/light.png)
+
+## Add a control
+
+![Searchable action picker](design/actions.png)
+
+## First run
+
+![First-run guide](design/onboarding.png)
+
+## Phone preview
+
+The phone retains touch-sized controls and bottom page navigation without editing tools.
 
 ![Phone deck](design/phone.png)
 
-## Phone volume control
-
 ![Phone volume preview](design/volume.png)
 
-## Checked, not assumed
+These are implemented browser screens, captured in isolated Chrome profiles at 1440×1000 and 390×844. The light screenshot includes a renamed test control. The 70% volume is a local preview value, not observed system output.
 
-52 frontend tests and 43 headless-browser checks pass, including editing/persistence, keyboard reorder visibility, font loading, layout overflow, phone target size/navigation, offline shell, and a two-build update. Dark desktop, phone portrait, and phone landscape screenshots were reviewed. Light-theme switching is exercised, but a dedicated light-theme visual review is still pending.
+## Verification and limits
 
-Native WebKit/Wayland appearance, real touch devices, and Tailscale/HTTPS phone installation remain unverified. Existing native settings/actions were preserved, not visually validated through a running desktop shell in this pass.
+52 frontend tests and 108 browser checks pass, including page/control editing, persistence, cross-tab synchronization, onboarding, modal focus/search/keyboard behavior, slider keyboard/touch interaction, 320px layouts with 24 long-labelled controls, offline shell, and the two-build user-applied update flow. Dark/light desktop, action picker, phone portrait/landscape, and first-run screenshots were reviewed.
+
+Saved deck schemas, desktop authority, native execution guards, credentials, and remote-service behavior are unchanged. This remains a local editor and phone preview: pairing is not wired to the UI. Native WebKit/Wayland rendering, physical phones, real OBS/audio controls, and HTTPS installation were not validated in this pass.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGrid, Link2Off, Moon, Settings, Smartphone, Sun } from "lucide-react";
+import { ArrowLeft, Moon, Plus, Settings, Smartphone, Sun } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -54,6 +54,8 @@ import { ObsSettingsCard } from "./components/ObsSettingsCard";
 import { PageList } from "./components/PageList";
 import { PhoneDeck } from "./components/PhoneDeck";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { SetupGuide } from "./components/SetupGuide";
+import type { SetupStep } from "./components/SetupGuide";
 
 type Route = "editor" | "settings" | "phone";
 
@@ -75,7 +77,6 @@ function NativeGate({
     <div className="app-shell">
       <main className="settings-view" id="main">
         <div className="settings-header">
-          <p className="eyebrow">Desktop storage</p>
           <h1>{error ? "The deck file needs attention" : "Loading the desktop deck…"}</h1>
           {error ? (
             <>
@@ -119,6 +120,8 @@ export default function App() {
   const [selectedControlId, setSelectedControlId] = useState<string | null>(
     () => activePage(initial.deck).controls[0]?.id ?? null,
   );
+  const actionDialog = useRef<HTMLDialogElement>(null);
+  const [setupStep, setSetupStep] = useState<SetupStep | null>(!nativeMode && initial.status === "empty" ? "start" : null);
   const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [pressedId, setPressedId] = useState<string | null>(null);
@@ -173,12 +176,14 @@ export default function App() {
         syncRef.current = sync;
         setLoadStatus("loaded");
         if (snapshot.exists) {
+          setSetupStep(null);
           setDeck(snapshot.deck);
         } else {
           const browser = loadDeck(getStorage());
           const initialDeck =
             browser.status === "loaded" ? browser.deck : snapshot.deck;
           setDeck(initialDeck);
+          setSetupStep(browser.status === "loaded" ? null : "start");
           sync.update(initialDeck);
         }
         setNativeLoading(false);
@@ -255,6 +260,11 @@ export default function App() {
     setPreviewNotice(`Preview only: volume ${next}%. No desktop action was sent.`);
   };
 
+  const openActionPicker = () => {
+    actionDialog.current?.showModal();
+    actionDialog.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
+  };
+
   const handleAddControl = (kind: ActionKind) => {
     const result = addControl(deck, page.id, kind);
     if (!result) {
@@ -263,6 +273,7 @@ export default function App() {
     }
     commitDeck(result.deck);
     setSelectedControlId(result.control.id);
+    if (setupStep && setupStep !== "done") setSetupStep("configure");
     setPreviewNotice(`Added ${result.control.label}. Local preview only.`);
   };
 
@@ -322,7 +333,6 @@ export default function App() {
 
   const handleTheme = (theme: Theme) => commitDeck(setTheme(deck, theme));
   const handleAccent = (accent: Accent) => commitDeck(setAccent(deck, accent));
-  const toggleTheme = () => handleTheme(deck.theme === "dark" ? "light" : "dark");
 
   if (nativeMode && nativeLoading) return <NativeGate error={null} onRetry={reloadNativeDeck} />;
   if (nativeMode && nativeBlocked) return <NativeGate error={nativeBlocked} onRetry={reloadNativeDeck} />;
@@ -406,43 +416,20 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
     >
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <LayoutGrid size={18} />
-          </span>
-          <div className="brand-copy">
-            <span className="brand-name">Deck</span>
-            <span className="brand-tag">alpha</span>
-          </div>
-        </div>
-
-        <div className="topbar-spacer" />
-
-        <div className="status-pill" title={obsPill.title}>
-          <span
-            className={`status-dot${obsPill.live ? " is-live" : ""}`}
-            aria-hidden="true"
+        <a className="brand" href="#/" aria-label="Deck editor">Deck</a>
+        {route === "editor" ? (
+          <PageList
+            deck={deck} activePageId={page.id} onSelect={handleSelectPage}
+            onAdd={handleAddPage} onRename={handleRenamePage}
+            onRemove={handleRemovePage} onMove={handleMovePage}
           />
-          <span>
-            <strong>{obsPill.strong}</strong>
-            <span className="status-sep"> / </span>
-            {obsPill.rest}
-          </span>
-        </div>
-
-        <button
-          type="button"
-          className="button secondary theme-toggle"
-          onClick={toggleTheme}
-          aria-label={`Switch to ${deck.theme === "dark" ? "light" : "dark"} theme`}
-        >
-          {deck.theme === "dark" ? (
-            <Sun size={16} aria-hidden="true" />
-          ) : (
-            <Moon size={16} aria-hidden="true" />
-          )}
-          <span>{deck.theme === "dark" ? "Light" : "Dark"}</span>
-        </button>
+        ) : <a className="back-link" href="#/"><ArrowLeft size={15} aria-hidden="true" /> Back to deck</a>}
+        <div className="topbar-spacer" />
+        {route === "editor" ? (
+          <button type="button" className="button secondary add-control" disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
+            <Plus size={15} aria-hidden="true" /> Add control
+          </button>
+        ) : null}
 
         <a
           className="button secondary"
@@ -454,68 +441,16 @@ export default function App() {
           <span>Preview</span>
         </a>
 
-        <div className="pairing">
-          <button
-            type="button"
-            className="button secondary"
-            disabled
-            aria-label="Connect phone (pairing interface not wired yet)"
-            title="The private service is implemented. Its pairing interface is next."
-          >
-            <Link2Off size={16} aria-hidden="true" />
-            <span>Connect phone</span>
-          </button>
-        </div>
+        <a href="#/settings" className="icon-button" aria-label="Open settings" title="Settings" aria-current={route === "settings" ? "page" : undefined}>
+          <Settings size={17} aria-hidden="true" />
+        </a>
       </header>
-
-      <aside className="sidebar" aria-label="Workspace tools">
-      <nav className="nav" aria-label="Primary">
-        <a
-          href="#/"
-          className={route === "editor" ? "is-active" : undefined}
-          aria-current={route === "editor" ? "page" : undefined}
-        >
-          <LayoutGrid size={18} aria-hidden="true" />
-          <span>Decks</span>
-        </a>
-        <a
-          href="#/settings"
-          className={route === "settings" ? "is-active" : undefined}
-          aria-current={route === "settings" ? "page" : undefined}
-        >
-          <Settings size={18} aria-hidden="true" />
-          <span>Settings</span>
-        </a>
-      </nav>
-      <PageList
-        deck={deck}
-        activePageId={page.id}
-        onSelect={handleSelectPage}
-        onAdd={handleAddPage}
-        onRename={handleRenamePage}
-        onRemove={handleRemovePage}
-        onMove={handleMovePage}
-      />
-      <ActionLibrary
-        pageName={page.name}
-        disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE}
-        onAdd={handleAddControl}
-      />
-      <p className="sidebar-footer">{nativeMode ? "Desktop workspace" : "Browser workspace"}</p>
-      </aside>
 
       {route === "settings" ? (
         <main className="settings-view" id="main">
           <div className="settings-header">
-            <p className="eyebrow">Settings</p>
-            <h1>Local editor</h1>
-            <p>
-              Deck is a provisional name. This build is a local editor and
-              phone-preview foundation. OBS scene switching runs natively when you
-              connect OBS in the desktop app. On Linux, the Inspector can also run
-              real default-microphone mute, output-volume, and media play/pause
-              actions; phone preview and toolbar tile presses stay local.
-            </p>
+            <h1>Settings</h1>
+            <p>Connections, appearance, and local storage.</p>
           </div>
 
           <section className="settings-card">
@@ -572,6 +507,8 @@ export default function App() {
           <section className="settings-card">
             <h2>Storage</h2>
             <p>{storageSummary}</p>
+            <details className="storage-details">
+              <summary>Storage details</summary>
             {nativeMode ? (
               <p className="muted">
                 Saved as a versioned, validated JSON document in{" "}
@@ -587,10 +524,11 @@ export default function App() {
                 only. Invalid or older data is ignored and the sample deck is loaded.
               </p>
             )}
+            </details>
           </section>
 
-          <section className="settings-card">
-            <h2>Preview scope</h2>
+          <details className="settings-card preview-scope">
+            <summary>About this preview</summary>
             <p>
               Toolbar tile presses and the phone preview are local only. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
@@ -603,7 +541,7 @@ export default function App() {
               The private connection service is implemented; pairing controls are not
               wired to this interface yet.
             </p>
-          </section>
+          </details>
 
           <section className="settings-card">
             <h2>Installable web app</h2>
@@ -617,67 +555,65 @@ export default function App() {
       ) : (
         <main className="workspace" id="main">
           <section className="canvas-panel" aria-labelledby="page-title">
+            <h1 id="page-title" className="sr-only">{page.name}</h1>
+            {setupStep ? (
+              <SetupGuide
+                step={setupStep} hasSelection={selectedControl !== null}
+                onAdd={openActionPicker}
+                onConfigure={() => setSetupStep("preview")}
+                onPreview={() => {
+                  if (!selectedControl) return;
+                  if (selectedControl.action === "volume") previewVolume(selectedControl, controlVolume(selectedControl));
+                  else previewControl(selectedControl);
+                  setSetupStep("done");
+                }}
+                onDismiss={() => setSetupStep(null)}
+              />
+            ) : null}
             {storageAlert ? (
               <p className="storage-alert" role="status">
                 {storageAlert}
               </p>
             ) : null}
 
-            <div className="canvas-header">
-              <div>
-                <p className="eyebrow">Workspace / Pages</p>
-                <h1 id="page-title">{page.name}</h1>
-                <p className="canvas-subtitle">
-                  {page.controls.length} controls
-                </p>
-              </div>
-              <a href="#/phone" className="canvas-preview" aria-label="Preview this page on phone">
-                <Smartphone size={15} aria-hidden="true" />
-                Phone view
-              </a>
-            </div>
-
             <div className="deck-workbench">
-            <div className="deck-frame">
-            <div className="deck-frame-heading">
-              <span>{page.name}</span><span>Layout preview</span>
-            </div>
-            <div className="control-grid">
-              {page.controls.map((control, index) => (
-                <ControlTile
-                  key={control.id}
-                  control={control}
-                  variant="editor"
-                  volume={previewVolumes[control.id] ?? controlVolume(control)}
-                  selected={selectedControlId === control.id}
-                  pressed={pressedId === control.id}
-                  onPrimary={() => setSelectedControlId(control.id)}
-                  onVolumeChange={(value) => previewVolume(control, value)}
-                  onMove={(delta) => handleMoveControl(control, delta)}
-                  canMoveUp={index > 0}
-                  canMoveDown={index < page.controls.length - 1}
-                />
-              ))}
-            </div>
-
-            {page.controls.length === 0 ? (
-              <div className="empty-canvas">
-                <p>No controls on this page yet.</p>
-                <p>Add one from the action library to start shaping the deck.</p>
+              <div className="control-grid">
+                {page.controls.map((control) => (
+                  <ControlTile
+                    key={control.id}
+                    control={control}
+                    variant="editor"
+                    volume={previewVolumes[control.id] ?? controlVolume(control)}
+                    selected={selectedControlId === control.id}
+                    pressed={pressedId === control.id}
+                    onPrimary={() => setSelectedControlId(control.id)}
+                    onVolumeChange={(value) => previewVolume(control, value)}
+                  />
+                ))}
+                {page.controls.length === 0 ? (
+                  <button
+                    type="button"
+                    className="empty-key"
+                    onClick={openActionPicker}
+                  >
+                    <Plus size={20} aria-hidden="true" /> Add your first control
+                  </button>
+                ) : null}
               </div>
-            ) : null}
-            <div className="deck-frame-footer"><span>DECK</span><span>{page.controls.length} keys</span></div>
-            </div>
             </div>
 
-            <p className="preview-feedback" role="status" aria-live="polite">
-              {previewNotice ??
-                "Select a key to edit. Add controls from the left."}
-            </p>
+            <div className="workspace-footer">
+              <span className="status-pill" title={obsPill.title}>
+                <span className={`status-dot${obsPill.live ? " is-live" : ""}`} aria-hidden="true" />
+                {obsPill.strong}<span className="status-detail"> / {obsPill.rest}</span>
+              </span>
+              <p className="preview-feedback" role="status" aria-live="polite">{previewNotice}</p>
+            </div>
           </section>
 
-          <aside className="right-panel" aria-label="Actions and inspector">
+          <section className="inspector-dock" aria-label="Control properties">
             <Inspector
+              key={selectedControl?.id ?? "empty"}
               control={selectedControl}
               pageName={page.name}
               obs={obs}
@@ -693,7 +629,11 @@ export default function App() {
                 selectedControl && previewVolume(selectedControl, value)
               }
             />
-          </aside>
+          </section>
+          <ActionLibrary
+            dialogRef={actionDialog} pageName={page.name}
+            disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onAdd={handleAddControl}
+          />
         </main>
       )}
 

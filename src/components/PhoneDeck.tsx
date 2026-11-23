@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, LayoutGrid } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { clampVolume, controlVolume } from "../lib/actions";
 import { activePage, findPage } from "../lib/deck";
 import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
@@ -87,12 +87,8 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
       <UpdateBanner />
       <header className="phone-header">
         <div className="phone-brand">
-          <span className="brand-mark" aria-hidden="true">
-            <LayoutGrid size={17} />
-          </span>
           <div className="brand-copy">
             <strong>Deck</strong>
-            <span className="brand-tag">Control surface</span>
           </div>
         </div>
         <a href="#/" className="phone-back">
@@ -143,7 +139,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
 
       <footer className="phone-footer">
         <nav className="phone-pages" aria-label="Deck pages">
-          {deck.pages.map((item, index) => (
+          {deck.pages.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -151,7 +147,6 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
               onClick={() => setPageId(item.id)}
               aria-current={item.id === page.id ? "page" : undefined}
             >
-              <span className="phone-page-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
               {item.name}
             </button>
           ))}

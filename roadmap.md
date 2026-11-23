@@ -212,7 +212,7 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 - [x] Scaffold shared web frontend and minimal Tauri shell with documented commands. Repository-local Nix shell is pinned; coordinator verified cargo check/test and a debug no-bundle Tauri build on x86_64-linux. No native runtime or packaging claim yet.
 - [x] Establish design tokens, dark/light themes, desktop editor, and same-origin phone preview.
-- [ ] Obtain user approval of the coordinator-led redesign. Original visuals were rejected; current graphite/control-surface direction has Chrome screenshot and interaction checks, not user acceptance.
+- [ ] Obtain user acceptance of the implemented redesign. The user approved the clean, Hex-inspired (not copied) single-toolbar layout; the new implementation has 108 Chrome checks and reviewed screenshots, not final visual acceptance. Earlier dashboard and colored-console directions were rejected.
 - [x] Add minimal deck/page/button schema, sample data, and validated browser-local persistence. Coordinator verified 29 tests plus 36 Chrome smoke checks, including cross-tab edits and refresh persistence. Desktop-owned atomic file persistence remains M2 work.
 - [ ] Add CI for formatting, type checking, unit tests, and desktop build checks on Linux/Windows/macOS.
 - [x] Add PWA manifest and generated icons.
@@ -236,6 +236,8 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 **Exit: minimal working project.** Two pages, real actions, secure pairing, live mirroring, persistence across restart, usable phone installation, clear errors. No mock-only action demos counted as completion.
 
 ### M3 — Useful integrations and extension developer preview
+
+**User priority after the interface is settled:** Spotify as the first requested plugin: play, pause, next/previous track, and volume. Before choosing an implementation, distinguish Linux player control from Spotify Web API integration and document account/API restrictions. Existing default-MPRIS play/pause is not a Spotify plugin. No Spotify implementation is included in the design pass.
 
 - [ ] Finish OBS acceptance on a real OBS/native runtime. Initial native implementation connects to loopback with session-only credentials, discovers scenes, and verifies scene switches; coordinator verified 13 fake-peer Rust tests and 37 TypeScript tests. Manual snapshots are implemented, not pushed live state.
 - [ ] Finish live Media/System acceptance and extend the OS matrix. Initial Linux adapter implements system-default microphone mute, output volume, and default MPRIS play/pause with fixed wpctl/playerctl commands; coordinator verified 33 Rust tests total (13 OBS + 20 system), 45 frontend tests, and 36 browser smoke checks. No live audio/playback mutation has been tested.

@@ -6,5 +6,5 @@ export function applyTheme(theme: Theme, accent: Accent): void {
   root.style.setProperty("--accent", accent);
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", theme === "dark" ? "#101112" : "#eeefec");
+    ?.setAttribute("content", theme === "dark" ? "#18191b" : "#f4f5f6");
 }
