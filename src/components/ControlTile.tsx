@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { actionDefinition, controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
@@ -29,19 +30,14 @@ export function ControlTile({
   canMoveDown = false,
 }: ControlTileProps) {
   const definition = actionDefinition(control.action);
-  const primaryLabel =
-    variant === "phone"
-      ? `Press ${control.label} (local preview only)`
-      : `Select ${control.label}`;
   const content = (
     <>
-      <span className="tile-icon">
-        <ActionIcon kind={control.action} />
-      </span>
+      <span className="tile-type">{definition.category}</span>
+      <span className="tile-icon"><ActionIcon kind={control.action} size={28} /></span>
       <span className="tile-copy">
         <span className="tile-label">{control.label}</span>
         <span className="tile-meta">
-          {definition.category} · {controlSummary(control)}
+          {control.action === "obs-scene" ? "Scene" : control.action === "mic-mute" ? "System input" : control.action === "volume" ? "Output" : "Transport"}
         </span>
       </span>
     </>
@@ -49,36 +45,10 @@ export function ControlTile({
 
   return (
     <article
-      className={`control-tile${selected ? " is-selected" : ""}${
-        pressed ? " is-pressed" : ""
-      }`}
+      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}`}
       data-action={control.action}
+      data-variant={variant}
     >
-      {variant === "editor" && onMove ? (
-        <div className="tile-tools">
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => onMove(-1)}
-            disabled={!canMoveUp}
-            aria-label={`Move ${control.label} up`}
-            title="Move up"
-          >
-            <ChevronUp size={15} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => onMove(1)}
-            disabled={!canMoveDown}
-            aria-label={`Move ${control.label} down`}
-            title="Move down"
-          >
-            <ChevronDown size={15} aria-hidden="true" />
-          </button>
-        </div>
-      ) : null}
-
       {control.action === "volume" && variant === "phone" ? (
         <div className="tile-primary tile-primary-static">{content}</div>
       ) : (
@@ -86,15 +56,16 @@ export function ControlTile({
           type="button"
           className="tile-primary"
           onClick={onPrimary}
-          aria-label={primaryLabel}
+          aria-label={variant === "phone" ? `Press ${control.label} (local preview only)` : `Select ${control.label}`}
           aria-pressed={variant === "editor" ? selected : undefined}
+          title={controlSummary(control)}
         >
           {content}
         </button>
       )}
 
       {control.action === "volume" ? (
-        <div className="tile-volume">
+        <div className="tile-volume" style={{ "--level": `${volume}%` } as CSSProperties}>
           <label className="sr-only" htmlFor={`vol-${variant}-${control.id}`}>
             Preview volume for {control.label}
           </label>
@@ -107,9 +78,18 @@ export function ControlTile({
             value={volume}
             onChange={(event) => onVolumeChange?.(Number(event.target.value))}
           />
-          <span className="volume-readout" aria-hidden="true">
-            {volume}%
-          </span>
+          <span className="volume-readout" aria-hidden="true">{volume}%</span>
+        </div>
+      ) : null}
+
+      {variant === "editor" && onMove ? (
+        <div className="tile-tools" aria-label={`Reorder ${control.label}`}>
+          <button type="button" className="icon-button" onClick={() => onMove(-1)} disabled={!canMoveUp} aria-label={`Move ${control.label} up`} title="Move up">
+            <ChevronUp size={14} aria-hidden="true" />
+          </button>
+          <button type="button" className="icon-button" onClick={() => onMove(1)} disabled={!canMoveDown} aria-label={`Move ${control.label} down`} title="Move down">
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
         </div>
       ) : null}
     </article>

@@ -12,6 +12,8 @@
 - Controls: **buttons and a slider first**; a dial is a follow-up once shared state and interaction behavior are proven.
 - Phone platform remains unknown; do not claim real-device validation until a target phone is tested.
 - User has authorized implementation and coordinated subworkers. Use bounded, sequential tasks and independently verify their results.
+- User rejected the initial visual design. Coordinator/ChatGPT owns a structural design pass before more feature/UI delegation; current direction is awaiting user feedback, not design-approved.
+- Make reviewable Git checkpoint commits as work progresses. Do not push without authorization.
 
 ## 1. Product
 
@@ -209,7 +211,8 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 ### M1 — Runnable foundation and polished UI slice
 
 - [x] Scaffold shared web frontend and minimal Tauri shell with documented commands. Repository-local Nix shell is pinned; coordinator verified cargo check/test and a debug no-bundle Tauri build on x86_64-linux. No native runtime or packaging claim yet.
-- [x] Establish design tokens, dark/light themes, desktop editor, and same-origin phone preview; initial coordinator Chrome screenshots reviewed, accessibility/interaction QA ongoing.
+- [x] Establish design tokens, dark/light themes, desktop editor, and same-origin phone preview.
+- [ ] Obtain user approval of the coordinator-led redesign. Original visuals were rejected; current graphite/control-surface direction has Chrome screenshot and interaction checks, not user acceptance.
 - [x] Add minimal deck/page/button schema, sample data, and validated browser-local persistence. Coordinator verified 29 tests plus 36 Chrome smoke checks, including cross-tab edits and refresh persistence. Desktop-owned atomic file persistence remains M2 work.
 - [ ] Add CI for formatting, type checking, unit tests, and desktop build checks on Linux/Windows/macOS.
 - [x] Add PWA manifest and generated icons.
@@ -220,8 +223,9 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 ### M2 — Secure end-to-end controller
 
-- [ ] Implement selected endpoint serving, QR/manual pairing, device approval/revocation, and authentication.
-- [ ] Sync a deck revision and live edits; reconnect and resume with a full-state check.
+- [x] Implement private loopback HTTP/WebSocket backend, session-only pairing/approval/revocation, request guards, and deduplicated saved-control commands. Coordinator verified 68 Rust tests including 24 real-loopback service tests; actual Tailscale proxy behavior remains unverified.
+- [ ] Wire desktop admin/QR/manual pairing and authenticated phone UI to the backend.
+- [ ] Wire revisioned snapshots/live edits into the phone client; reconnect/resume with a full-state check.
 - [ ] Route desktop preview and phone commands through one action engine; implement the selected real action family.
 - [ ] Show honest pressed/pending/result/disconnect states; deduplicate commands and prevent offline replay.
 - [x] Add desktop-owned validated atomic file persistence, native migration/load gate, revision CAS, and a sequential frontend save queue; corruption is surfaced without overwrite. Coordinator verified 44 Rust tests (including a temp-file ownership regression) and 52 frontend tests.

@@ -158,9 +158,7 @@ export function PageList({
         })}
       </ul>
 
-      <p className="page-hint">
-        Reorder with the arrow buttons. Keyboard focus reaches every action.
-      </p>
+
     </aside>
   );
 }

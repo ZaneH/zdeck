@@ -116,7 +116,9 @@ export default function App() {
   const [deck, setDeck] = useState<Deck>(initial.deck);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>(initial.status);
   const [saveError, setSaveError] = useState(initial.status === "unavailable");
-  const [selectedControlId, setSelectedControlId] = useState<string | null>(null);
+  const [selectedControlId, setSelectedControlId] = useState<string | null>(
+    () => activePage(initial.deck).controls[0]?.id ?? null,
+  );
   const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [pressedId, setPressedId] = useState<string | null>(null);
@@ -338,8 +340,8 @@ export default function App() {
   const obsPill = !obs.native
     ? {
         title: "This build has no desktop connection.",
-        strong: "Local preview",
-        rest: "Desktop not connected",
+        strong: "Preview",
+        rest: "No actions sent",
         live: false,
       }
     : obs.status === "connected"
@@ -360,8 +362,8 @@ export default function App() {
           }
         : {
             title: "The desktop app is running; OBS is not connected.",
-            strong: "OBS not connected",
-            rest: "Local preview only",
+            strong: "Desktop",
+            rest: "OBS offline",
             live: false,
           };
 
@@ -410,7 +412,7 @@ export default function App() {
           </span>
           <div className="brand-copy">
             <span className="brand-name">Deck</span>
-            <span className="brand-tag">provisional name</span>
+            <span className="brand-tag">alpha</span>
           </div>
         </div>
 
@@ -449,7 +451,7 @@ export default function App() {
           title="Open phone preview"
         >
           <Smartphone size={16} aria-hidden="true" />
-          <span>Phone preview</span>
+          <span>Preview</span>
         </a>
 
         <div className="pairing">
@@ -457,16 +459,16 @@ export default function App() {
             type="button"
             className="button secondary"
             disabled
-            aria-label="Pair device (unavailable: desktop service not built)"
-            title="Pairing needs the desktop connection service, which is not built yet."
+            aria-label="Connect phone (pairing interface not wired yet)"
+            title="The private service is implemented. Its pairing interface is next."
           >
             <Link2Off size={16} aria-hidden="true" />
-            <span>Pair device</span>
+            <span>Connect phone</span>
           </button>
-          <span className="pairing-note">Pairing needs the desktop service (not built).</span>
         </div>
       </header>
 
+      <aside className="sidebar" aria-label="Workspace tools">
       <nav className="nav" aria-label="Primary">
         <a
           href="#/"
@@ -484,13 +486,23 @@ export default function App() {
           <Settings size={18} aria-hidden="true" />
           <span>Settings</span>
         </a>
-        <div className="nav-spacer" />
-        <p className="nav-note">
-          {obs.native ? "Native desktop shell" : "Browser preview only"}
-          <br />
-          {obs.status === "connected" ? "OBS connected" : "OBS not connected"}
-        </p>
       </nav>
+      <PageList
+        deck={deck}
+        activePageId={page.id}
+        onSelect={handleSelectPage}
+        onAdd={handleAddPage}
+        onRename={handleRenamePage}
+        onRemove={handleRemovePage}
+        onMove={handleMovePage}
+      />
+      <ActionLibrary
+        pageName={page.name}
+        disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE}
+        onAdd={handleAddControl}
+      />
+      <p className="sidebar-footer">{nativeMode ? "Desktop workspace" : "Browser workspace"}</p>
+      </aside>
 
       {route === "settings" ? (
         <main className="settings-view" id="main">
@@ -588,8 +600,8 @@ export default function App() {
               not applied, failed, or unknown results.
             </p>
             <p>
-              Pairing is disabled because the desktop connection service is not built. No
-              connected or success state is simulated.
+              The private connection service is implemented; pairing controls are not
+              wired to this interface yet.
             </p>
           </section>
 
@@ -604,16 +616,6 @@ export default function App() {
         </main>
       ) : (
         <main className="workspace" id="main">
-          <PageList
-            deck={deck}
-            activePageId={page.id}
-            onSelect={handleSelectPage}
-            onAdd={handleAddPage}
-            onRename={handleRenamePage}
-            onRemove={handleRemovePage}
-            onMove={handleMovePage}
-          />
-
           <section className="canvas-panel" aria-labelledby="page-title">
             {storageAlert ? (
               <p className="storage-alert" role="status">
@@ -623,15 +625,23 @@ export default function App() {
 
             <div className="canvas-header">
               <div>
-                <p className="eyebrow">Deck page</p>
+                <p className="eyebrow">Workspace / Pages</p>
                 <h1 id="page-title">{page.name}</h1>
                 <p className="canvas-subtitle">
-                  {page.controls.length} controls · Local preview only
+                  {page.controls.length} controls
                 </p>
               </div>
-              <span className="preview-badge">Preview only</span>
+              <a href="#/phone" className="canvas-preview" aria-label="Preview this page on phone">
+                <Smartphone size={15} aria-hidden="true" />
+                Phone view
+              </a>
             </div>
 
+            <div className="deck-workbench">
+            <div className="deck-frame">
+            <div className="deck-frame-heading">
+              <span>{page.name}</span><span>Layout preview</span>
+            </div>
             <div className="control-grid">
               {page.controls.map((control, index) => (
                 <ControlTile
@@ -656,19 +666,17 @@ export default function App() {
                 <p>Add one from the action library to start shaping the deck.</p>
               </div>
             ) : null}
+            <div className="deck-frame-footer"><span>DECK</span><span>{page.controls.length} keys</span></div>
+            </div>
+            </div>
 
             <p className="preview-feedback" role="status" aria-live="polite">
               {previewNotice ??
-                "Select a control or add one from the action library. Nothing is sent to the desktop."}
+                "Select a key to edit. Add controls from the left."}
             </p>
           </section>
 
           <aside className="right-panel" aria-label="Actions and inspector">
-            <ActionLibrary
-              pageName={page.name}
-              disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE}
-              onAdd={handleAddControl}
-            />
             <Inspector
               control={selectedControl}
               pageName={page.name}

@@ -55,9 +55,9 @@ function switchFeedbackText(
     case "not_applied":
       return `Not applied: OBS reports “${current ?? "unknown"}”.`;
     case "failed":
-      return "Switch failed. OBS did not change the program scene.";
+      return "Scene switch failed.";
     case "unknown":
-      return "Result unknown after a timeout. Check OBS before retrying.";
+      return "Result unknown. Check OBS before retrying.";
   }
 }
 
@@ -80,21 +80,21 @@ export function Inspector({
   const obsScene = control?.action === "obs-scene" ? control.scene : null;
   const obsPending = obsActive && obs.pendingScene !== null && obs.pendingScene === obsScene;
   const obsFeedback =
-    obsActive && obsScene !== null && obs.lastSwitch?.scene === obsScene
+    obs.native && obsScene !== null && obs.lastSwitch?.scene === obsScene
       ? obs.lastSwitch
       : null;
 
   return (
     <details className="panel" open>
       <summary className="panel-head">
-        <span>Inspector</span>
+        <span>Properties</span>
         <span className="panel-hint">{control ? control.label : "No selection"}</span>
       </summary>
       <div className="panel-body">
         {!control ? (
           <div className="empty-note">
-            <p>Select a control on the {pageName} canvas to edit it.</p>
-            <p>Add a control from the action library when you need a new one.</p>
+            <p>Select a key on {pageName}.</p>
+            <p>Its settings appear here.</p>
           </div>
         ) : (
           <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
@@ -195,7 +195,7 @@ export function Inspector({
             ) : null}
 
             {control.action === "obs-scene" ? (
-              obsActive ? (
+              obsActive || obsFeedback ? (
                 <p
                   className={`obs-switch${obsFeedback ? ` is-${obsFeedback.state}` : ""}`}
                   role="status"
@@ -209,8 +209,7 @@ export function Inspector({
                 </p>
               ) : (
                 <p className="field-note">
-                  Connect OBS in Settings to run this scene natively. The scene name
-                  is kept in this deck while offline.
+                  {obs.native ? "Connect OBS in Settings to run this scene." : "OBS runs in the desktop app."}
                 </p>
               )
             ) : null}
@@ -341,8 +340,7 @@ export function Inspector({
                 </div>
               ) : (
                 <p className="field-note">
-                  Scope: system default input. Provisional until the desktop integration is
-                  built.
+                  Default system input, not an OBS source.
                 </p>
               )
             ) : null}
@@ -380,7 +378,7 @@ export function Inspector({
                 </div>
               ) : (
                 <p className="field-note">
-                  Media play/pause stays local preview until the desktop integration is built.
+                  Uses the default MPRIS player in the desktop app.
                 </p>
               )
             ) : null}
@@ -439,13 +437,9 @@ export function Inspector({
               </button>
             </div>
 
-            <p className="preview-note">
-              {control.action === "obs-scene" && obsActive
-                ? "Runs a real OBS scene switch. A failed switch is reported, never shown as preview."
-                : systemNative && isSystemAction(control.action)
-                  ? "Runs a real system action on this machine. A failed or unknown result is reported, never shown as preview."
-                  : "Preview only — no desktop action is sent. Changes to this control are saved locally."}
-            </p>
+            {(control.action === "obs-scene" && obsActive) || (systemNative && isSystemAction(control.action)) ? (
+              <p className="preview-note">Runs on this computer.</p>
+            ) : null}
           </form>
         )}
       </div>

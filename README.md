@@ -4,6 +4,12 @@
 
 Deck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend, but no desktop admin or phone UI is wired to it yet, and it has not been exercised against a real tailnet or phone.
 
+## Design checkpoint
+
+The original dashboard-style UI was rejected. The current coordinator-led pass uses a graphite workspace, a single page/action sidebar, a deck-centered editor, quieter properties, and bottom page navigation on phones. The self-hosted Geist font is licensed under the [SIL Open Font License](src/assets/Geist-OFL.txt). Existing deck data and native actions are unchanged.
+
+This is a direction for review, not an approved final design. See [desktop and phone screenshots](docs/design.md).
+
 ## What is in this slice
 
 - Compact dark-first desktop editor with an optional light theme and five accent tokens.
@@ -12,7 +18,7 @@ Deck is a local-first stream-deck-style editor and phone-preview foundation. The
 - In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
 - Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
-- A prominent but quiet `Local preview / Desktop not connected` status, plus a disabled pairing button with an explanation in the UI.
+- One preview status indicator (`Preview / No actions sent` in the browser), plus a disabled **Connect phone** button until the implemented service has UI wiring.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
 - Phone preview route at `#/phone` using the same components and saved deck in the same origin. It is not a paired remote controller.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
@@ -32,7 +38,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:1420>. The phone preview is the top-bar **Phone preview** link or <http://localhost:1420/#/phone>.
+Open <http://localhost:1420>. The phone view is the top-bar **Preview** link or <http://localhost:1420/#/phone>.
 
 ### Checks
 
@@ -262,14 +268,14 @@ Reverse or re-adjust any volume, mute, or playback the smoke steps changed.
 `wireplumber` (which provides `wpctl`) session tools, and WebKitGTK 4.1, GTK3,
 glib, libsoup3, openssl, librsvg, and XZ. The shell also prepends XZ to `LD_LIBRARY_PATH`, because the npm `@tauri-apps/cli` native binding needs `liblzma.so.5`, which is not on the default Nix loader path.
 
-This repository currently has no Git commits and all files are untracked, so the flake must be evaluated by path:
+The Nix environment can be evaluated from the committed repository:
 
 ```bash
-nix develop path:. --command cargo --version
-nix develop path:. --command npm run tauri:build -- --debug --no-bundle
+nix develop --command cargo --version
+nix develop --command npm run tauri:build -- --debug --no-bundle
 ```
 
-Once these files are committed, plain `nix develop` works too.
+Run `nix develop` for an interactive shell. Keep new Nix source files tracked so the Git flake includes them; avoid `path:.`, which can copy ignored build artifacts into the Nix store.
 
 Verified on this machine (NixOS `x86_64-linux`, KDE Plasma Wayland, Node `v22.23.3`, npm `10.9.9`, Nix `2.34.8`):
 

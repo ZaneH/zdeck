@@ -242,6 +242,7 @@ async function openPage(label, url, viewport) {
       deviceScaleFactor: viewport.scale ?? 1,
       mobile: Boolean(viewport.mobile),
     });
+    if (viewport.mobile) await page.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   }
   if (url) await page.navigate(url);
   return page;
@@ -279,6 +280,9 @@ try {
   // ------------------------------------------------------------ editor flow
   const editor = await openPage("editor", `${BASE}/`, { width: 1440, height: 1000 });
   check("editor shell renders", await editor.waitFor("!!document.querySelector('.app-shell')"));
+  check("self-hosted font loads", await editor.eval("document.fonts.ready.then(() => document.fonts.check('12px Geist'))"));
+  check("desktop workspace has no horizontal overflow", await editor.eval("document.documentElement.scrollWidth <= innerWidth"));
+  check("deck is the dominant editor surface", await editor.eval("document.querySelector('.canvas-panel').clientWidth > document.querySelector('.right-panel').clientWidth * 2"));
 
   const pagesBefore = await editor.eval("document.querySelectorAll('.page-item').length");
   await editor.eval(click('[aria-label="Add page"]'));
@@ -321,6 +325,8 @@ try {
   check("reorder control changes order", orderBefore !== orderAfter, `${orderBefore} -> ${orderAfter}`);
 
   await editor.screenshot("/tmp/deck-smoke-editor-desktop.png");
+  await editor.eval("document.querySelector('.control-tile button[title=\"Move down\"]').focus()");
+  check("keyboard focus reveals key reorder tools", await editor.eval("getComputedStyle(document.activeElement.closest('.tile-tools')).opacity === '1'"));
 
   // refresh persistence
   await editor.reload();
@@ -386,6 +392,9 @@ try {
     "document.documentElement.scrollWidth - window.innerWidth",
   );
   check("phone portrait has no horizontal overflow", portraitOverflow <= 1, `overflow=${portraitOverflow}px`);
+  check("phone page navigation stays in thumb reach", await phonePortrait.eval("Math.abs(document.querySelector('.phone-footer').getBoundingClientRect().bottom - innerHeight) <= 1"));
+  check("phone page targets are at least 44px", await phonePortrait.eval("[...document.querySelectorAll('.phone-page-tab')].every(el => el.getBoundingClientRect().height >= 44)"));
+  check("phone slider spans the control grid", await phonePortrait.eval("document.querySelector('.phone-grid [data-action=\"volume\"]').clientWidth >= document.querySelector('.phone-grid').clientWidth - 3"));
   await phonePortrait.screenshot("/tmp/deck-smoke-phone-portrait.png");
 
   const phoneLandscape = await openPage("phone-landscape", `${BASE}/#/phone`, {

@@ -22,11 +22,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
   const [pageId, setPageId] = useState(initialDeck.activePageId);
   const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
   const [pressedId, setPressedId] = useState<string | null>(null);
-  const [notice, setNotice] = useState(
-    mode === "native"
-      ? "Native deck preview. No desktop connection is active."
-      : "Local preview. No desktop connection is active.",
-  );
+  const [notice, setNotice] = useState("");
   const pressTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -96,7 +92,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
           </span>
           <div className="brand-copy">
             <strong>Deck</strong>
-            <span className="brand-tag">Preview</span>
+            <span className="brand-tag">Control surface</span>
           </div>
         </div>
         <a href="#/" className="phone-back">
@@ -107,35 +103,13 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
 
       <div className="phone-status">
         <span className="status-dot" aria-hidden="true" />
-        <span>
-          <strong>{mode === "native" ? "Native deck" : "Local preview"}</strong> /{" "}
-          {mode === "native"
-            ? "Loaded from the desktop deck file"
-            : "Desktop not connected"}
-        </span>
+        <span><strong>Preview</strong><span className="status-sep"> / </span>No actions sent</span>
       </div>
 
       <main className="phone-main">
-        <nav className="phone-pages" aria-label="Deck pages">
-          {deck.pages.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="phone-page-tab"
-              onClick={() => setPageId(item.id)}
-              aria-current={item.id === page.id ? "page" : undefined}
-            >
-              {item.name}
-            </button>
-          ))}
-        </nav>
-
         <div className="phone-page-heading">
-          <div>
-            <p className="eyebrow">Phone preview</p>
-            <h1>{page.name}</h1>
-          </div>
-          <span className="preview-badge">Preview only</span>
+          <h1>{page.name}</h1>
+          <span className="phone-page-count">{page.controls.length} controls</span>
         </div>
 
         <div className="phone-grid">
@@ -168,8 +142,20 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
       </main>
 
       <footer className="phone-footer">
-        <p>Same-origin preview. No network connection or desktop action.</p>
-        <p>Editing stays in the desktop editor.</p>
+        <nav className="phone-pages" aria-label="Deck pages">
+          {deck.pages.map((item, index) => (
+            <button
+              key={item.id}
+              type="button"
+              className="phone-page-tab"
+              onClick={() => setPageId(item.id)}
+              aria-current={item.id === page.id ? "page" : undefined}
+            >
+              <span className="phone-page-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              {item.name}
+            </button>
+          ))}
+        </nav>
       </footer>
     </div>
   );

@@ -28,8 +28,7 @@ export function ActionLibrary({ pageName, disabled = false, onAdd }: ActionLibra
   return (
     <details className="panel" open>
       <summary className="panel-head">
-        <span>Action library</span>
-        <span className="panel-hint">Local preview</span>
+        <span>Add controls</span>
       </summary>
       <div className="panel-body">
         <label className="sr-only" htmlFor="action-search">
@@ -62,16 +61,14 @@ export function ActionLibrary({ pageName, disabled = false, onAdd }: ActionLibra
                     onClick={() => onAdd(action.kind)}
                     disabled={disabled}
                     aria-label={`Add ${action.name} to ${pageName}`}
+                    title={[action.description, action.note].filter(Boolean).join(" ")}
                   >
                     <span className="action-row-icon">
                       <ActionIcon kind={action.kind} size={18} />
                     </span>
                     <span className="action-row-copy">
                       <span className="action-row-name">{action.name}</span>
-                      <span className="action-row-description">{action.description}</span>
-                      {action.note ? (
-                        <span className="action-row-note">{action.note}</span>
-                      ) : null}
+
                     </span>
                     <Plus size={16} aria-hidden="true" className="action-row-plus" />
                   </button>
