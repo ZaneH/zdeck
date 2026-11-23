@@ -1,0 +1,454 @@
+import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { ACTION_CATALOG, clampVolume } from "../lib/actions";
+import type { ActionKind, Control, ControlPatch } from "../lib/types";
+import type { ObsConsole, SceneSwitchFeedback } from "../lib/useObsConsole";
+import { formatPercent } from "../lib/useSystemConsole";
+import type { ApplyFeedback, SystemConsole } from "../lib/useSystemConsole";
+
+interface InspectorProps {
+  control: Control | null;
+  pageName: string;
+  previewVolume: number;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  obs: ObsConsole;
+  system: SystemConsole;
+  onPatch: (patch: ControlPatch) => void;
+  onRemove: () => void;
+  onMove: (delta: number) => void;
+  onPreviewPress: () => void;
+  onPreviewVolume: (value: number) => void;
+}
+
+function isSystemAction(kind: ActionKind): boolean {
+  return kind === "mic-mute" || kind === "media-play-pause" || kind === "volume";
+}
+
+function observedLine(observedAtMs: number | null | undefined): string {
+  return observedAtMs ? `checked ${new Date(observedAtMs).toLocaleTimeString()}` : "not checked";
+}
+
+function NativeStatus({ feedback, error }: { feedback: ApplyFeedback | null; error: string | null }) {
+  return (
+    <>
+      {feedback ? (
+        <p className={`native-feedback is-${feedback.state}`} role="status" aria-live="polite">
+          {feedback.message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="settings-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function switchFeedbackText(
+  feedback: SceneSwitchFeedback,
+  current: string | null,
+): string {
+  switch (feedback.state) {
+    case "confirmed":
+      return `Confirmed: OBS is on “${feedback.scene}”.`;
+    case "not_applied":
+      return `Not applied: OBS reports “${current ?? "unknown"}”.`;
+    case "failed":
+      return "Switch failed. OBS did not change the program scene.";
+    case "unknown":
+      return "Result unknown after a timeout. Check OBS before retrying.";
+  }
+}
+
+export function Inspector({
+  control,
+  pageName,
+  previewVolume,
+  canMoveUp,
+  canMoveDown,
+  obs,
+  system,
+  onPatch,
+  onRemove,
+  onMove,
+  onPreviewPress,
+  onPreviewVolume,
+}: InspectorProps) {
+  const obsActive = obs.native && obs.status === "connected";
+  const systemNative = system.native;
+  const obsScene = control?.action === "obs-scene" ? control.scene : null;
+  const obsPending = obsActive && obs.pendingScene !== null && obs.pendingScene === obsScene;
+  const obsFeedback =
+    obsActive && obsScene !== null && obs.lastSwitch?.scene === obsScene
+      ? obs.lastSwitch
+      : null;
+
+  return (
+    <details className="panel" open>
+      <summary className="panel-head">
+        <span>Inspector</span>
+        <span className="panel-hint">{control ? control.label : "No selection"}</span>
+      </summary>
+      <div className="panel-body">
+        {!control ? (
+          <div className="empty-note">
+            <p>Select a control on the {pageName} canvas to edit it.</p>
+            <p>Add a control from the action library when you need a new one.</p>
+          </div>
+        ) : (
+          <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+            <label className="field">
+              <span>Label</span>
+              <input
+                key={`${control.id}-${control.action}-${control.label}-label`}
+                type="text"
+                defaultValue={control.label}
+                maxLength={40}
+                onBlur={(event) => {
+                  const label = event.currentTarget.value.trim();
+                  if (!label) {
+                    event.currentTarget.value = control.label;
+                    return;
+                  }
+                  event.currentTarget.value = label;
+                  onPatch({ label });
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                  if (event.key === "Escape") {
+                    event.currentTarget.value = control.label;
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </label>
+
+            <label className="field">
+              <span>Action</span>
+              <select
+                value={control.action}
+                onChange={(event) =>
+                  onPatch({ action: event.target.value as ActionKind })
+                }
+              >
+                {ACTION_CATALOG.map((action) => (
+                  <option key={action.kind} value={action.kind}>
+                    {action.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {control.action === "obs-scene" ? (
+              <label className="field">
+                <span>Scene</span>
+                {obsActive ? (
+                  <select
+                    value={control.scene}
+                    disabled={obsPending}
+                    onChange={(event) => onPatch({ scene: event.target.value })}
+                  >
+                    {obs.scenes.includes(control.scene) ? null : (
+                      <option value={control.scene}>
+                        {control.scene} (not in OBS)
+                      </option>
+                    )}
+                    {obs.scenes.map((scene) => (
+                      <option key={scene} value={scene}>
+                        {scene}
+                        {scene === obs.currentScene ? " · live" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    key={`${control.id}-${control.scene}-scene`}
+                    type="text"
+                    defaultValue={control.scene}
+                    maxLength={40}
+                    onBlur={(event) => {
+                      const scene = event.currentTarget.value.trim();
+                      if (!scene) {
+                        event.currentTarget.value = control.scene;
+                        return;
+                      }
+                      event.currentTarget.value = scene;
+                      onPatch({ scene });
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === "Escape") {
+                        event.currentTarget.value = control.scene;
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                )}
+              </label>
+            ) : null}
+
+            {control.action === "obs-scene" ? (
+              obsActive ? (
+                <p
+                  className={`obs-switch${obsFeedback ? ` is-${obsFeedback.state}` : ""}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {obsPending
+                    ? `Switching to “${control.scene}”…`
+                    : obsFeedback
+                      ? switchFeedbackText(obsFeedback, obs.currentScene)
+                      : `OBS is connected. Run scene switches program output to “${control.scene}”.`}
+                </p>
+              ) : (
+                <p className="field-note">
+                  Connect OBS in Settings to run this scene natively. The scene name
+                  is kept in this deck while offline.
+                </p>
+              )
+            ) : null}
+
+            {control.action === "volume" ? (
+              <>
+                <label className="field">
+                  <span>Default volume</span>
+                  <input
+                    key={`${control.id}-${control.volume}-default-volume`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    defaultValue={control.volume}
+                    onBlur={(event) => {
+                      if (event.currentTarget.value.trim() === "") {
+                        event.currentTarget.value = String(control.volume);
+                        return;
+                      }
+                      const value = Number(event.currentTarget.value);
+                      if (!Number.isFinite(value)) {
+                        event.currentTarget.value = String(control.volume);
+                        return;
+                      }
+                      const clamped = clampVolume(value);
+                      event.currentTarget.value = String(clamped);
+                      onPatch({ volume: clamped });
+                    }}
+                  />
+                </label>
+                {systemNative ? (
+                  <div className="native-control">
+                    <p className="native-state">
+                      Current output:{" "}
+                      {system.output
+                        ? `${formatPercent(system.output.volumePercent)}${
+                            system.output.muted ? " · muted" : ""
+                          }`
+                        : "unknown"}{" "}
+                      · {observedLine(system.output?.observedAtMs)}
+                    </p>
+                    <label className="field">
+                      <span>Target output ({system.outputTarget}%)</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={system.outputTarget}
+                        onChange={(event) => system.setOutputTarget(Number(event.target.value))}
+                      />
+                    </label>
+                    <div className="native-actions">
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() => void system.applyOutput()}
+                        disabled={system.outputPending || system.output === null}
+                      >
+                        {system.outputPending ? "Applying…" : `Apply ${system.outputTarget}%`}
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => void system.refreshOutput()}
+                        disabled={system.outputRefreshing || system.outputPending}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <NativeStatus feedback={system.outputFeedback} error={system.outputError} />
+                  </div>
+                ) : (
+                  <label className="field">
+                    <span>Preview volume</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={previewVolume}
+                      onChange={(event) => onPreviewVolume(Number(event.target.value))}
+                    />
+                  </label>
+                )}
+              </>
+            ) : null}
+
+            {control.action === "mic-mute" ? (
+              systemNative ? (
+                <div className="native-control">
+                  <p className="native-state">
+                    Default system input (not an OBS input):{" "}
+                    {system.microphone
+                      ? system.microphone.muted
+                        ? "muted"
+                        : "live"
+                      : "unknown"}{" "}
+                    · {observedLine(system.microphone?.observedAtMs)}
+                  </p>
+                  <div className="native-actions">
+                    <button
+                      type="button"
+                      className="button primary"
+                      onClick={() => void system.toggleMicrophone()}
+                      disabled={system.microphonePending || system.microphone === null}
+                    >
+                      {system.microphonePending
+                        ? "Applying…"
+                        : system.microphone?.muted
+                          ? "Unmute"
+                          : "Mute"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => void system.refreshMicrophone()}
+                      disabled={system.microphoneRefreshing || system.microphonePending}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <NativeStatus
+                    feedback={system.microphoneFeedback}
+                    error={system.microphoneError}
+                  />
+                </div>
+              ) : (
+                <p className="field-note">
+                  Scope: system default input. Provisional until the desktop integration is
+                  built.
+                </p>
+              )
+            ) : null}
+
+            {control.action === "media-play-pause" ? (
+              systemNative ? (
+                <div className="native-control">
+                  <p className="native-state">
+                    Default MPRIS player: {system.media ? system.media.status : "unknown"} ·{" "}
+                    {observedLine(system.media?.observedAtMs)}
+                  </p>
+                  <div className="native-actions">
+                    <button
+                      type="button"
+                      className="button primary"
+                      onClick={() => void system.runMedia()}
+                      disabled={system.mediaPending || system.media === null}
+                    >
+                      {system.mediaPending
+                        ? "Sending…"
+                        : system.media?.status === "playing"
+                          ? "Pause"
+                          : "Play"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => void system.refreshMedia()}
+                      disabled={system.mediaRefreshing || system.mediaPending}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <NativeStatus feedback={system.mediaFeedback} error={system.mediaError} />
+                </div>
+              ) : (
+                <p className="field-note">
+                  Media play/pause stays local preview until the desktop integration is built.
+                </p>
+              )
+            ) : null}
+
+            <div className="inspector-actions">
+              {control.action !== "volume" ? (
+                control.action === "obs-scene" && obsActive ? (
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={() => void obs.runScene(control.scene)}
+                    disabled={obsPending}
+                  >
+                    {obsPending ? "Switching…" : "Run scene"}
+                  </button>
+                ) : systemNative && isSystemAction(control.action) ? null : (
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={onPreviewPress}
+                  >
+                    Preview press
+                  </button>
+                )
+              ) : null}
+              <div className="move-group" aria-label="Reorder selected control">
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => onMove(-1)}
+                  disabled={!canMoveUp}
+                  aria-label={`Move ${control.label} up`}
+                  title="Move up"
+                >
+                  <ChevronUp size={17} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => onMove(1)}
+                  disabled={!canMoveDown}
+                  aria-label={`Move ${control.label} down`}
+                  title="Move down"
+                >
+                  <ChevronDown size={17} aria-hidden="true" />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="button danger"
+                onClick={onRemove}
+                aria-label={`Remove ${control.label}`}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                Remove
+              </button>
+            </div>
+
+            <p className="preview-note">
+              {control.action === "obs-scene" && obsActive
+                ? "Runs a real OBS scene switch. A failed switch is reported, never shown as preview."
+                : systemNative && isSystemAction(control.action)
+                  ? "Runs a real system action on this machine. A failed or unknown result is reported, never shown as preview."
+                  : "Preview only — no desktop action is sent. Changes to this control are saved locally."}
+            </p>
+          </form>
+        )}
+      </div>
+    </details>
+  );
+}

@@ -1,0 +1,40 @@
+[package]
+name = "deck"
+version = "0.1.0"
+description = "Deck local editor and phone preview"
+authors = ["Zane Helton"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.89"
+
+[lib]
+name = "deck_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+obws = "0.15"
+axum = "0.8"
+base64 = "0.22"
+futures-util = "0.3"
+getrandom = "0.3"
+hyper = { version = "1", features = ["server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1_smol = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time", "process", "io-util"] }
+tokio-websockets = { version = "0.13", features = ["server"] }
+url = "2"
+
+[dev-dependencies]
+http = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time", "io-util"] }
+tokio-websockets = { version = "0.13", features = ["server", "client"] }
+futures-util = "0.3"
+sha2 = "0.10"
+base64 = "0.22"

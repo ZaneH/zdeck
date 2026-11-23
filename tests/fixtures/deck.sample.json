@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "theme": "dark",
+  "accent": "#4cc9f0",
+  "activePageId": "page_stream",
+  "pages": [
+    {
+      "id": "page_stream",
+      "name": "Stream",
+      "controls": [
+        {
+          "id": "ctl_starting_soon",
+          "label": "Starting soon",
+          "action": "obs-scene",
+          "scene": "Starting soon"
+        },
+        {
+          "id": "ctl_live",
+          "label": "Go live",
+          "action": "obs-scene",
+          "scene": "Live"
+        },
+        {
+          "id": "ctl_mic",
+          "label": "Mic mute",
+          "action": "mic-mute"
+        },
+        {
+          "id": "ctl_play_pause",
+          "label": "Play / pause",
+          "action": "media-play-pause"
+        }
+      ]
+    },
+    {
+      "id": "page_media",
+      "name": "Media",
+      "controls": [
+        {
+          "id": "ctl_volume",
+          "label": "Volume",
+          "action": "volume",
+          "volume": 50
+        },
+        {
+          "id": "ctl_media_pause",
+          "label": "Play / pause",
+          "action": "media-play-pause"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Deck",
+  "version": "0.1.0",
+  "identifier": "com.deck.local",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Deck",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#0b0d10"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' http://localhost:1420; img-src 'self' data:; style-src 'self' 'unsafe-inline' http://localhost:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "category": "Utility",
+    "shortDescription": "Local deck editor and phone preview",
+    "longDescription": "A local editor and phone preview for a compact stream deck, with native OBS program-scene switching in the desktop app.",
+    "icon": [
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ]
+  }
+}
