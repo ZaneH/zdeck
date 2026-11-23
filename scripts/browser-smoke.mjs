@@ -178,6 +178,7 @@ class Page {
     }
   }
   async screenshot(path) {
+    await this.eval("document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(resolve))).then(() => Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))))");
     const { data } = await this.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(path, Buffer.from(data, "base64"));
   }
@@ -288,21 +289,33 @@ const livePages = [];
 
 try {
   // ------------------------------------------------------------ editor shell + onboarding
-  const editor = await openPage("editor", `${BASE}/`, { width: 1440, height: 1000 });
+  const editor = await openPage("editor", `${BASE}/`, { width: 960, height: 680 });
   livePages.push(editor);
-  check("editor shell renders", await editor.waitFor("!!document.querySelector('.app-shell')"));
+  check("first-run setup fills the window", await editor.waitFor("!!document.querySelector('.setup-shell')"));
+  check("setup starts on welcome with the heading focused", await editor.eval("document.querySelector('.setup-story').classList.contains('setup-welcome') && document.querySelector('#setup-title').textContent === 'Start with one button.' && document.activeElement.id === 'setup-title'"));
+  check("setup replaces the editor chrome without the old guide", await editor.eval("!document.querySelector('.app-shell, .topbar, .setup-guide') && document.querySelectorAll('.setup-shell').length === 1"));
+  check("setup welcome offers all four rehearsal keys", await editor.eval("(() => { const keys = [...document.querySelectorAll('.setup-demo-key')]; return keys.length === 4 && keys.map((key) => key.getAttribute('aria-label')).join('|') === 'Rehearse OBS scene|Rehearse Microphone mute|Rehearse Play / pause|Rehearse Volume slider'; })()"));
+  check("setup welcome starts untouched", await editor.eval("document.querySelector('.setup-hint').textContent === 'Try a key. This is just a rehearsal.' && !document.querySelector('.rehearsal.is-active')"));
+  await editor.screenshot("/tmp/deck-design-onboarding.png");
+  await sleep(500);
+  await editor.screenshot("/tmp/deck-design-setup-welcome.png");
+  await editor.eval(clickText('.setup-header .button', 'Skip setup'));
+  check("skip closes setup and shows the editor", await editor.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
+  const skipState = await editor.eval("({ deck: localStorage.getItem('deck.local.v1'), setup: localStorage.getItem('deck.setup.v1') })");
+  check("skip stores only the setup flag, never a deck", skipState.deck === null && skipState.setup === 'dismissed', JSON.stringify(skipState));
+  check("skip returns focus to the editor page title", await editor.waitFor("document.activeElement.id === 'page-title'"));
+  await editor.reload();
+  check("a skipped setup stays closed after reload", await editor.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
+  check("skipped first run still shows the sample deck", await editor.eval("document.querySelectorAll('.control-tile').length === 4 && !localStorage.getItem('deck.local.v1')"));
   check("self-hosted Geist font loads", await editor.eval("document.fonts.ready.then(() => [...document.fonts].some(face => face.family === 'Geist' && face.status === 'loaded'))"));
   check("desktop workspace has no horizontal overflow", await editor.eval("document.documentElement.scrollWidth <= innerWidth"));
   check("single topbar carries the editor chrome", await editor.eval("document.querySelectorAll('.topbar').length === 1"));
   check("no sidebar or floating deck frame", await editor.eval("!document.querySelector('.sidebar, .deck-frame, .right-panel')"));
   check("no global theme toggle remains", await editor.eval("!document.querySelector('.theme-toggle')"));
-  check("inspector sits beneath the control grid", await editor.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom"));
-  check("control keys use restrained corners", await editor.eval("[...document.querySelectorAll('.control-tile')].every(el => getComputedStyle(el).borderRadius === '6px')"));
+  check("desktop inspector sits beside the control grid", await editor.eval("(() => { const grid = document.querySelector('.control-grid').getBoundingClientRect(); const dock = document.querySelector('.inspector-dock').getBoundingClientRect(); return dock.left >= grid.right - 1 && dock.top < grid.bottom; })()"));
+  check("control keys use 7px corners", await editor.eval("[...document.querySelectorAll('.control-tile')].every(el => getComputedStyle(el).borderRadius === '7px')"));
+  check("control keys keep a shallow physical depth", await editor.eval("(() => { const shadow = getComputedStyle(document.querySelector('.control-tile')).boxShadow; return shadow.includes('0px 3px 0px') && !shadow.includes('0px 3px 0px 4px'); })()"), await editor.eval("getComputedStyle(document.querySelector('.control-tile')).boxShadow"));
   check("page switcher lists the deck pages", await editor.eval("document.querySelectorAll('#page-switcher option').length === 2"));
-  check("first-run setup guide shows for an empty deck", await editor.eval("document.querySelector('.setup-guide #setup-title')?.textContent === 'Make your first control'"));
-  await editor.screenshot("/tmp/deck-design-onboarding.png");
-  await editor.eval(click('[aria-label="Dismiss setup guide"]'));
-  check("setup guide dismisses without editing the deck", await editor.waitFor("!document.querySelector('.setup-guide')"));
   await editor.screenshot("/tmp/deck-design-desktop.png");
 
   // page switcher drives the active page
@@ -410,7 +423,7 @@ try {
   await editor.waitFor("!!document.querySelector('.app-shell')");
   const persisted = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
   check("refresh keeps the edited deck", persisted === keyboardOrderAfter, persisted);
-  check("saved deck no longer shows the first-run guide", await editor.eval("!document.querySelector('.setup-guide')"));
+  check("saved deck no longer shows onboarding", await editor.eval("!document.querySelector('.setup-shell')"));
 
   // ------------------------------------------------------------ settings + theme segmented control
   await editor.eval(click('[aria-label="Open settings"]'));
@@ -429,37 +442,182 @@ try {
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
 
-  // ------------------------------------------------------------ first-run flow in an isolated context
+  // ------------------------------------------------------------ onboarding walkthrough in an isolated context
   const { browserContextId: firstRunCtx } = await cdp.send('Target.createBrowserContext');
-  const firstRun = await openPage('first-run', `${BASE}/`, { width: 1200, height: 900 }, firstRunCtx);
+  const firstRun = await openPage('first-run', `${BASE}/`, { width: 960, height: 680 }, firstRunCtx);
   livePages.push(firstRun);
-  await firstRun.waitFor("!!document.querySelector('.app-shell')");
-  check("first-run guide appears in a fresh profile", await firstRun.eval("document.querySelector('.setup-guide #setup-title')?.textContent === 'Make your first control'"));
-  await firstRun.eval(clickText('.setup-guide .button.primary', 'Add a control'));
-  check("guide start opens the action picker", await firstRun.eval("document.querySelector('.action-library').open"));
-  await firstRun.eval(clickText('.action-library .action-row', 'OBS scene'));
-  await firstRun.waitFor("!document.querySelector('.action-library').open");
-  check("picker closes after each add", await firstRun.eval("!document.querySelector('.action-library').open"));
-  check("guide advances to configure after an add", await firstRun.eval("document.querySelector('.setup-guide #setup-title')?.textContent === 'Make it yours'"));
-  await firstRun.eval(clickText('.setup-guide .button.primary', 'Continue'));
-  check("guide advances to preview", await firstRun.eval("document.querySelector('.setup-guide #setup-title')?.textContent === 'Give it a try'"));
-  await firstRun.eval(clickText('.setup-guide .button.primary', 'Try local preview'));
-  check("guide finishes after local preview", await firstRun.eval("document.querySelector('.setup-guide #setup-title')?.textContent === 'Your first control is ready'"));
-  check("onboarding preview explicitly reports no desktop action", await firstRun.eval("document.querySelector('.preview-feedback').textContent.includes('No desktop action was sent')"));
-  await firstRun.eval(clickText('.setup-guide .button.primary', 'Done'));
-  check("guide dismisses from done", await firstRun.waitFor("!document.querySelector('.setup-guide')"));
+  await firstRun.waitFor("!!document.querySelector('.setup-shell')");
+  check("fresh profile starts on the setup welcome step", await firstRun.eval("document.querySelector('.setup-story').classList.contains('setup-welcome')"));
+  const rehearsalHint = () => firstRun.eval("document.querySelector('.setup-hint').textContent");
+
+  // welcome: every catalog action rehearses locally, scene presses repeat safely
+  await firstRun.eval("document.querySelector('[aria-label=\"Rehearse OBS scene\"]').focus()");
+  await pressKey(firstRun, "Enter", "Enter", 13, "\r");
+  check("scene rehearsal switches the demo once", (await rehearsalHint()) === "Rehearsal switched to Scene 1." && await firstRun.eval("document.querySelector('.rehearsal').classList.contains('is-active') && document.querySelector('.scene-after span').textContent === 'Scene 1'"));
+  await firstRun.eval(click('[aria-label="Rehearse OBS scene"]'));
+  check("repeating the scene press keeps the demo switched, not reset", (await rehearsalHint()) === "Rehearsal switched to Scene 1." && await firstRun.eval("document.querySelector('.rehearsal').classList.contains('is-active')"));
+
+  await firstRun.eval(click('[aria-label="Rehearse Microphone mute"]'));
+  check("mic rehearsal mutes the demo", (await rehearsalHint()) === "Rehearsal microphone muted." && await firstRun.eval("document.querySelector('.rehearsal').classList.contains('is-active') && document.querySelector('.rehearsal-audio > span').textContent === 'Microphone muted'"));
+  await firstRun.eval(click('[aria-label="Rehearse Microphone mute"]'));
+  check("mic rehearsal toggles back to unmuted", (await rehearsalHint()) === "Rehearsal microphone on." && await firstRun.eval("!document.querySelector('.rehearsal').classList.contains('is-active') && document.querySelector('.rehearsal-audio > span').textContent === 'Microphone on'"));
+
+  await firstRun.eval(click('[aria-label="Rehearse Play / pause"]'));
+  check("playback rehearsal starts the demo", (await rehearsalHint()) === "Rehearsal playback started." && await firstRun.eval("document.querySelector('.rehearsal-player small').textContent === 'Playing'"));
+  await firstRun.eval(click('[aria-label="Rehearse Play / pause"]'));
+  check("playback rehearsal toggles back to paused", (await rehearsalHint()) === "Rehearsal playback paused." && await firstRun.eval("document.querySelector('.rehearsal-player small').textContent === 'Paused'"));
+
+  await firstRun.eval(click('[aria-label="Rehearse Volume slider"]'));
+  check("volume rehearsal shows 75%", (await rehearsalHint()) === "Rehearsal volume 75%." && await firstRun.eval("document.querySelector('.rehearsal-volume strong').textContent === '75%'"));
+  await firstRun.eval(click('[aria-label="Rehearse Volume slider"]'));
+  check("second volume press shows 50%", (await rehearsalHint()) === "Rehearsal volume 50%." && await firstRun.eval("document.querySelector('.rehearsal-volume strong').textContent === '50%'"));
+
+  // build: radio arrows, blank validation, draft survives Back
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  check("guide advances to build with the heading focused", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('#setup-title').textContent === 'Choose what it does.' && document.activeElement.id === 'setup-title'"));
+  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelectorAll('.setup-choice input').length === 4 && document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Scene 1' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+  await firstRun.eval("[...document.querySelectorAll('.setup-choice input')].find((el) => el.value === 'obs-scene').focus()");
+  await pressKey(firstRun, "ArrowRight", "ArrowRight", 39);
+  check("arrow keys move through the action radios", await firstRun.waitFor("document.querySelector('.setup-choice input:checked').value === 'mic-mute' && document.querySelector('input[name=\"label\"]').value === 'Mic mute' && !document.querySelector('input[name=\"scene\"]')"));
+  await pressKey(firstRun, "ArrowLeft", "ArrowLeft", 37);
+  check("arrowing back restores the scene fields", await firstRun.waitFor("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+
+  for (const [kind, first, second] of [
+    ['mic-mute', 'Rehearsal: Microphone muted.', 'Rehearsal: Microphone unmuted.'],
+    ['media-play-pause', 'Rehearsal: Playback started.', 'Rehearsal: Playback paused.'],
+  ]) {
+    await firstRun.eval(click(`.setup-choice input[value="${kind}"]`));
+    await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
+    await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try')");
+    check(`${kind} practice requires an interaction`, await firstRun.eval("document.querySelector('.setup-actions .primary').disabled"));
+    await firstRun.eval(click('.setup-practice-key .tile-primary'));
+    check(`${kind} practice reports its first toggle`, await firstRun.eval(`document.querySelector('.setup-result').textContent === ${JSON.stringify(first)} && !document.querySelector('.setup-actions .primary').disabled`));
+    await firstRun.eval(click('.setup-practice-key .tile-primary'));
+    check(`${kind} practice reports its second toggle`, await firstRun.eval(`document.querySelector('.setup-result').textContent === ${JSON.stringify(second)}`));
+    await firstRun.eval(clickText('.setup-actions .button.quiet', 'Edit button'));
+    await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')");
+  }
+  await firstRun.eval(click('.setup-choice input[value="obs-scene"]'));
+
+  await firstRun.eval(setValue('input[name="label"]', ''));
+  check("blank label blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"label\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  await firstRun.eval(setValue('input[name="label"]', 'Practice scene'));
+  await firstRun.eval(setValue('input[name="scene"]', ''));
+  check("blank scene blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"scene\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  await firstRun.eval(setValue('input[name="scene"]', 'Practice'));
+  check("a complete draft enables the build submit", await firstRun.eval("!document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  await sleep(500);
+  await firstRun.screenshot("/tmp/deck-design-setup-build.png");
+
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
+  check("guide advances to try and requires a rehearsal", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try') && document.querySelector('#setup-title').textContent === 'Give it a press.'"));
+  check("try step starts with Add disabled", await firstRun.eval("document.querySelector('.setup-result').textContent === 'Your button is ready to try.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => button.disabled)"));
+  check("try step promises no desktop action", await firstRun.eval("document.querySelector('.setup-hint').textContent === 'Nothing runs on your desktop during setup.' && document.querySelector('.setup-limitation').textContent.includes('Phone pairing')"));
+  await sleep(500);
+  await firstRun.screenshot("/tmp/deck-design-setup-try.png");
+  await firstRun.eval(clickText('.setup-actions .button.quiet', 'Edit button'));
+  check("Back to build preserves the draft label and scene", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('input[name=\"label\"]').value === 'Practice scene' && document.querySelector('input[name=\"scene\"]').value === 'Practice' && document.querySelector('.setup-choice input:checked').value === 'obs-scene'"));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
+  await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try')");
+
+  await firstRun.eval("document.querySelector('.setup-practice-key .tile-primary').focus()");
+  await pressKey(firstRun, "Enter", "Enter", 13, "\r");
+  check("rehearsing the draft scene enables Add", await firstRun.waitFor("document.querySelector('.setup-result').textContent === 'Rehearsal switched to Practice.' && ![...document.querySelectorAll('.setup-actions .button.primary')].some((button) => button.disabled)"));
+  const rehearsedResult = await firstRun.eval("document.querySelector('.setup-result').textContent");
+  await firstRun.eval(click('.setup-practice-key .tile-primary'));
+  check("repeated scene press does not reset the rehearsal", (await firstRun.eval("document.querySelector('.setup-result').textContent")) === rehearsedResult && await firstRun.eval("document.querySelector('.rehearsal').classList.contains('is-active')"));
+
+  const deckBeforeAdd = await firstRun.eval("localStorage.getItem('deck.local.v1')");
+  check("nothing is saved before Add", deckBeforeAdd === null, String(deckBeforeAdd && deckBeforeAdd.slice(0, 60)));
+  await sleep(300);
+  await firstRun.screenshot("/tmp/deck-design-setup-result.png");
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to Stream'));
+  check("Add closes setup and shows the new editor", await firstRun.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
+  check("Add returns focus to the page title", await firstRun.waitFor("document.activeElement.id === 'page-title'"));
+  const addedDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
+  const addedPage = addedDeck.pages.find((deckPage) => deckPage.id === addedDeck.activePageId);
+  const addedControls = addedPage.controls.filter((control) => control.label === 'Practice scene');
+  check("Add saves the configured control exactly once", addedControls.length === 1 && addedControls[0].action === 'obs-scene' && addedControls[0].scene === 'Practice' && addedPage.controls.length === 5, JSON.stringify(addedControls));
+  check("Add remembers the setup flag", await firstRun.eval("localStorage.getItem('deck.setup.v1') === 'dismissed'"));
+  check("the new control is selected in the inspector", await firstRun.eval("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Practice scene'"));
+  await firstRun.screenshot("/tmp/deck-design-setup-result-editor.png");
   await firstRun.reload();
+  check("a saved deck skips onboarding after reload", await firstRun.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell') && document.querySelectorAll('.control-tile').length === 5"));
+
+  // Replay setup from Settings keeps the existing deck intact.
+  await firstRun.eval(click('[aria-label="Open settings"]'));
+  await firstRun.waitFor("!!document.querySelector('.settings-view')");
+  check("settings offers Replay setup", await firstRun.eval("[...document.querySelectorAll('.settings-view button')].some((button) => button.textContent.includes('Replay setup'))"));
+  await firstRun.eval(clickText('.settings-view button', 'Replay setup'));
+  check("Replay setup opens the full-window guide on welcome", await firstRun.waitFor("!!document.querySelector('.setup-shell') && location.hash === '#/' && document.querySelector('.setup-story').classList.contains('setup-welcome') && document.activeElement.id === 'setup-title'"));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')");
+  await firstRun.eval(click('.setup-choice input[value="volume"]'));
+  await firstRun.eval(setValue('input[name="label"]', 'Replay volume'));
+  check("volume choice swaps the scene field for nothing extra", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'volume' && !document.querySelector('input[name=\"scene\"]') && !document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
+  await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try') && !!document.querySelector('.setup-practice-key input[type=\"range\"]')");
+  await firstRun.eval(setValue('.setup-practice-key input[type="range"]', '35'));
+  check("sliding the rehearsal volume enables Add", await firstRun.waitFor("document.querySelector('.setup-result').textContent === 'Rehearsal: Volume changed to 35%.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => !button.disabled)"));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to Stream'));
   await firstRun.waitFor("!!document.querySelector('.app-shell')");
-  check("no first-run guide for a saved deck", await firstRun.eval("!document.querySelector('.setup-guide')"));
+  const replayDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
+  const replayPage = replayDeck.pages.find((deckPage) => deckPage.id === replayDeck.activePageId);
+  const replayVolume = replayPage.controls.filter((control) => control.label === 'Replay volume');
+  check("replay preserves the existing deck and adds once", replayPage.controls.length === 6 && replayPage.controls.filter((control) => control.label === 'Practice scene').length === 1 && replayVolume.length === 1 && replayVolume[0].volume === 35, JSON.stringify(replayDeck.pages[0].controls.map((c) => c.label)));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: firstRunCtx });
+
+  // ------------------------------------------------------------ setup on narrow and short viewports
+  const { browserContextId: tightCtx } = await cdp.send('Target.createBrowserContext');
+  const narrowSetup = await openPage('setup-narrow', `${BASE}/`, { width: 320, height: 700, mobile: true }, tightCtx);
+  livePages.push(narrowSetup);
+  await narrowSetup.waitFor("!!document.querySelector('.setup-shell')");
+  check("setup welcome fits a 320px viewport", await narrowSetup.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelectorAll('.setup-demo-key').length === 4"));
+  await narrowSetup.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  await narrowSetup.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')");
+  check("setup build stacks its fields on narrow screens", await narrowSetup.eval("document.documentElement.scrollWidth <= innerWidth && getComputedStyle(document.querySelector('.setup-fields')).gridTemplateColumns.split(' ').length === 1"));
+  await narrowSetup.send("Emulation.setDeviceMetricsOverride", { width: 900, height: 460, deviceScaleFactor: 1, mobile: false });
+  check("setup build survives a short viewport", await narrowSetup.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.setup-actions .button.primary').getBoundingClientRect().right <= innerWidth"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: tightCtx });
+
+  // ------------------------------------------------------------ light theme and reduced motion during setup
+  const { browserContextId: motionCtx } = await cdp.send('Target.createBrowserContext');
+  const lightSetup = await openPage('setup-light', `${BASE}/`, { width: 960, height: 680 }, motionCtx);
+  livePages.push(lightSetup);
+  await lightSetup.waitFor("!!document.querySelector('.setup-shell')");
+  const lightDeck = {
+    version: 1,
+    theme: "light",
+    accent: "#4cc9f0",
+    activePageId: "page_stream",
+    pages: [{ id: "page_stream", name: "Stream", controls: [{ id: "ctl_keep", label: "Keep me", action: "mic-mute" }] }],
+  };
+  await lightSetup.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(lightDeck))})`);
+  await lightSetup.reload();
+  check("a saved light deck goes straight to the editor", await lightSetup.waitFor("!!document.querySelector('.app-shell') && document.documentElement.dataset.theme === 'light'"));
+  await lightSetup.eval(click('[aria-label="Open settings"]'));
+  await lightSetup.waitFor("!!document.querySelector('.settings-view')");
+  await lightSetup.eval(clickText('.settings-view button', 'Replay setup'));
+  await lightSetup.waitFor("!!document.querySelector('.setup-shell')");
+  check("replay setup keeps the light theme", await lightSetup.eval("document.documentElement.dataset.theme === 'light' && getComputedStyle(document.body).backgroundColor === 'rgb(244, 245, 246)'"));
+  await lightSetup.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const reducedMotionDuration = await lightSetup.eval("getComputedStyle(document.querySelector('.setup-demo-key')).animationDuration");
+  check("reduced motion shortens the welcome animation", parseFloat(reducedMotionDuration) <= 0.001, reducedMotionDuration);
+  await lightSetup.eval("window.__vtCalls = 0; const real = document.startViewTransition; if (real) document.startViewTransition = (callback) => { window.__vtCalls += 1; return real.call(document, callback); }");
+  await lightSetup.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  check("reduced motion skips the view transition but still advances", await lightSetup.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')") && (await lightSetup.eval("window.__vtCalls")) === 0);
+  await sleep(500);
+  await lightSetup.screenshot("/tmp/deck-design-setup-light.png");
+  await lightSetup.send("Emulation.setEmulatedMedia", { features: [] });
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: motionCtx });
 
   // ------------------------------------------------------------ page management in an isolated context
   const { browserContextId: manageCtx } = await cdp.send('Target.createBrowserContext');
   const manage = await openPage('page-manage', `${BASE}/`, { width: 1200, height: 900 }, manageCtx);
   livePages.push(manage);
+  await manage.waitFor("!!document.querySelector('.setup-shell')");
+  await manage.eval(clickText('.setup-header .button', 'Skip setup'));
   await manage.waitFor("!!document.querySelector('.app-shell')");
-  await manage.eval(click('[aria-label="Dismiss setup guide"]'));
-  await manage.waitFor("!document.querySelector('.setup-guide')");
   const initialPages = await manage.eval("document.querySelectorAll('#page-switcher option').length");
   check("isolated deck starts with two pages", initialPages === 2, `pages=${initialPages}`);
   await manage.eval(click('[aria-label="Manage pages"]'));
@@ -568,7 +726,6 @@ try {
   const { browserContextId } = await cdp.send('Target.createBrowserContext');
   const narrow = await openPage('narrow-stress', `${BASE}/`, { width: 320, height: 844, mobile: true }, browserContextId);
   livePages.push(narrow);
-  await narrow.waitFor("!!document.querySelector('.app-shell')");
   const stressDeck = JSON.parse(await editor.eval("localStorage.getItem('deck.local.v1')"));
   const longName = 'A very long control label with forty chars'.slice(0, 40);
   stressDeck.pages.forEach(page => { page.name = longName; });
@@ -578,12 +735,27 @@ try {
   await narrow.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(stressDeck))})`);
   await narrow.reload();
   check('full editor with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
+  check('narrow editor stacks the inspector below the grid', await narrow.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom - 1"));
   check('full page does not offer an extra control slot', await narrow.eval("!document.querySelector('.empty-key')"));
   check('narrow editor reorder targets are touch-sized', await narrow.eval("(() => { const buttons = [...document.querySelectorAll('.inspector-actions .move-group button')]; return buttons.length === 2 && buttons.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
   await narrow.eval("location.hash = '#/phone'");
   await narrow.waitFor("!!document.querySelector('.phone-shell')");
   check('full phone deck with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
   check('long labels and faders stay within their keys', await narrow.eval("[...document.querySelectorAll('.tile-label, .tile-volume input')].every(el => { const r = el.getBoundingClientRect(); const key = el.closest('.control-tile').getBoundingClientRect(); return r.left >= key.left - 1 && r.right <= key.right + 1 && r.bottom <= key.bottom + 1; })"));
+  await narrow.eval("location.hash = '#/settings'");
+  await narrow.waitFor("!!document.querySelector('.settings-view')");
+  await narrow.eval(clickText('.settings-view button', 'Replay setup'));
+  await narrow.waitFor("!!document.querySelector('.setup-shell')");
+  const fullDeckBefore = await narrow.eval("localStorage.getItem('deck.local.v1')");
+  await narrow.eval(clickText('.setup-actions .primary', 'Make a button'));
+  await narrow.waitFor("!!document.querySelector('.setup-build')");
+  await narrow.eval(clickText('.setup-actions .primary', 'Try this control'));
+  await narrow.waitFor("!!document.querySelector('.setup-try')");
+  await narrow.eval(click('.setup-practice-key .tile-primary'));
+  check('full-page rehearsal keeps Add disabled and explains the limit', await narrow.eval("document.querySelector('.setup-actions .primary').disabled && document.querySelector('.setup-error').textContent.includes('page is full')"));
+  check('full-page setup leaves saved deck unchanged and fits 320px', fullDeckBefore === await narrow.eval("localStorage.getItem('deck.local.v1')") && await narrow.eval("document.documentElement.scrollWidth <= innerWidth"));
+  await narrow.eval(clickText('.setup-header .button', 'Skip setup'));
+  check('skip exits full-page setup safely', await narrow.waitFor("!!document.querySelector('.app-shell') && document.querySelectorAll('.control-tile').length === 24"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId });
 
   // ------------------------------------------------------------ service worker offline shell
@@ -698,6 +870,12 @@ try {
   console.log("\nScreenshots:");
   for (const name of [
     "deck-design-onboarding.png",
+    "deck-design-setup-welcome.png",
+    "deck-design-setup-build.png",
+    "deck-design-setup-try.png",
+    "deck-design-setup-result.png",
+    "deck-design-setup-result-editor.png",
+    "deck-design-setup-light.png",
     "deck-design-desktop.png",
     "deck-design-actions.png",
     "deck-design-phone.png",

@@ -2,6 +2,17 @@ import { createDefaultDeck, isDeck } from "./deck";
 import type { Deck, StorageLike } from "./types";
 
 export const STORAGE_KEY = "deck.local.v1";
+const SETUP_KEY = "deck.setup.v1";
+
+export function setupDismissed(storage: StorageLike | null): boolean {
+  try { return storage?.getItem(SETUP_KEY) === "dismissed"; }
+  catch { return false; }
+}
+
+export function dismissSetup(storage: StorageLike | null): void {
+  try { storage?.setItem(SETUP_KEY, "dismissed"); }
+  catch { /* Setup stays dismissible even when storage is blocked. */ }
+}
 
 export type LoadStatus = "loaded" | "empty" | "invalid" | "unavailable";
 

@@ -97,10 +97,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
         </a>
       </header>
 
-      <div className="phone-status">
-        <span className="status-dot" aria-hidden="true" />
-        <span><strong>Preview</strong><span className="status-sep"> / </span>No actions sent</span>
-      </div>
+      <p className="phone-status">Local preview only. No desktop actions are sent.</p>
 
       <main className="phone-main">
         <div className="phone-page-heading">

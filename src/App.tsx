@@ -32,6 +32,8 @@ import {
   loadDeck,
   saveDeck,
   STORAGE_KEY,
+  setupDismissed,
+  dismissSetup,
 } from "./lib/persistence";
 import type { LoadStatus } from "./lib/persistence";
 import { nativeAvailable } from "./lib/native";
@@ -55,7 +57,6 @@ import { PageList } from "./components/PageList";
 import { PhoneDeck } from "./components/PhoneDeck";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SetupGuide } from "./components/SetupGuide";
-import type { SetupStep } from "./components/SetupGuide";
 
 type Route = "editor" | "settings" | "phone";
 
@@ -121,7 +122,7 @@ export default function App() {
     () => activePage(initial.deck).controls[0]?.id ?? null,
   );
   const actionDialog = useRef<HTMLDialogElement>(null);
-  const [setupStep, setSetupStep] = useState<SetupStep | null>(!nativeMode && initial.status === "empty" ? "start" : null);
+  const [setupOpen, setSetupOpen] = useState(!nativeMode && initial.status === "empty" && !setupDismissed(getStorage()));
   const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [pressedId, setPressedId] = useState<string | null>(null);
@@ -176,14 +177,14 @@ export default function App() {
         syncRef.current = sync;
         setLoadStatus("loaded");
         if (snapshot.exists) {
-          setSetupStep(null);
+          setSetupOpen(false);
           setDeck(snapshot.deck);
         } else {
           const browser = loadDeck(getStorage());
           const initialDeck =
             browser.status === "loaded" ? browser.deck : snapshot.deck;
           setDeck(initialDeck);
-          setSetupStep(browser.status === "loaded" ? null : "start");
+          setSetupOpen(browser.status !== "loaded" && !setupDismissed(getStorage()));
           sync.update(initialDeck);
         }
         setNativeLoading(false);
@@ -273,8 +274,27 @@ export default function App() {
     }
     commitDeck(result.deck);
     setSelectedControlId(result.control.id);
-    if (setupStep && setupStep !== "done") setSetupStep("configure");
     setPreviewNotice(`Added ${result.control.label}. Local preview only.`);
+  };
+
+  const closeSetup = () => {
+    dismissSetup(getStorage());
+    setSetupOpen(false);
+    window.requestAnimationFrame(() => document.getElementById("page-title")?.focus());
+  };
+
+  const finishSetup = (control: Control) => {
+    const result = addControl(deck, page.id, control.action, {
+      label: control.label,
+      scene: control.action === "obs-scene" ? control.scene : undefined,
+      volume: control.action === "volume" ? control.volume : undefined,
+    });
+    if (!result) return false;
+    commitDeck(result.deck);
+    setSelectedControlId(result.control.id);
+    setPreviewNotice(`Added ${result.control.label}. No desktop action was sent.`);
+    closeSetup();
+    return true;
   };
 
   const handlePatchControl = (patch: ControlPatch) => {
@@ -350,31 +370,23 @@ export default function App() {
   const obsPill = !obs.native
     ? {
         title: "This build has no desktop connection.",
-        strong: "Preview",
-        rest: "No actions sent",
-        live: false,
+        text: "Local preview only. No desktop actions are sent.",
       }
     : obs.status === "connected"
       ? {
           title: `Connected to local OBS. Last checked ${new Date(
             obs.snapshot?.observedAtMs ?? Date.now(),
           ).toLocaleTimeString()}.`,
-          strong: "OBS connected",
-          rest: obs.currentScene ? `Scene: ${obs.currentScene}` : "Scene unknown",
-          live: true,
+          text: obs.currentScene ? `OBS connected to ${obs.currentScene}.` : "OBS connected. Current scene unknown.",
         }
       : obs.status === "connecting"
         ? {
             title: "Connecting to the local OBS Studio WebSocket server.",
-            strong: "Connecting to OBS",
-            rest: "…",
-            live: false,
+            text: "Connecting to OBS…",
           }
         : {
             title: "The desktop app is running; OBS is not connected.",
-            strong: "Desktop",
-            rest: "OBS offline",
-            live: false,
+            text: "OBS is not connected.",
           };
 
   const nativeWriteError =
@@ -409,6 +421,10 @@ export default function App() {
           : loadStatus === "invalid"
             ? "Saved data was invalid. The sample deck is shown."
             : "Local storage is unavailable.";
+
+  if (setupOpen && route === "editor") {
+    return <><SetupGuide pageName={page.name} canAdd={page.controls.length < MAX_CONTROLS_PER_PAGE} storageAlert={storageAlert} onFinish={finishSetup} onDismiss={closeSetup} /><UpdateBanner /></>;
+  }
 
   return (
     <div
@@ -544,6 +560,12 @@ export default function App() {
           </details>
 
           <section className="settings-card">
+            <h2>Getting started</h2>
+            <p>Build and rehearse another control without changing your existing ones.</p>
+            <div><button type="button" className="button secondary" onClick={() => { setSetupOpen(true); window.location.hash = "#/"; }}>Replay setup</button></div>
+          </section>
+
+          <section className="settings-card">
             <h2>Installable web app</h2>
             <p>
               A web manifest and a production-only offline shell are included. Installation
@@ -555,21 +577,7 @@ export default function App() {
       ) : (
         <main className="workspace" id="main">
           <section className="canvas-panel" aria-labelledby="page-title">
-            <h1 id="page-title" className="sr-only">{page.name}</h1>
-            {setupStep ? (
-              <SetupGuide
-                step={setupStep} hasSelection={selectedControl !== null}
-                onAdd={openActionPicker}
-                onConfigure={() => setSetupStep("preview")}
-                onPreview={() => {
-                  if (!selectedControl) return;
-                  if (selectedControl.action === "volume") previewVolume(selectedControl, controlVolume(selectedControl));
-                  else previewControl(selectedControl);
-                  setSetupStep("done");
-                }}
-                onDismiss={() => setSetupStep(null)}
-              />
-            ) : null}
+            <h1 id="page-title" className="sr-only" tabIndex={-1}>{page.name}</h1>
             {storageAlert ? (
               <p className="storage-alert" role="status">
                 {storageAlert}
@@ -603,11 +611,7 @@ export default function App() {
             </div>
 
             <div className="workspace-footer">
-              <span className="status-pill" title={obsPill.title}>
-                <span className={`status-dot${obsPill.live ? " is-live" : ""}`} aria-hidden="true" />
-                {obsPill.strong}<span className="status-detail"> / {obsPill.rest}</span>
-              </span>
-              <p className="preview-feedback" role="status" aria-live="polite">{previewNotice}</p>
+              <p className="preview-feedback" title={obsPill.title} role="status" aria-live="polite">{previewNotice ?? obsPill.text}</p>
             </div>
           </section>
 

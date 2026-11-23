@@ -212,7 +212,7 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 - [x] Scaffold shared web frontend and minimal Tauri shell with documented commands. Repository-local Nix shell is pinned; coordinator verified cargo check/test and a debug no-bundle Tauri build on x86_64-linux. No native runtime or packaging claim yet.
 - [x] Establish design tokens, dark/light themes, desktop editor, and same-origin phone preview.
-- [ ] Obtain user acceptance of the implemented redesign. The user approved the clean, Hex-inspired (not copied) single-toolbar layout; the new implementation has 108 Chrome checks and reviewed screenshots, not final visual acceptance. Earlier dashboard and colored-console directions were rejected.
+- [ ] Obtain user acceptance of the implemented redesign. The user rejected the inline-guide pass and requested Touch Portal’s direct editing combined with Hex’s focused, animated onboarding and tactile depth. The new pass has full-window draft → rehearsal → Add setup, a compact 960×680 desktop, adjacent Inspector, pressable keys, plain status text, 160 coordinator-verified Chrome checks, 54 frontend tests, reviewed screenshots, and a browser motion recording. No final visual acceptance yet. Earlier dashboard and colored-console directions were also rejected.
 - [x] Add minimal deck/page/button schema, sample data, and validated browser-local persistence. Coordinator verified 29 tests plus 36 Chrome smoke checks, including cross-tab edits and refresh persistence. Desktop-owned atomic file persistence remains M2 work.
 - [ ] Add CI for formatting, type checking, unit tests, and desktop build checks on Linux/Windows/macOS.
 - [x] Add PWA manifest and generated icons.

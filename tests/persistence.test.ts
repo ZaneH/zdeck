@@ -4,6 +4,8 @@ import {
   loadDeck,
   saveDeck,
   STORAGE_KEY,
+  setupDismissed,
+  dismissSetup,
 } from "../src/lib/persistence";
 import type { StorageLike } from "../src/lib/types";
 
@@ -27,6 +29,27 @@ const throwingStorage: StorageLike = {
     throw new Error("storage unavailable");
   },
 };
+
+describe("setup dismissal", () => {
+  it("remembers dismissal separately without creating or changing a deck", () => {
+    const storage = new MemoryStorage();
+    expect(setupDismissed(storage)).toBe(false);
+    dismissSetup(storage);
+    expect(setupDismissed(storage)).toBe(true);
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+    const deck = createDefaultDeck();
+    saveDeck(storage, deck);
+    dismissSetup(storage);
+    expect(loadDeck(storage).deck).toEqual(deck);
+  });
+
+  it("remains safe with absent or blocked storage", () => {
+    expect(setupDismissed(null)).toBe(false);
+    expect(setupDismissed(throwingStorage)).toBe(false);
+    expect(() => dismissSetup(null)).not.toThrow();
+    expect(() => dismissSetup(throwingStorage)).not.toThrow();
+  });
+});
 
 describe("deck persistence", () => {
   it("loads the sample deck when storage is empty", () => {
