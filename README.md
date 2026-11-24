@@ -17,12 +17,12 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 - OBS scene, microphone mute, media play/pause, and volume controls. The microphone scope is the **default system input**, explicitly labelled as distinct from an OBS input. The dial is deferred.
 - In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
-- Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
-- Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” The separate authenticated phone surface shows connection and action outcomes; native Settings manage explicit start/stop, expiring links, approval/denial, and revocation.
+- The native editor defaults to **Preview** each session. Explicit **Live** mode runs saved tile controls on this computer without a phone or phone service; it requires a loaded, valid, synchronized saved deck. Edits (including page selection) or leaving the editor return to Preview. Live slider targets commit only on release; in-flight/pending actions block more presses, and unknown outcomes are never automatically retried. Native Inspector **Run scene**/**Toggle**/**Apply**/**Run** actions remain explicitly real. Browser and phone previews are always simulated.
+- Plain mode and outcome text distinguishes simulated preview from **Live — presses run on this computer**. The authenticated phone surface shows its own connection and action outcomes; native Settings manage explicit start/stop, expiring links, approval/denial, and revocation.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
 - The local editor's `#/phone` route is simulated, with Landscape/Portrait desktop frames. Every route served by the private phone service instead stays on the authenticated remote surface: no local editor, sample fallback, or desktop IPC.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
-- Minimal Tauri 2 Rust shell and configuration that points at the same built frontend. It exposes the four narrow OBS commands, six narrow system commands, two narrow native-deck persistence commands, and eight native-only private-service admin commands described below, plus no plugins.
+- Minimal Tauri 2 Rust shell and configuration that points at the same built frontend. It exposes the four narrow OBS commands, six narrow system commands, two narrow native-deck persistence commands, and eight native-only private-service admin commands described below, plus the external-process plugin commands. See [Plugin setup and SDK guide](docs/plugins.md) for folder installation, automatic Node detection, and the macOS Spotify reference plugin.
 - Vitest tests cover schema/persistence, editing, native adapters/save queue, invitation parsing, phone lifecycle cancellation, deadlines, and ambiguous outcomes. Rust tests cover fake OBS/system adapters, temporary atomic storage, and real loopback HTTP/WebSocket security. A separate HTTPS/Chrome smoke exercises the phone against that actual service.
 
 ## Requirements
@@ -56,6 +56,18 @@ npm run smoke:remote  # Linux/Nix, installed google-chrome and openssl; fake act
 
 `npm run smoke:remote` builds the frontend and runs the opt-in Rust browser fixture. It starts the actual service with a temporary deck and fake action runner, then uses a disposable certificate, loopback HTTPS proxy, host-resolver mapping, and isolated Chrome profile. Host/Origin/cookies are forwarded unchanged; hostile Host/Origin probes must fail. It covers explicit pairing/approval, fresh-context link paste, authenticated GET/WSS, saved actions and results, deliberate slider commits, live edits, conflict resync, lost-response Unknown/no replay, revocation, and remote-only offline caching. Current checks pass **65 HTTPS integration checks**, **107 frontend tests**, **225 local UI browser checks**, and **71 default Rust tests**. Routine action outcomes are kept in a collapsed Activity view (ten recent entries, memory only); ambiguous outcomes retain a visible check-the-desktop warning. TypeScript, production build, and Tauri debug no-bundle build also pass. Certificate bypasses exist **only in this disposable test**, never as phone setup guidance. The fixture is ignored by default and has a 120-second deadline; no real system controls or Tailscale settings are touched.
 
+### Component design with Storybook
+
+Run `npm run storybook` and open <http://localhost:6006>. This renders the **real components**, using the app's Geist font, CSS tokens and a Dark/Light toolbar switch, without a native desktop or phone service. No addon pack or production refactor is required.
+
+- **Controls → Control tile:** all five action kinds, disabled, selected editor, long label and narrow volume. Presses and slider releases update local counters only.
+- **Settings → External plugin:** missing runtime, nothing installed, ready-for-trust, connected, unknown outcome and narrow trust. Selection, trust, enabling, read-state and disconnect are local fixtures; buttons never probe Node, open folders, launch plugins or control media.
+- **Onboarding → Setup guide:** first use, full page and storage unavailable. Click through the real welcome/build/try flow; blank a scene/name to inspect incomplete validation. Finishing or skipping changes only the story, and **Restart demo** resets it.
+
+The narrow stories constrain component width without an extra viewport addon. Reload/switch stories to reset local state. `RemoteSettingsCard` remains hook-coupled and is intentionally not included; extracting a pure connection view can be a separate design task.
+
+`npm run storybook:build` writes the standalone site to ignored `storybook-static/`, separate from production `dist/` and the Spotify artifact. Serve that directory with your preferred static server; opening its files directly is not supported. These are design fixtures, not proof of native permissions, network connectivity or real action outcomes.
+
 ### Production build preview
 
 ```bash
@@ -71,7 +83,7 @@ Open <http://localhost:4173>. This is also the useful way to exercise the servic
 - The service worker is generated at build time (`build/serviceWorkerPlugin.ts`) from the real `dist/` output; there is no hand-written `public/sw.js`. Its cache name embeds a hash of the shell and hashed asset contents, so a new frontend build always produces a new worker and a distinct cache.
 - It precaches only an exact allowlist: `index.html`, the manifest, the icons, and the hashed files under `assets/`. It never handles query strings, API-shaped paths, cross-origin requests, or non-GET requests, so server auth/API responses are never cached. The navigation fallback serves the cached `index.html` only for `/` and `/index.html`.
 - A waiting worker installs into its own cache and never mutates the live cache or reloads the page. The app shows a **Reload** banner; the user applies the update, the previous cache is deleted, and only then does the page reload. Set `VITE_BUILD_MARKER` at build time to produce a distinguishable build when exercising the update lifecycle.
-- Installation requires a browser-accepted secure context. **The user reports that phone connection worked after manually setting up Tailscale Serve. Physical iPhone/Android installation and the full action checklist remain unverified.** The phone UI and local HTTPS integration are implemented; LAN-only trusted HTTPS remains a release requirement.
+- Installation requires a browser-accepted secure context. **The user reports that phone connection worked after manually setting up Tailscale Serve. Physical iPhone/Android installation and the full action checklist remain unverified.** The phone UI and both connection modes are implemented; real LAN trusted-certificate proxy/phone validation remains open.
 
 ## Tauri desktop shell
 
@@ -89,7 +101,7 @@ They run the Tauri CLI against `src-tauri/`. The configuration:
 - exposes four narrow OBS commands (`obs_connect`, `obs_disconnect`, `obs_snapshot`, `obs_switch_scene`) that connect only to loopback (`127.0.0.1`, then `::1`) and return sanitized typed errors;
 - exposes six narrow system commands (`system_output_snapshot`, `system_output_set_volume`, `system_microphone_snapshot`, `system_microphone_set_muted`, `system_media_snapshot`, `system_media_play_pause`) that run fixed executables with fixed argument arrays (no shell, no user-supplied program or command text) and return sanitized typed errors;
 - owns the authoritative native deck through `native_deck_load` and `native_deck_save(expectedRevision, deck)`. The store validates the same schema and limits as the frontend, writes atomically, and returns typed sanitized errors. The frontend never supplies a path;
-- adds no plugins, and `src-tauri/capabilities/default.json` keeps an empty permission list;
+- adds no Tauri framework plugins, and `src-tauri/capabilities/default.json` keeps an empty permission list; the external-process extension host uses narrow native commands and explicit local trust instead;
 - allows no remote privileged pages.
 
 ### OBS Studio scene switching
@@ -178,16 +190,14 @@ Desktop Settings and the authenticated phone client implement the backend in
 [`docs/protocol.md`](docs/protocol.md). The service is **not** started automatically.
 Only the native desktop can administer it, using:
 
-- `remote_start(origin)`, `remote_stop`, `remote_status`
+- `remote_start({ origin, mode?: "tailscale" | "local_https" })`, `remote_stop`, `remote_status` (status includes the running mode, or `null` when stopped)
 - `remote_create_invitation`, `remote_list_devices`
 - `remote_approve_device`, `remote_deny_device`, `remote_revoke_device`
 
 Behavior:
 
-- Binds only `127.0.0.1:45829` by default after an explicit native `remote_start`. The
-  configured origin must be an HTTPS URL whose host ends in `.ts.net`, with no
-  path, query, credentials, fragment, or non-default port. The service never
-  runs Tailscale commands or changes Serve configuration.
+- Binds plain HTTP only on `127.0.0.1:45829` after an explicit native start, behind an external HTTPS proxy. **Tailscale** accepts a `.ts.net` HTTPS origin on port 443. **Local HTTPS** accepts canonical private RFC1918 IPv4, ULA/link-local IPv6, or ASCII `.local`/`.lan`/`.home.arpa` names with ports 1–65535. Both reject credentials, paths beyond `/`, query/fragment syntax, whitespace, escapes, aliases and ambiguous URL repairs. Local mode rejects public/loopback addresses. See the [exact origin rules and manual local setup](docs/protocol.md#connection-modes-and-origin-validation).
+- Settings provides accessible **Tailscale / Local HTTPS** tabs, disabled while running or busy. Stop before switching. Only explicit mode choices and successfully started per-mode origins are remembered locally; legacy tailnet preferences are retained. Drafts survive tab switches in memory; pairing links/tokens/approvals are never saved as preferences. Restoring preferences does not start a service. The app never configures networks, certificates, firewalls, Tailscale or proxies, or verifies live phone connectivity.
 - Serves the bundled PWA and `/api/v1/*` from that same origin. There are no
   HTTP admin endpoints. A server-rewritten HTML marker selects the remote client;
   a missing marker fails closed. Bundled lookup rejects missing assets rather
@@ -239,19 +249,15 @@ run this automatically):**
 tailscale serve --bg --https=443 http://127.0.0.1:45829
 ```
 
-The service trusts the configured public host and the exact loopback upstream
+The service trusts the configured HTTPS authority and the exact loopback upstream
 authority. If your Serve proxy rewrites `Host` or `Origin` differently, adjust
 the proxy configuration or report the mismatch; the backend does not trust
 arbitrary forwarded headers.
 
 #### Physical-phone checklist (connection user-reported; full checklist still open)
 
-1. Launch the native desktop app. In **Settings → Phone connection**, enter the
-   root `https://computer.tailnet-name.ts.net` origin and choose **Start local service**.
-   This starts loopback only; it does **not** publish an HTTPS endpoint.
-2. Review your current Serve configuration before deliberately applying an approved
-   HTTPS-to-loopback proxy such as the example above. Never enable public Funnel.
-   Keep Tailscale connected on both devices and the desktop app running.
+1. Launch the native desktop app. In **Settings → Phone connection**, choose **Tailscale** or **Local HTTPS**, enter this computer's actual HTTPS root origin, and explicitly **Start local service**. The tailnet example is `https://computer.tailnet-name.ts.net`; the local example is `https://192.168.1.20:8443`. Replace example addresses. This starts loopback only, not an HTTPS endpoint.
+2. For Tailscale, review your existing Serve configuration before deliberately applying the HTTPS-to-loopback example above; never enable public Funnel. Keep Tailscale connected on both devices. For Local HTTPS, no Tailscale is needed: configure a trusted-certificate reverse proxy yourself using the [mkcert + Caddy recipe](docs/protocol.md#local-https-setup). Transfer only your personally controlled CA certificate, **never its private key**, and explicitly install/enable phone trust (iOS requires both profile installation and full trust). Both devices need a mutually reachable permitted network; Wi-Fi client isolation may block access. Use a permitted home network/hotspot, not a policy bypass. The app does not configure or test any of this. Keep the desktop app and chosen proxy running.
 3. On iPhone, open that root address in **Safari → Share → Add to Home Screen**.
    Launch the installed app. On Android, use the browser's install menu.
 4. First confirm the root address shows **Connect your phone**. Only then create
@@ -266,8 +272,7 @@ arbitrary forwarded headers.
    OBS/audio/media actions**, unlike the local Preview route. Choose a deliberate,
    reversible action and verify the actual desktop result. If the result is
    Unknown, check the desktop before retrying.
-6. Revoke the phone and confirm controls disappear. Stopping/restarting the
-   service invalidates every device; the next session needs fresh pairing.
+6. Revoke the phone and confirm controls disappear. Stopping/restarting the service invalidates every device; the next session needs fresh pairing. Keep the origin (scheme, name/IP and port) and certificate stable. Changing the origin requires re-pairing and possibly removing/reinstalling the PWA at the new address; changing the certificate's IP/name requires minting a matching certificate. The phone must accept HTTPS without a certificate warning.
 
 Repeat in Brave and on Android separately. This checklist is a validation plan,
 not a claim that physical-device installation or actions have succeeded.
@@ -443,8 +448,8 @@ action state.
 
 ## Honest limitations
 
-- The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. The user reports a successful phone connection after manually setting up Tailscale Serve, but physical iPhone/Android installation, native desktop admin lifecycle, and packaged asset resolution remain unverified. There is no automatic Serve setup or LAN HTTPS implementation. The service is explicit-enable only.
-- Execution is limited to OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS play/pause, from the native Inspector or approved phone. Local phone preview and toolbar tile presses remain simulated. Windows/macOS system actions are not implemented (typed `unsupported`).
+- The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. The user reports a successful phone connection after manually setting up Tailscale Serve, but physical iPhone/Android installation, native desktop admin lifecycle, and packaged asset resolution remain unverified. Both Tailscale and Local HTTPS modes are explicit-enable only; neither configures a proxy or certificate. Real LAN/certificate/phone setup remains unverified.
+- Built-in execution covers OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS play/pause, from explicit native Live tiles, the native Inspector, or an approved phone. Native tiles default to Preview; browser and phone previews remain simulated. Standalone desktop Live execution does not require starting the phone service. Windows/macOS system actions are not implemented (typed `unsupported`).
 - The system adapter is tested with a fake process runner. The user reports that media play/pause did not control the intended player; read-only diagnosis found Gwenview listed first by `playerctl`, ahead of Brave and Strawberry. The default MPRIS target is not a Spotify-specific binding. No agent-triggered live playback/audio actions were performed; full runtime action validation remains open. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.
 - Both browser suites run locally against isolated headless Chrome (`npm run smoke`, `npm run smoke:remote`); no physical-phone, pixel-regression, or real-network claim is made.
