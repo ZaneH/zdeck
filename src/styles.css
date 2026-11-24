@@ -365,6 +365,30 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 @media (pointer: coarse) {
   .button, .icon-button, .page-select, .page-panel > select, .accent-button { min-width: 44px; min-height: 44px; }
 }
+.remote-app { display: flex; flex-direction: column; min-height: 100dvh; background: var(--bg); }
+.remote-header { justify-content: space-between; }
+.remote-connection { flex: none; color: var(--text-muted); font-size: 11px; }
+.remote-connection[data-state="active"] { color: var(--accent); }
+.remote-connection[data-state="disconnected"] { color: var(--warning); }
+.remote-pair { display: flex; flex: 1; flex-direction: column; gap: 16px; width: 100%; max-width: 440px; margin: 0 auto; padding: 32px max(16px, env(safe-area-inset-right)) 40px max(16px, env(safe-area-inset-left)); }
+.remote-pair h1 { font-size: 22px; font-weight: 550; letter-spacing: -.4px; }
+.remote-lead { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.remote-captured { color: var(--text-faint); font-size: 12px; line-height: 1.5; }
+.remote-error { color: var(--danger); font-size: 12px; line-height: 1.5; }
+.remote-warning { color: var(--warning); font-size: 12px; line-height: 1.5; }
+.remote-target-note { color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.remote-status { min-height: 1.6em; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.remote-status[data-kind="confirmed"] { color: var(--accent); }
+.remote-status[data-kind="unknown"] { color: var(--warning); }
+.remote-status[data-kind="failed"], .remote-status[data-kind="not_applied"] { color: var(--danger); }
+.remote-install { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); }
+.remote-install > summary { padding: 11px 12px; cursor: pointer; color: var(--text-muted); font-size: 12px; list-style: none; }
+.remote-install > summary::-webkit-details-marker { display: none; }
+.remote-install[open] > summary { border-bottom: 1px solid var(--border); }
+.remote-install > div { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.remote-install p { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.control-tile.is-disabled { opacity: .55; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

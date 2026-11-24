@@ -154,7 +154,7 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
               <p className="setup-destination">Page: {pageName}</p>
               <div className="setup-actions"><button type="button" className="button quiet" onClick={() => changeStep("build")}><ArrowLeft size={15} aria-hidden="true" /> Edit button</button><button type="button" className="button primary" disabled={!tried || !canAdd} onClick={() => { if (!onFinish(draft)) setFinishError(true); }}>Add to page <ArrowRight size={15} aria-hidden="true" /></button></div>
               {!canAdd || finishError ? <p className="setup-error" role="status">This page is full. Skip setup to make room or choose another page.</p> : null}
-              <p className="setup-limitation">Phone pairing isn’t connected yet.</p>
+              <p className="setup-limitation">Connect your phone in Settings.</p>
             </>
           )}
           {storageAlert ? <p className="storage-alert" role="status">{storageAlert}</p> : null}

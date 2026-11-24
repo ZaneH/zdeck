@@ -99,7 +99,7 @@ impl FakeAssets {
         map.insert(
             "index.html".to_string(),
             PublicAsset {
-                bytes: b"<!doctype html><title>Deck</title>".to_vec(),
+                bytes: b"<!doctype html><html data-zdeck-local><head><title>zDeck</title></head><body></body></html>".to_vec(),
                 mime: "text/html".to_string(),
             },
         );
@@ -1673,12 +1673,37 @@ async fn websocket_requires_origin_and_cookie_and_ignores_messages() {
 }
 
 #[tokio::test]
+async fn missing_phone_surface_marker_does_not_serve_the_editor() {
+    let mut assets = FakeAssets::new();
+    assets.map.get_mut("index.html").unwrap().bytes =
+        b"<!doctype html><title>old editor</title>".to_vec();
+    let env = env_with(
+        Limits::default(),
+        default_obs(),
+        Arc::new(assets),
+        default_clock(),
+        Arc::new(FakeRunner::new(vec![])),
+    )
+    .await;
+    let index = http_request(env.port, "GET", "/", PUBLIC_HOST, None, None, None).await;
+    assert_eq!(index.status, 503);
+    assert_eq!(index.header("cache-control"), Some("no-store"));
+    assert!(!index.text().contains("old editor"));
+    env.service.stop().await;
+}
+
+#[tokio::test]
 async fn static_assets_are_allowlisted_and_headers_are_safe() {
     let env = default_env().await;
     let index = http_request(env.port, "GET", "/", PUBLIC_HOST, None, None, None).await;
     assert_eq!(index.status, 200);
     assert_eq!(index.header("content-type"), Some("text/html"));
     assert_eq!(index.header("cache-control"), Some("no-cache"));
+    assert!(index.text().contains("data-zdeck-remote"));
+    assert!(!index.text().contains("data-zdeck-local"));
+    let policy = index.header("content-security-policy").unwrap();
+    assert!(policy.contains(&ORIGIN.replacen("https://", "wss://", 1)));
+    assert!(!policy.contains("ipc:"));
     assert!(index
         .header("content-security-policy")
         .expect("csp")
@@ -2281,4 +2306,296 @@ async fn start_fake_obs() -> FakeObs {
         }
     });
     FakeObs { port, current }
+}
+
+// ---------------------------------------------------------------------------
+// Browser smoke fixture
+//
+// Opt-in and ignored by default. `npm run smoke:remote` builds the frontend and
+// then runs this single test under `nix develop`, which supplies node, openssl,
+// Chrome, and a disposable loopback HTTPS proxy driven by scripts/remote-smoke.mjs.
+// The test never touches a real tailnet, OBS, audio, or a phone device: every
+// action goes through the existing fake runners and a temporary deck store.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod browser_smoke {
+    use super::*;
+    use serde::Deserialize;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    /// Real build assets; production routing still owns the path allowlist.
+    struct DiskAssets {
+        root: PathBuf,
+    }
+    impl AssetProvider for DiskAssets {
+        fn get(&self, path: &str) -> Option<PublicAsset> {
+            let full = self.root.join(path);
+            let mime = match full.extension().and_then(|extension| extension.to_str()) {
+                Some("html") => "text/html",
+                Some("js") => "text/javascript",
+                Some("css") => "text/css",
+                Some("png") => "image/png",
+                Some("svg") => "image/svg+xml",
+                Some("webmanifest") => "application/manifest+json",
+                Some("ttf") => "font/ttf",
+                _ => "application/octet-stream",
+            };
+            Some(PublicAsset {
+                bytes: std::fs::read(full).ok()?,
+                mime: mime.to_string(),
+            })
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct RpcRequest {
+        id: u64,
+        method: String,
+        #[serde(default)]
+        params: Value,
+    }
+
+    /// Kills the Node smoke process and its process group if the test unwinds early.
+    struct SmokeChildGuard {
+        pid: u32,
+        child: Option<tokio::process::Child>,
+    }
+
+    impl Drop for SmokeChildGuard {
+        fn drop(&mut self) {
+            if let Some(mut child) = self.child.take() {
+                let _ = child.start_kill();
+                // The Node child leads its own process group; this reaps a stuck Chrome too.
+                let _ = std::process::Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", self.pid)])
+                    .status();
+            }
+        }
+    }
+
+    async fn browser_rpc(
+        service: &RunningService,
+        store: &DeckStore,
+        runner: &FakeRunner,
+        request: &RpcRequest,
+    ) -> Value {
+        let outcome: Result<Value, String> = match request.method.as_str() {
+            "create_invitation" => service
+                .create_invitation()
+                .await
+                .map(|view| serde_json::to_value(view).unwrap())
+                .map_err(|error| format!("{error:?}")),
+            "list_devices" => service
+                .list_devices()
+                .await
+                .map(|devices| serde_json::to_value(devices).unwrap())
+                .map_err(|error| format!("{error:?}")),
+            "approve_device" => {
+                let request_id = request
+                    .params
+                    .get("requestId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "requestId is required".to_string());
+                match request_id {
+                    Ok(request_id) => service
+                        .approve_device(request_id)
+                        .await
+                        .map(|view| serde_json::to_value(view).unwrap())
+                        .map_err(|error| format!("{error:?}")),
+                    Err(error) => Err(error),
+                }
+            }
+            "deny_device" => {
+                let request_id = request
+                    .params
+                    .get("requestId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "requestId is required".to_string());
+                match request_id {
+                    Ok(request_id) => service
+                        .deny_device(request_id)
+                        .await
+                        .map(|view| serde_json::to_value(view).unwrap())
+                        .map_err(|error| format!("{error:?}")),
+                    Err(error) => Err(error),
+                }
+            }
+            "revoke_device" => {
+                let request_id = request
+                    .params
+                    .get("requestId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "requestId is required".to_string());
+                match request_id {
+                    Ok(request_id) => service
+                        .revoke_device(request_id)
+                        .await
+                        .map(|view| serde_json::to_value(view).unwrap())
+                        .map_err(|error| format!("{error:?}")),
+                    Err(error) => Err(error),
+                }
+            }
+            "status" => {
+                let status = service.status().await;
+                Ok(serde_json::to_value(status).unwrap())
+            }
+            "counts" => {
+                let status = service.status().await;
+                Ok(json!({
+                    "pending": status.pending_devices,
+                    "approved": status.approved_devices,
+                    "connectedSockets": status.connected_sockets,
+                }))
+            }
+            "save_deck" => {
+                let page_id = request
+                    .params
+                    .get("pageId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("page_stream")
+                    .to_string();
+                let name = request
+                    .params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Updated")
+                    .to_string();
+                match store.load().await {
+                    Ok(snapshot) => {
+                        let mut deck = snapshot.deck;
+                        if let Some(page) = deck.pages.iter_mut().find(|page| page.id == page_id) {
+                            page.name = name;
+                        }
+                        store
+                            .save(snapshot.revision, deck)
+                            .await
+                            .map(|saved| json!({ "revision": saved.revision }))
+                            .map_err(|error| format!("{error:?}"))
+                    }
+                    Err(error) => Err(format!("{error:?}")),
+                }
+            }
+            "runner_push" => match request.params.get("outputs").and_then(Value::as_array) {
+                Some(outputs) => {
+                    let mut queue = runner.queue.lock().unwrap();
+                    for output in outputs {
+                        if let Some(text) = output.as_str() {
+                            queue.push(ok(text));
+                        }
+                    }
+                    Ok(json!(true))
+                }
+                None => Err("outputs is required".to_string()),
+            },
+            "runner_calls" => Ok(json!({ "calls": runner.calls().len() })),
+            "stop" => {
+                service.stop().await;
+                Ok(json!(true))
+            }
+            other => Err(format!("unknown RPC method: {other}")),
+        };
+
+        match outcome {
+            Ok(result) => json!({ "id": request.id, "ok": true, "result": result }),
+            Err(error) => json!({ "id": request.id, "ok": false, "error": error }),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "launches real Chrome via Node against built dist; run `npm run smoke:remote`"]
+    async fn remote_browser_smoke() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dist = manifest_dir.join("../dist");
+        assert!(
+            dist.join("index.html").is_file(),
+            "built frontend missing; run `npm run build` first ({})",
+            dist.display()
+        );
+        let script = manifest_dir.join("../scripts/remote-smoke.mjs");
+        assert!(script.is_file(), "missing {}", script.display());
+
+        let dir = TempDir::new("browser");
+        let store = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+        let mut deck = default_deck();
+        deck.pages[0].controls[3].label = "Fixture playback".to_string();
+        store.save(0, deck).await.expect("save fixture deck");
+        let runner = Arc::new(FakeRunner::new(vec![]));
+        let config = ServiceConfig {
+            origin: ORIGIN.to_string(),
+            port: 0,
+            deck: store.clone(),
+            obs: default_obs(),
+            system: default_system(runner.clone()),
+            assets: Arc::new(DiskAssets { root: dist }),
+            clock: default_clock(),
+            limits: Limits::default(),
+        };
+        let service = start(config).await.expect("start browser smoke service");
+        let port = service.port();
+
+        let mut std_cmd = std::process::Command::new("node");
+        std_cmd
+            .arg(&script)
+            .arg("--origin")
+            .arg(ORIGIN)
+            .arg("--backend-port")
+            .arg(port.to_string())
+            .arg("--temp-dir")
+            .arg(&dir.path)
+            .env(
+                "CHROME_BIN",
+                std::env::var("CHROME_BIN").unwrap_or_else(|_| "google-chrome".to_string()),
+            );
+        std_cmd.process_group(0);
+        let mut cmd = tokio::process::Command::from(std_cmd);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        let mut child = cmd.spawn().expect("spawn node smoke");
+        let pid = child.id().expect("node smoke pid");
+        let mut stdin = child.stdin.take().expect("node stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("node stdout"));
+        let mut guard = SmokeChildGuard {
+            pid,
+            child: Some(child),
+        };
+
+        let status = tokio::time::timeout(Duration::from_secs(120), async {
+            let mut lines = stdout.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let request: RpcRequest = match serde_json::from_str(trimmed) {
+                    Ok(request) => request,
+                    Err(_) => continue,
+                };
+                let response = browser_rpc(&service, &store, &runner, &request).await;
+                let mut payload = serde_json::to_string(&response).expect("serialize RPC response");
+                payload.push('\n');
+                if stdin.write_all(payload.as_bytes()).await.is_err() {
+                    break;
+                }
+                let _ = stdin.flush().await;
+            }
+            drop(stdin);
+
+            guard
+                .child
+                .as_mut()
+                .expect("node child")
+                .wait()
+                .await
+                .expect("wait for node smoke")
+        })
+        .await
+        .expect("remote browser smoke exceeded 120 seconds");
+        guard.child = None;
+        service.stop().await;
+        assert!(status.success(), "remote browser smoke reported failures");
+    }
 }

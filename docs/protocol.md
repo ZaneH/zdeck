@@ -10,6 +10,7 @@ Implementation contract for the first remote controller. This describes intended
 - Tailscale membership is not application authorization. Every device requires desktop approval.
 - Initial device credentials are **session-only**: stopping the service or restarting the app requires pairing again. Durable device enrollment is deferred, explicitly visible to users.
 - All API responses, including errors, use `Cache-Control: no-store`. Static assets contain no secrets and keep the existing exact-allowlist PWA cache policy.
+- The service rewrites `data-zdeck-local` to `data-zdeck-remote` in its index before serving or caching it. Missing/invalid index markers fail closed; missing bundled assets cannot fall back to the editor index. All remote routes remain remote. This marker is UI routing only, never authentication.
 
 ## Request boundary
 
@@ -26,10 +27,10 @@ Implementation contract for the first remote controller. This describes intended
 Native-only admin operations: start/stop/status, create invitation, list pending/approved devices, approve/deny, revoke. There are **no HTTP admin endpoints**.
 
 1. Desktop creates a CSPRNG invitation, one active invitation at a time, expires after two minutes. Store only its hash; keep the returned raw invitation transiently in the desktop pairing view.
-2. Share `https://<configured-origin>/#/pair?invite=<token>` by QR/link. The fragment is not sent to the server. The phone removes it from visible history immediately after consumption; no permanent token appears in the QR.
+2. Share `https://<configured-origin>/#/pair?invite=<token>` by expiring link (QR deferred). The fragment is not sent to the server. The phone captures/removes it synchronously before rendering or registering its service worker. Alternatively paste a fresh same-origin root link inside the installed PWA; do not assume Safari, Brave, and standalone sessions share cookies. Neither form persists the invitation.
 3. Phone `POST /api/v1/pair` with `{ invitation, name }`. Consume the invitation atomically once; enforce expiry, limits, and bounded name. Return `{ requestId, status: "pending" }` and set the provisional device cookie.
 4. Desktop shows the pending request/name and approves or denies it. The invitation alone does not authorize an action.
-5. Phone polls `GET /api/v1/pair/status` with its HttpOnly cookie until approved/denied/expired. Cookie identifies only its own pending request. Stop polling on terminal status or view cancellation.
+5. Phone polls `GET /api/v1/pair/status` about every two seconds, without overlap, until approved/denied/expired. Cookie identifies only its own pending request. Pause on hide and stop on terminal status/cancellation. Cancellation is local, not a promise of server denial. Resume uses non-mutating status reads; it never repeats the pairing POST.
 6. On approval, that cookie becomes an active device credential. On denial/expiry/revocation, it has no deck or action access. Cap pending lifetime; do not retain abandoned secrets indefinitely.
 
 Avoid access/request-body logging of invitations or cookies. Invitation matching and registry updates are atomic. Pairing request IDs and display names are metadata, not authorization secrets.
@@ -41,7 +42,8 @@ Avoid access/request-body logging of invitations or cookies. Invitation matching
 - A revision describes the complete deck, not an incremental patch. Reconnect/resume always gets a fresh snapshot, so missed messages require no replay log.
 - No editing over the socket. Ignore/reject unsolicited non-protocol messages with bounded framing; support normal socket close/ping behavior.
 - Phone page selection is local per client. New snapshots preserve that selection while the page exists; otherwise use the desktop's starting page.
-- Loss of socket/foreground session disables actions until authentication and a fresh snapshot have been checked. Never queue presses offline.
+- Actions require protocol v1, a safe positive revision, runtime-valid deck data, and a fresh valid WebSocket snapshot, not merely a successful HTTP read. Reject invalid/oversized socket messages.
+- Loss of socket/foreground session disables actions until authentication and a fresh snapshot have been checked. HTTP reads/bodies and the first socket snapshot have 12-second deadlines. Reconnect delays cap at 15 seconds and pause while hidden; terminal authorization failures halt reconnects. Never queue presses offline. In-flight callbacks cannot revive canceled/old sessions.
 
 ## Action commands
 
@@ -76,6 +78,8 @@ Outcome shape:
 
 States are `pending`, `confirmed`, `not_applied`, `failed`, or `unknown`. `observed` is an optional typed adapter result with its observation time; never treat a configured default as a live device reading. A lost response/readback after a possible mutation is **unknown**, not proof of failure. No automatic mutation retries.
 
+The phone allows one command request at a time, correlates the returned ID, and shows typed state/message without optimistic native state. Volume movement updates a local **target**, not an observed reading; only a deliberate pointer release or value-key release commits. Cancellation, blur, or disabling the control cancels that gesture. A stale-revision 409 resyncs reads only. Timeout, lost/unreadable reply, or interruption after a possible action shows **Unknown — check the desktop before retrying**. No offline queue or application-level POST retry exists. Browser/transport behavior can still repeat an identical request, so server deduplication remains necessary.
+
 ### Bounded deduplication
 
 - Reserve `(device ID, command ID)` atomically **before** running the action. Serialize action execution to keep toggles ordered and resource use bounded.
@@ -90,4 +94,5 @@ States are `pending`, `confirmed`, `not_applied`, `failed`, or `unknown`. `obser
 - Test duplicate and concurrent commands with an injected fake system runner: one execution, stable result, no live audio/media changes.
 - Test saved-deck changes over a real local socket, restart/resync semantics, server stop/start cleanup, and resource caps.
 - Browser-test the phone against the actual Rust service with owned fake adapters and an isolated local HTTPS proxy, not a mocked fetch-only API. Test TLS bypasses, if needed for a disposable browser profile, must never become installation guidance.
-- Real Tailscale Serve, phone Home Screen install, native GUI behavior, and LAN-only HTTPS are separate manual/device validation gates. Do not configure the user's services automatically.
+- `npm run smoke:remote` runs an opt-in actual-service browser fixture with built assets, fake actions, private stdio administration, loopback HTTPS, and disposable Chrome. Test-only certificate bypass and hostname mapping must never be offered as installation instructions. The default Rust suite ignores this fixture.
+- Real Tailscale Serve, phone Home Screen install, native GUI/bundled-resolver behavior, and LAN-only HTTPS are separate manual/device validation gates. Do not configure the user's services automatically.

@@ -207,7 +207,7 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 - [ ] Confirm the provisional default-system-input microphone scope.
 - [ ] Prove trusted HTTPS/WSS + Home Screen installation on a real target phone over Tailscale.
 - [ ] Select and prove a LAN-only trusted HTTPS path, including reconnect after desktop restart and certificate lifecycle notes.
-- [ ] If a Tailscale-only prototype is approved, label it explicitly; retain LAN proof as a release gate.
+- [x] Label the approved Tailscale-first prototype explicitly; retain trusted LAN HTTPS proof as a release gate.
 - [ ] Prove one actual desktop action on each target OS; record unsupported permissions/capabilities, especially Wayland. One developer's OS is not cross-platform verification.
 - [ ] Agree on desktop/phone visual prototypes and interaction states.
 - [ ] Record transport/pairing threat model, stable-origin plan, configuration schema, and extension runtime decision.
@@ -231,13 +231,13 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 - [x] Implement private loopback HTTP/WebSocket backend, session-only pairing/approval/revocation, request guards, and deduplicated saved-control commands. Coordinator verified 68 Rust tests including 24 real-loopback service tests; actual Tailscale proxy behavior remains unverified.
 - [x] Wire native desktop connection settings, session-only expiring pairing links, approval/denial/revocation; coordinator verified 64 frontend tests and the existing 202-check browser suite. QR presentation is deferred; links are the first pairing method. Native admin lifecycle browser coverage remains to be added.
-- [ ] Wire authenticated phone pairing/control UI, including link paste inside a Safari-installed PWA. Keep preview distinct and never assume browser/standalone cookies are shared.
-- [ ] Wire revisioned snapshots/live edits into the phone client; reconnect/resume with a full-state check.
-- [ ] Route desktop preview and phone commands through one action engine; implement the selected real action family.
-- [ ] Show honest pressed/pending/result/disconnect states; deduplicate commands and prevent offline replay.
+- [x] Wire authenticated phone pairing/control UI, including fresh-link paste for independent standalone/browser sessions. Actual-service HTTPS/Chrome tests cover the paste flow in a fresh cookie context; Safari installation remains a physical-device gate. Keep every private-service route remote and local Preview simulated.
+- [x] Wire revisioned snapshots/live edits; authenticate and wait for a fresh valid WebSocket snapshot before enabling controls. Suspend/abort stale work in the background, bound requests/snapshot waits, and reconnect reads without replay.
+- [x] Share native Inspector and approved-phone execution through the same saved-control action adapters. Never make local preview presses real.
+- [x] Show pending/typed results/disconnection honestly; correlate IDs, deduplicate on the server, mark ambiguous actions Unknown, and prevent offline queuing or automatic mutation retries. Slider targets commit only on deliberate release, never cancel/blur.
 - [x] Add desktop-owned validated atomic file persistence, native migration/load gate, revision CAS, and a sequential frontend save queue; corruption is surfaced without overwrite. Coordinator verified 44 Rust tests (including a temp-file ownership regression) and 52 frontend tests.
 - [ ] Finish page editing, phone page navigation, and basic export/import without secrets.
-- [ ] Add focused protocol/security tests and automated browser coverage of create → pair → press → edit → reconnect → revoke.
+- [x] Add focused protocol/security tests and opt-in actual Rust + HTTPS/Chrome coverage of invitation → pair → approve → press → live edit → conflict resync → revoke, plus independent link paste and offline caching. Fake adapters only; real native/phone/network acceptance is not implied.
 - [ ] Validate PWA installation and real button execution on the chosen phone over both approved network modes.
 
 **Exit: minimal working project.** Two pages, real actions, secure pairing, live mirroring, persistence across restart, usable phone installation, clear errors. No mock-only action demos counted as completion.

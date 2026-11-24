@@ -1739,9 +1739,23 @@ async fn fallback(State(inner): State<Arc<Inner>>, uri: Uri) -> Response {
     let Some(path) = public_asset_path(uri.path()) else {
         return text_response(StatusCode::NOT_FOUND, "Not found.");
     };
-    let Some(asset) = inner.assets.get(&path) else {
+    let Some(mut asset) = inner.assets.get(&path) else {
         return text_response(StatusCode::NOT_FOUND, "Not found.");
     };
+    if path == "index.html" {
+        let Ok(html) = String::from_utf8(asset.bytes) else {
+            return ApiError::unavailable("The phone app is unavailable in this build.")
+                .into_response();
+        };
+        if !html.contains("data-zdeck-local") {
+            return ApiError::unavailable("The phone app is unavailable in this build.")
+                .into_response();
+        }
+        // UI routing only: API authentication still requires an approved device cookie.
+        asset.bytes = html
+            .replacen("data-zdeck-local", "data-zdeck-remote", 1)
+            .into_bytes();
+    }
     let mut response = Response::new(Body::from(asset.bytes));
     let mime = HeaderValue::from_str(&asset.mime)
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
@@ -1756,10 +1770,18 @@ async fn fallback(State(inner): State<Arc<Inner>>, uri: Uri) -> Response {
             },
         ),
     );
-    response.headers_mut().insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(PUBLIC_CSP),
+    // Safari may not map connect-src 'self' to the matching WebSocket scheme.
+    let socket_origin = inner.origin.replacen("https://", "wss://", 1);
+    let policy = PUBLIC_CSP.replace(
+        "connect-src 'self';",
+        &format!("connect-src 'self' {socket_origin};"),
     );
+    let Ok(policy) = HeaderValue::from_str(&policy) else {
+        return ApiError::internal().into_response();
+    };
+    response
+        .headers_mut()
+        .insert(header::CONTENT_SECURITY_POLICY, policy);
     response
 }
 

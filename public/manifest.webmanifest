@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "zDeck — Local Preview",
+  "name": "zDeck",
   "short_name": "zDeck",
-  "description": "A local editor and phone preview for a compact stream deck. Preview only; no desktop connection yet.",
+  "description": "A private, open-source control deck for your desktop.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/#/phone",

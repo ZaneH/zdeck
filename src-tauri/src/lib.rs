@@ -22,13 +22,37 @@ struct TauriAssets {
     resolver: tauri::AssetResolver<tauri::Wry>,
 }
 
+// In dev the resolver reads exact files; bundled mode also has an index fallback.
+fn allows_exact_asset(path: &str, keys: impl Iterator<Item = impl AsRef<str>>) -> bool {
+    let mut keys = keys.peekable();
+    keys.peek().is_none() || keys.any(|key| key.as_ref().trim_start_matches('/') == path)
+}
+
 impl AssetProvider for TauriAssets {
     fn get(&self, path: &str) -> Option<PublicAsset> {
+        if !allows_exact_asset(path, self.resolver.iter().map(|(key, _)| key)) {
+            return None;
+        }
         let asset = self.resolver.get(path.to_string())?;
         Some(PublicAsset {
             bytes: asset.bytes,
             mime: asset.mime_type,
         })
+    }
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::allows_exact_asset;
+
+    #[test]
+    fn missing_bundled_assets_cannot_fall_back_to_the_editor() {
+        let keys = ["/index.html", "/assets/app.js"];
+        assert!(allows_exact_asset("index.html", keys.iter()));
+        assert!(allows_exact_asset("assets/app.js", keys.iter()));
+        assert!(!allows_exact_asset("assets/missing.html", keys.iter()));
+        assert!(!allows_exact_asset("icons/missing.png", keys.iter()));
+        assert!(allows_exact_asset("index.html", std::iter::empty::<&str>()));
     }
 }
 

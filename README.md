@@ -2,7 +2,7 @@
 
 > Project name: **zDeck**. Internal names `deck-editor` (npm), `deck` (Rust), and `com.deck.local` (Tauri app identifier) are retained so the display rename does not move existing app data. Storage/protocol identifiers are unchanged.
 
-zDeck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend and native Settings controls for explicit start/stop, expiring pairing links, approval/denial, and revocation. The authenticated phone client is still being connected; this has not been exercised against a real tailnet or phone.
+zDeck is a free, MIT-licensed desktop control deck with a Tauri editor and an authenticated phone PWA. The standalone browser build remains a local editor and simulated phone preview. The native desktop app can switch OBS program scenes and, on Linux, mute the default system microphone, set default output volume, and play/pause the default MPRIS player. Approved phones run those saved controls through an explicitly enabled private HTTPS service. Pairing, live edits, actions, revocation, and offline safety are tested against the actual Rust service with fake adapters and isolated Chrome; real Tailscale and physical-phone validation remain open.
 
 ## Design checkpoint
 
@@ -18,12 +18,12 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 - In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
 - Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
-- Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” Native Settings can manage pairing requests, but the authenticated phone client is not yet wired; onboarding still marks phone pairing as incomplete.
+- Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” The separate authenticated phone surface shows connection and action outcomes; native Settings manage explicit start/stop, expiring links, approval/denial, and revocation.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
-- Phone preview route at `#/phone` using the same components and saved deck in the same origin. Desktop preview offers Landscape (default) and Portrait frames; real phone viewports follow their natural orientation. It is not a paired remote controller.
+- The local editor's `#/phone` route is simulated, with Landscape/Portrait desktop frames. Every route served by the private phone service instead stays on the authenticated remote surface: no local editor, sample fallback, or desktop IPC.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
-- Minimal Tauri 2 Rust shell and configuration that points at the same built frontend. It exposes the four narrow OBS commands, six narrow system commands, two narrow native-deck persistence commands, and nine native-only private-service admin commands described below, plus no plugins.
-- Vitest tests for schema/persistence validation, page/control editing edge cases, the native save queue, and the native OBS/system error and fallback handling. Rust tests cover the OBS adapter and the system adapter through an injected fake runner, plus the atomic deck store against owned temporary directories.
+- Minimal Tauri 2 Rust shell and configuration that points at the same built frontend. It exposes the four narrow OBS commands, six narrow system commands, two narrow native-deck persistence commands, and eight native-only private-service admin commands described below, plus no plugins.
+- Vitest tests cover schema/persistence, editing, native adapters/save queue, invitation parsing, phone lifecycle cancellation, deadlines, and ambiguous outcomes. Rust tests cover fake OBS/system adapters, temporary atomic storage, and real loopback HTTP/WebSocket security. A separate HTTPS/Chrome smoke exercises the phone against that actual service.
 
 ## Requirements
 
@@ -47,11 +47,14 @@ npm test
 npm run typecheck
 npm run build
 npm run smoke
+npm run smoke:remote  # Linux/Nix, installed google-chrome and openssl; fake actions only
 ```
 
 `npm run build` also runs the TypeScript check before the production Vite build. The production bundle is written to `dist/`.
 
 `npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 202 checks exercise all four onboarding rehearsals, validation, save/skip/replay, full-page limits, keyboard focus and reduced motion, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/short/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
+
+`npm run smoke:remote` builds the frontend and runs the opt-in Rust browser fixture. It starts the actual service with a temporary deck and fake action runner, then uses a disposable certificate, loopback HTTPS proxy, host-resolver mapping, and isolated Chrome profile. Host/Origin/cookies are forwarded unchanged; hostile Host/Origin probes must fail. It covers explicit pairing/approval, fresh-context link paste, authenticated GET/WSS, saved actions and results, deliberate slider commits, live edits, conflict resync, lost-response Unknown/no replay, revocation, and remote-only offline caching. The current run passes **62 checks**, alongside **93 frontend tests**, **202 local UI browser checks**, and **70 default Rust tests**. TypeScript, production build, and Tauri debug no-bundle build also pass. Certificate bypasses exist **only in this disposable test**, never as phone setup guidance. The fixture is ignored by default and has a 120-second deadline; no real system controls or Tailscale settings are touched.
 
 ### Production build preview
 
@@ -63,12 +66,12 @@ Open <http://localhost:4173>. This is also the useful way to exercise the servic
 
 ## Phone preview and PWA notes
 
-- The phone preview is a same-origin view of the saved deck. It reads the same `localStorage` document and listens for `storage` events from other tabs. It makes no network requests and claims no device pairing.
+- In the standalone browser build, the phone preview reads the same `localStorage` deck and listens for other tabs' edits. It sends no desktop commands and claims no pairing. The private service's phone client reads only authenticated desktop snapshots; it never uses browser-local/sample data.
 - The manifest starts at `/#/phone`, uses locally created 192×192 and 512×512 PNG icons, and has `display: standalone`. The icons are also marked maskable; the artwork keeps its main content within the maskable safe area.
 - The service worker is generated at build time (`build/serviceWorkerPlugin.ts`) from the real `dist/` output; there is no hand-written `public/sw.js`. Its cache name embeds a hash of the shell and hashed asset contents, so a new frontend build always produces a new worker and a distinct cache.
 - It precaches only an exact allowlist: `index.html`, the manifest, the icons, and the hashed files under `assets/`. It never handles query strings, API-shaped paths, cross-origin requests, or non-GET requests, so server auth/API responses are never cached. The navigation fallback serves the cached `index.html` only for `/` and `/index.html`.
 - A waiting worker installs into its own cache and never mutates the live cache or reloads the page. The app shows a **Reload** banner; the user applies the update, the previous cache is deleted, and only then does the page reload. Set `VITE_BUILD_MARKER` at build time to produce a distinguishable build when exercising the update lifecycle.
-- Installation over HTTPS or localhost depends on browser support. **Installation from a network address on a real phone has not been verified.** LAN/Tailscale HTTPS and UI pairing are later work.
+- Installation requires a browser-accepted secure context. **Physical iPhone/Android installation and real Tailscale Serve are not yet verified.** The phone UI and local HTTPS integration are implemented; LAN-only trusted HTTPS remains a release requirement.
 
 ## Tauri desktop shell
 
@@ -169,11 +172,11 @@ live hardware verification has been performed: the real volume, mute, and
 play/pause commands have not been run on a real PipeWire session, and a real
 MPRIS player has not been exercised.**
 
-### Private phone service (desktop admin wired; phone client in progress)
+### Private phone service
 
-The Rust shell now contains the private phone-service backend described in
-`docs/protocol.md`. It is deliberately **not** started automatically and has no
-desktop admin or phone UI wiring yet. The native commands are:
+Desktop Settings and the authenticated phone client implement the backend in
+[`docs/protocol.md`](docs/protocol.md). The service is **not** started automatically.
+Only the native desktop can administer it, using:
 
 - `remote_start(origin)`, `remote_stop`, `remote_status`
 - `remote_create_invitation`, `remote_list_devices`
@@ -186,8 +189,11 @@ Behavior:
   path, query, credentials, fragment, or non-default port. The service never
   runs Tailscale commands or changes Serve configuration.
 - Serves the bundled PWA and `/api/v1/*` from that same origin. There are no
-  HTTP admin endpoints. The Tauri asset resolver is used through a narrow
-  provider, so packaging does not depend on a mutable `cwd` or `dist/`.
+  HTTP admin endpoints. A server-rewritten HTML marker selects the remote client;
+  a missing marker fails closed. Bundled lookup rejects missing assets rather
+  than using Tauri's editor-index fallback. This marker is routing, not authorization.
+  The Tauri asset provider does not depend on a mutable `cwd` or `dist/` in a
+  packaged app; actual bundled resolver runtime still needs native validation.
 - Pairing is session-only: one active invitation expires after two minutes and
   is consumed once at `POST /api/v1/pair`. The provisional `__Host-deck-device`
   cookie is `Secure; HttpOnly; SameSite=Strict; Path=/`; only its hash is kept
@@ -213,14 +219,16 @@ Behavior:
   `Cache-Control: no-store`. Static responses use an exact public allowlist and
   a restrictive CSP.
 
-The backend is covered by 24 loopback integration tests that open real TCP and
+The backend is covered by 25 loopback integration tests that open real TCP and
 WebSocket connections to temporary service instances. They use temporary deck
 directories, fake assets, an injected fake system runner, and a fake OBS peer.
 They verify invitation expiry/reuse, approval and denial, Host/Origin/cookie
 rejection, socket closure on deny/revoke, strict command bodies, revision
 conflicts, duplicate/concurrent commands, rate and capacity limits, initial and
-post-save snapshots, and stop/restart cleanup. These tests do not prove real
-Tailscale Serve behavior, a real phone, a real tailnet, or GUI wiring.
+post-save snapshots, fail-closed static routing, and stop/restart cleanup. The
+additional actual-service HTTPS/Chrome harness verifies the phone UI with fake
+actions, not just mocked fetch calls. Neither suite proves real Tailscale Serve,
+physical phones, native WebKit rendering, or the desktop admin UI lifecycle.
 
 **Manual Serve example (review your existing Serve configuration first; do not
 run this automatically):**
@@ -235,6 +243,30 @@ The service trusts the configured public host and the exact loopback upstream
 authority. If your Serve proxy rewrites `Host` or `Origin` differently, adjust
 the proxy configuration or report the mismatch; the backend does not trust
 arbitrary forwarded headers.
+
+#### First physical-phone check (manual; not yet verified)
+
+1. Launch the native desktop app. In **Settings → Phone connection**, enter the
+   root `https://computer.tailnet-name.ts.net` origin and choose **Start connection**.
+2. Review your current Serve configuration before deliberately applying an approved
+   HTTPS-to-loopback proxy such as the example above. Never enable public Funnel.
+   Keep Tailscale connected on both devices and the desktop app running.
+3. On iPhone, open that root address in **Safari → Share → Add to Home Screen**.
+   Launch the installed app. On Android, use the browser's install menu.
+4. Only now create a fresh pairing link in desktop Settings. **Paste it inside
+   the installed app**, name the phone, and choose **Request approval**. Links
+   expire after two minutes; Safari, Brave, and standalone sessions must not be
+   assumed to share cookies.
+5. Approve the named request on the desktop. Confirm the phone shows the saved
+   pages and live edits. Before pressing a control, remember: these are **real
+   OBS/audio/media actions**, unlike the local Preview route. Choose a deliberate,
+   reversible action and verify the actual desktop result. If the result is
+   Unknown, check the desktop before retrying.
+6. Revoke the phone and confirm controls disappear. Stopping/restarting the
+   service invalidates every device; the next session needs fresh pairing.
+
+Repeat in Brave and on Android separately. This checklist is a validation plan,
+not a claim that physical-device installation or actions have succeeded.
 
 **One-process prototype limit:** the deck store's compare-and-swap serializes
 writes within one native app process. Do not run two native app instances
@@ -380,12 +412,12 @@ action state.
 
 ## Honest limitations
 
-- The private phone-service backend is tested over loopback, with native desktop start/stop, expiring links, and approval/revocation controls. The authenticated phone UI is still in progress. There is no shipped QR presentation, automatic Tailscale Serve setup, LAN HTTPS/WSS validation, or real-phone/network claim. The service is explicit-enable only and does not start automatically.
-- Native action execution is limited to OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS media play/pause from the desktop Inspector. Phone preview and toolbar tile presses remain local. Windows and macOS system actions are not implemented (typed `unsupported`).
+- The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. Physical iPhone/Android PWAs, real Tailscale Serve, native desktop admin lifecycle, and packaged asset resolution remain unverified. There is no QR presentation, automatic Serve setup, or LAN HTTPS implementation. The service is explicit-enable only.
+- Execution is limited to OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS play/pause, from the native Inspector or approved phone. Local phone preview and toolbar tile presses remain simulated. Windows/macOS system actions are not implemented (typed `unsupported`).
 - The system adapter is tested with a fake process runner; it has not been run against a live PipeWire session or a real media player, so runtime behavior on this machine's actual audio setup is unverified. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.
-- Browser smoke runs locally against headless Chrome (`npm run smoke`), but no real-phone, visual-regression, or remote-network claim is made.
-- The native deck store is exercised only through Rust unit tests using owned temporary directories; no GUI was launched, no real app-data file was written outside those temp dirs, and the app-data path resolution itself has not been observed at runtime. Wayland runtime behavior, a live OBS connection, and deb/AppImage packaging are unverified.
+- Both browser suites run locally against isolated headless Chrome (`npm run smoke`, `npm run smoke:remote`); no physical-phone, pixel-regression, or real-network claim is made.
+- The native deck store is exercised only through automated tests using owned temporary directories; no GUI was launched, no real app-data file was written outside those temp dirs, and the app-data path resolution itself has not been observed at runtime. Wayland runtime behavior, a live OBS connection, and deb/AppImage packaging are unverified.
 - The native store and the browser store are independent. There is no continuous sync between the browser deck and the native file; migration happens only once, when the native file is missing.
 - The dial control, drag-and-drop editing, multi-select, undo/redo, export/import, and CI are not included.
 - The web app is installable only where the browser accepts it as a secure-context PWA. Network-device installation remains unverified.
@@ -393,14 +425,14 @@ action state.
 ## Project shape
 
 ```text
-src/                 React editor, phone preview, schema, persistence, tests-facing logic
+src/                 React editor, simulated preview, authenticated phone client, schema, persistence
 public/              PWA manifest and generated icons (service worker is build-generated)
 build/               Vite plugin that generates the versioned service worker
 tests/               Vitest logic, native-save-queue, persistence, and service-worker policy tests
                      plus tests/fixtures/deck.sample.json shared with the Rust store tests
-scripts/             Headless-Chrome browser smoke helper (raw CDP, no browser dependency)
+scripts/             Local UI and actual-service HTTPS/Chrome smoke helpers (raw CDP)
 src-tauri/           Tauri 2 Rust shell: deck store, OBS and system audio/media adapters, private phone-service backend, tests, config, capabilities
-roadmap.md           Product roadmap and confirmed decisions (unchanged)
+roadmap.md           Product roadmap and confirmed decisions
 ```
 
 ## License

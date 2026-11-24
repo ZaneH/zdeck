@@ -24,15 +24,17 @@ Dark tokens remain background `#18191b`, surface `#212326`, secondary text `#b2b
 
 ![Animated onboarding walkthrough](design/onboarding.gif)
 
+The recording captures the earlier visual checkpoint, before phone pairing was wired. Current setup points to Settings rather than saying pairing is unavailable.
+
 The full-window flow deliberately shows one task at a time:
 
 1. **Start with one button.** Try four example keys and watch the rehearsal respond: scene change, microphone mute, playback, or volume.
 2. **Make it yours.** The welcome action choice carries forward automatically; enter a label and the scene name when relevant. Changing action is optional, tucked behind “Change action,” not a second mandatory picker. Blank labels/scenes cannot advance, and Back/Next preserves the draft.
-3. **Give it a press / slide.** Rehearse the configured control. **Add to page** becomes available only after trying it; the destination is shown separately as “Page: Stream.” Adding appends exactly one control to that page and selects it for editing. The limitation note is simply “Phone pairing isn’t connected yet.”
+3. **Give it a press / slide.** Rehearse the configured control. **Add to page** becomes available only after trying it; the destination is shown separately as “Page: Stream.” Adding appends exactly one control to that page and selects it for editing. The final note now points to “Connect your phone in Settings.”
 
 Everything before Add is a local draft. Nothing runs on OBS, microphone, playback, or output volume during setup. Rehearsal outcomes are explicitly labelled; they do not claim observed native success. The sample deck is retained, not replaced. Existing saved decks go directly to the editor. Settings → **Replay setup** opens the flow without resetting work.
 
-Skip is always available. Dismissal is remembered separately under `deck.setup.v1`, without writing a browser deck. If browser storage is blocked, dismissal lasts for the session. In-progress drafts do not resume after restart; the native store initializes its default document before onboarding and subsequent launches treat that as an existing deck. Phone pairing remains unwired and the final step says so.
+Skip is always available. Dismissal is remembered separately under `deck.setup.v1`, without writing a browser deck. If browser storage is blocked, dismissal lasts for the session. In-progress drafts do not resume after restart; the native store initializes its default document before onboarding and subsequent launches treat that as an existing deck. Pairing is a separate explicit Settings step, never part of rehearsal.
 
 Motion uses short key entrances, a downward press, scene slides, and approximately 340ms step transitions. Supported browsers use the platform View Transition API; other browsers use a CSS entrance. Reduced-motion preference skips the view transition and shortens CSS animation. Each step focuses its heading; exiting focuses the editor page title. Action choices are ordinary keyboard-operable radio inputs.
 
@@ -62,8 +64,20 @@ The phone retains touch-sized keys and bottom page navigation without editing to
 
 These are implemented browser screens from isolated Chrome profiles: desktop/setup at 960×680, desktop device previews at 1024×900, and phone at 390×844. Screenshots wait for finite entrance animations to finish. The light editor includes a renamed test control; the 70% phone volume is a local preview value, not observed system output.
 
+## Authenticated phone
+
+The private service serves a separate phone surface, never the local editor or sample fallback. It starts with **Connect your phone** and supports pasting a fresh link inside the installed app, rather than assuming Safari/Brave/standalone cookies are shared. Explicit desktop approval unlocks saved pages and controls only after a live validated snapshot. Disconnection disables keys; an ambiguous result is **Unknown**, not an optimistic success. Sliders show local targets and commit only on deliberate release, not drag/cancel/blur. The shared user-applied update banner is also present here.
+
+![Phone pairing in the actual-service test](design/remote-pairing.png)
+
+![Approved phone showing the saved fixture deck](design/remote-active.png)
+
+These are real Chrome screenshots at 390×844 against the Rust service through a disposable loopback HTTPS proxy. The fixture label distinguishes authoritative saved data from a preview fallback. No real OBS/audio action was run.
+
 ## Verification and limits
 
-Coordinator reran **54 frontend tests**, **202 browser checks**, TypeScript, production build, and the Tauri debug no-bundle build. The browser suite covers all four rehearsal actions, repeated scene presses, draft validation/back navigation, required practice, save-on-Add, skip/replay persistence, a full page, keyboard activation and focus, radio arrows, reduced motion, light mode, short/narrow layouts, welcome-to-configuration continuity, optional action disclosure, category filtering/keyboard access, backdrop pointer interaction, Settings toggling, brand identity, preview orientation/scrolling, and the existing editing/dialog/slider/offline/update behavior. The coordinator reviewed the DeepSeek worker’s diff/screenshots and independently reran checks; an earlier read-only review’s minor documentation, length-limit, and dead-style findings were also addressed.
+The earlier UI checkpoint passed **54 frontend tests**, **202 browser checks**, TypeScript, production build, and the Tauri debug no-bundle build. The browser suite covers all four rehearsal actions, repeated scene presses, draft validation/back navigation, required practice, save-on-Add, skip/replay persistence, a full page, keyboard activation and focus, radio arrows, reduced motion, light mode, short/narrow layouts, welcome-to-configuration continuity, optional action disclosure, category filtering/keyboard access, backdrop pointer interaction, Settings toggling, brand identity, preview orientation/scrolling, and the existing editing/dialog/slider/offline/update behavior. The coordinator reviewed the DeepSeek worker’s diff/screenshots and independently reran checks; an earlier read-only review’s minor documentation, length-limit, and dead-style findings were also addressed.
 
-Saved deck schema, desktop authority, native execution guards, credentials, and remote-service behavior are unchanged. The zDeck display rename intentionally retains existing app/storage/protocol identifiers so it does not move saved work. Swipeable panels within pages and per-page themes are recorded requirements, not implemented features; they need their own saved-data migration. Current appearance controls are still global. This is still a local editor and phone preview, not a paired remote controller. Native WebKit/Wayland rendering, physical phones, real OBS/audio controls, and HTTPS installation were not validated in this pass. Backend Rust tests were not rerun for these UI/config-only changes.
+The connection checkpoint adds authenticated phone rendering and fail-closed server routing, without changing saved schema, app/storage/protocol identifiers, or desktop authority. Unit coverage includes late/canceled responses, hidden-page suspension, uncertain actions and bounded requests; actual-service browser coverage includes pairing, real HTTP/WSS snapshots, saved fake actions, live revisions, conflict resync, revocation and offline/auth boundaries. The coordinator independently passed **93 frontend tests**, **202 local UI browser checks**, **62 actual-service HTTPS browser checks**, and **70 default Rust tests**, plus typecheck and production/Tauri debug builds. See the README for reproducible checks.
+
+Swipeable panels within pages and per-page themes remain planned migrations; appearance controls are still global. Physical iPhone/Android installation, Safari/Brave behavior, actual Tailscale Serve, native WebKit/Wayland/bundled asset resolution, and real OBS/audio execution remain unverified. An isolated Chromium HTTPS test is not a real-device result.

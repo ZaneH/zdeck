@@ -320,10 +320,10 @@ try {
   check("a skipped setup stays closed after reload", await editor.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
   check("skipped first run still shows the sample deck", await editor.eval("document.querySelectorAll('.control-tile').length === 4 && !localStorage.getItem('deck.local.v1')"));
   check("self-hosted Geist font loads", await editor.eval("document.fonts.ready.then(() => [...document.fonts].some(face => face.family === 'Geist' && face.status === 'loaded'))"));
-  check("display branding uses zDeck in the title, meta, and PWA fields", await editor.eval("document.title === 'zDeck — Local editor' && document.querySelector('meta[name=\"description\"]').content.startsWith('zDeck') && document.querySelector('meta[name=\"apple-mobile-web-app-title\"]').content === 'zDeck'"));
+  check("display branding uses zDeck in the title, meta, and PWA fields", await editor.eval("document.title === 'zDeck' && document.querySelector('meta[name=\"description\"]').content.startsWith('zDeck') && document.querySelector('meta[name=\"apple-mobile-web-app-title\"]').content === 'zDeck'"));
   check("navbar logo is the zDeck brand mark labelled as the editor", await editor.eval("(() => { const a = document.querySelector('.topbar .brand'); return a.getAttribute('aria-label') === 'zDeck editor' && !!a.querySelector('svg[aria-label=\"zDeck\"]'); })()"));
   const webManifest = await editor.eval("fetch('/manifest.webmanifest').then((response) => response.json())");
-  check("PWA manifest keeps the zDeck display name", webManifest.name.startsWith('zDeck') && webManifest.short_name === 'zDeck', JSON.stringify({ name: webManifest.name, short_name: webManifest.short_name }));
+  check("PWA manifest keeps the zDeck display name", webManifest.name === 'zDeck' && webManifest.short_name === 'zDeck', JSON.stringify({ name: webManifest.name, short_name: webManifest.short_name }));
   const tauriConfig = JSON.parse(readFileSync(join(ROOT, 'src-tauri/tauri.conf.json'), 'utf8'));
   check("Tauri display names use zDeck while the identifier stays put", tauriConfig.productName === 'zDeck' && tauriConfig.app.windows[0].title === 'zDeck' && tauriConfig.identifier === 'com.deck.local', JSON.stringify({ productName: tauriConfig.productName, title: tauriConfig.app.windows[0].title, identifier: tauriConfig.identifier }));
   check("desktop workspace has no horizontal overflow", await editor.eval("document.documentElement.scrollWidth <= innerWidth"));
@@ -573,7 +573,7 @@ try {
   check("guide advances to try and requires a rehearsal", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try') && document.querySelector('#setup-title').textContent === 'Give it a press.'"));
   check("try step starts with Add disabled", await firstRun.eval("document.querySelector('.setup-result').textContent === 'Your button is ready to try.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => button.disabled)"));
   check("try step promises no desktop action", await firstRun.eval("document.querySelector('.setup-hint').textContent === 'Nothing runs on your desktop during setup.'"));
-  check("try step shows the destination separately and the exact pairing limitation", await firstRun.eval("document.querySelector('.setup-destination').textContent === 'Page: Stream' && document.querySelector('.setup-limitation').textContent === 'Phone pairing isn’t connected yet.'"));
+  check("try step shows the destination separately and points to phone settings", await firstRun.eval("document.querySelector('.setup-destination').textContent === 'Page: Stream' && document.querySelector('.setup-limitation').textContent === 'Connect your phone in Settings.'"));
   await sleep(500);
   await firstRun.screenshot("/tmp/deck-design-setup-try.png");
   await firstRun.eval(clickText('.setup-actions .button.quiet', 'Edit button'));

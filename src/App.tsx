@@ -565,7 +565,8 @@ export default function App() {
             </p>
             <p>
               Desktop Settings can manage the private connection and approve phones.
-              The authenticated phone interface is still being connected.
+              Paired phones can run saved controls through the private HTTPS service.
+              Real-phone installation and Tailscale connectivity still need device testing.
             </p>
           </details>
 
