@@ -44,6 +44,9 @@
             # is not on the default loader path inside a Nix shell.
             shellHook = ''
               export LD_LIBRARY_PATH="${pkgs.xz.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              # Keep Mesa's EGL and GBM loaders on this shell's glibc, not the host's.
+              export __EGL_VENDOR_LIBRARY_DIRS="''${__EGL_VENDOR_LIBRARY_DIRS:-${pkgs.mesa}/share/glvnd/egl_vendor.d}"
+              export GBM_BACKENDS_PATH="''${GBM_BACKENDS_PATH:-${pkgs.mesa}/lib/gbm}"
             '';
           };
         }

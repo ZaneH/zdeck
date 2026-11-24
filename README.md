@@ -300,6 +300,8 @@ Reverse or re-adjust any volume, mute, or playback the smoke steps changed.
 `wireplumber` (which provides `wpctl`) session tools, and WebKitGTK 4.1, GTK3,
 glib, libsoup3, openssl, librsvg, and XZ. The shell also prepends XZ to `LD_LIBRARY_PATH`, because the npm `@tauri-apps/cli` native binding needs `liblzma.so.5`, which is not on the default Nix loader path.
 
+For Mesa-based graphics, the shell selects its **pinned Mesa EGL vendor and GBM backend** through `__EGL_VENDOR_LIBRARY_DIRS` and `GBM_BACKENDS_PATH`, preserving explicit overrides. Otherwise a newer host driver can require a newer glibc than the pinned app and WebKit aborts with `Could not create default EGL display: EGL_BAD_PARAMETER`. Both loader paths must match; no sandbox or GPU-acceleration disabling is needed. This was verified on the current AMD/Wayland machine; proprietary NVIDIA needs a compatible vendor/backend configuration of its own. This is a development-shell fix, not a validated packaging solution.
+
 The Nix environment can be evaluated from the committed repository:
 
 ```bash
@@ -307,7 +309,7 @@ nix develop --command cargo --version
 nix develop --command npm run tauri:build -- --debug --no-bundle
 ```
 
-Run `nix develop` for an interactive shell. Keep new Nix source files tracked so the Git flake includes them; avoid `path:.`, which can copy ignored build artifacts into the Nix store.
+Run `nix develop` for an interactive shell. With direnv, `.envrc` can simply contain `use flake`; run `direnv reload` after changing the flake, then `npm run tauri:dev`. Generated `.direnv/` data is ignored. Keep new Nix source files tracked so the Git flake includes them; avoid `path:.`, which can copy ignored build artifacts into the Nix store.
 
 Verified on this machine (NixOS `x86_64-linux`, KDE Plasma Wayland, Node `v22.23.3`, npm `10.9.9`, Nix `2.34.8`):
 
@@ -335,13 +337,21 @@ The pinned dev shell includes `rustfmt`, so formatting can be checked in place:
 nix develop path:. --command bash -c 'cd src-tauri && cargo fmt --check'
 ```
 
-This verifies **compilation, the deck store tests, the OBS adapter tests, and the
-system adapter tests only**. The debug binary has not been launched, so Wayland
-runtime behavior, native app-data path resolution, a real OBS connection, a real
-PipeWire/WirePlumber volume or mute change, a real MPRIS player, and deb/AppImage
-packaging remain unverified. Run `nix develop
-path:. --command npm run tauri:dev` only when launching the desktop app is
-intended.
+The commands above verify compilation and automated backend behavior, not live
+integrations. A separate **opt-in headful startup check** is available:
+
+```bash
+npm run smoke:native
+```
+
+It builds the native debug app in the Nix shell, briefly opens a real window with
+isolated temporary data/config/cache, and checks that WebKit actually initializes
+the native deck—not merely that the GTK parent stays alive after a renderer
+crash. No buttons are pressed and no OBS/audio/media or phone service is started.
+This startup check passes on the current AMD/Wayland machine with matching EGL
+and GBM libraries. It does not verify visual correctness, normal user app-data,
+real OBS/PipeWire/MPRIS actions, or deb/AppImage packaging. To launch normally,
+use `nix develop --command npm run tauri:dev` or the direnv flow above.
 
 ### Other Linux distributions
 
@@ -417,7 +427,7 @@ action state.
 - The system adapter is tested with a fake process runner; it has not been run against a live PipeWire session or a real media player, so runtime behavior on this machine's actual audio setup is unverified. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.
 - Both browser suites run locally against isolated headless Chrome (`npm run smoke`, `npm run smoke:remote`); no physical-phone, pixel-regression, or real-network claim is made.
-- The native deck store is exercised only through automated tests using owned temporary directories; no GUI was launched, no real app-data file was written outside those temp dirs, and the app-data path resolution itself has not been observed at runtime. Wayland runtime behavior, a live OBS connection, and deb/AppImage packaging are unverified.
+- Native startup is verified in a bounded real-window smoke with temporary app-data/config/cache; the frontend creates its native deck successfully. Normal user data was not touched. Visual correctness, desktop admin lifecycle, remote bundled-asset serving, live OBS/audio actions, and deb/AppImage packaging remain unverified.
 - The native store and the browser store are independent. There is no continuous sync between the browser deck and the native file; migration happens only once, when the native file is missing.
 - The dial control, drag-and-drop editing, multi-select, undo/redo, export/import, and CI are not included.
 - The web app is installable only where the browser accepts it as a secure-context PWA. Network-device installation remains unverified.
