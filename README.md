@@ -344,14 +344,30 @@ integrations. A separate **opt-in headful startup check** is available:
 npm run smoke:native
 ```
 
-It builds the native debug app in the Nix shell, briefly opens a real window with
-isolated temporary data/config/cache, and checks that WebKit actually initializes
-the native deck—not merely that the GTK parent stays alive after a renderer
-crash. No buttons are pressed and no OBS/audio/media or phone service is started.
-This startup check passes on the current AMD/Wayland machine with matching EGL
-and GBM libraries. It does not verify visual correctness, normal user app-data,
+It builds the native debug app with an opt-in `native-smoke` feature, briefly
+opens a real window with isolated temporary data/config/cache, and checks native
+deck initialization **and WebKit layout geometry**: positive pixel ratio,
+viewport/font size, onboarding welcome/build/try widths, editor grid/Inspector,
+and no horizontal overflow. Test navigation only advances/skips setup; no real
+OBS/audio/media or phone service is started. The test hook requires both the
+build feature and its launcher-set environment flag, and is absent from normal
+builds. This check passes on the current AMD/Wayland machine with matching EGL
+and GBM libraries. It does not replace visual QA, normal user app-data testing,
 real OBS/PipeWire/MPRIS actions, or deb/AppImage packaging. To launch normally,
 use `nix develop --command npm run tauri:dev` or the direnv flow above.
+
+#### WebKitGTK content collapsed into a thin column
+
+WebKitGTK 2.52 can turn GTK3's unset screen resolution (`-1`) into negative page
+zoom, producing a negative `devicePixelRatio` and a squashed layout even though
+the window launches. On Linux zDeck now initializes GTK before creating the
+webview and replaces only invalid/unset resolution with the configured GTK font
+DPI (96 DPI if unset), honoring a valid `GDK_DPI_SCALE`. Valid screen resolution
+is left alone. This is process-local: it does not change KDE/display settings,
+CSS, or the user's configuration. The native smoke checks the resulting layout.
+The upstream path is [`xftDPI()`](https://github.com/WebKit/WebKit/blob/webkitgtk-2.52.6/Source/WebKit/UIProcess/gtk/SystemSettingsManagerProxyGtk.cpp),
+which feeds GTK's resolution into [`fontDPI()`](https://github.com/WebKit/WebKit/blob/webkitgtk-2.52.6/Source/WebCore/platform/gtk/PlatformScreenGtk.cpp)
+and the webview's page scale.
 
 ### Other Linux distributions
 

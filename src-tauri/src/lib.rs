@@ -1,4 +1,8 @@
 pub mod deck;
+#[cfg(target_os = "linux")]
+mod linux_display;
+#[cfg(feature = "native-smoke")]
+mod native_smoke;
 pub mod obs;
 pub mod remote;
 pub mod system;
@@ -235,7 +239,18 @@ async fn remote_revoke_device(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_display::initialize();
     tauri::Builder::default()
+        .on_page_load(|webview, payload| {
+            #[cfg(feature = "native-smoke")]
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && std::env::var("ZDECK_NATIVE_SMOKE").as_deref() == Ok("1")
+            {
+                native_smoke::check_layout(webview.clone());
+            }
+            let _ = (webview, payload);
+        })
         .manage(RemoteAdmin::default())
         .setup(|app| {
             use tauri::Manager;
