@@ -76,13 +76,27 @@ These are real Chrome screenshots at 390×844 against the Rust service through a
 
 ## Desktop pairing presentation
 
-Settings now names **Start/Stop local service**, explicitly distinguishes loopback availability from unverified phone access, and shows the separate private Tailscale Serve setup. Open the root HTTPS address on the phone first; only generate an invitation once that route works. Port 45829 is not a phone-facing endpoint, and Wi-Fi alone does not publish the app.
+Settings names **Start/Stop local service** and distinguishes loopback availability from unverified phone access. Four short steps use subtly highlighted numbered circles; technical Serve setup and installation caveats live under **Connection help**. Connection help, Storage details, and About this preview share one native disclosure-row style, with centered text/chevron and no closed-state blank space. Native WebKit and Chrome geometry checks cover the alignment. Open the root HTTPS address on the phone first; only generate an invitation once that route works. Port 45829 is not a phone-facing endpoint, and Wi-Fi alone does not publish the app.
 
 Expiry sits directly under the selectable link field, above **Copy link**, independently of copy feedback. The same expiring invitation is encoded into a locally generated black-on-white SVG QR with a four-module quiet zone. Replacement, expiry, stopping, or leaving Settings removes it. QR camera scanning normally opens a browser, so an installed iPhone app should still receive a fresh pasted link in its own session.
 
 ![Pairing field, expiry, Copy and local QR](design/pairing.png)
 
-This screenshot uses an owned fake native-IPC adapter in an isolated browser, not a real invitation. An independent QR decoder recovered the exact fixture URL from the screenshot. Coordinator checks pass: **105 frontend tests**, **212 local UI browser checks**, **62 actual-service HTTPS checks**, native WebKit welcome/build/try/editor layout smoke, production/native debug builds, and zero npm audit findings. Physical camera scanning, DNS and Tailscale Serve reachability are separate checks; no Tailscale changes were made by these tests.
+![Compact setup steps and shared disclosure row](design/pairing-steps.png)
+
+These Settings screenshots use an owned fake native-IPC adapter in an isolated browser, not a real invitation. An independent QR decoder recovered the exact fixture URL at the earlier QR checkpoint. Coordinator checks now pass **107 frontend tests**, **225 local UI browser checks**, **65 actual-service HTTPS checks**, native WebKit welcome/build/try/editor/Settings geometry smoke, and production/native debug builds. The user reports that the phone connected after manually configuring Tailscale Serve; these automated tests did not change Tailscale or establish physical camera/install coverage.
+
+## Quieter phone controls
+
+Preview now has an explicit 44px **Close preview** X at the top right: outside the device frame on desktop, in the header at narrow sizes. Only one is visible at each breakpoint. Authenticated phones never gain an editor route/close button. Neither surface shows a redundant control count.
+
+Routine action outcomes live in a collapsed **Activity** disclosure with the last ten completed results, newest first, saved control labels and no persistence. Opening it exposes diagnostics without constant below-grid status noise. Connection status stays visible; pending marks the key. Unknown outcomes deliberately retain a visible check-the-desktop warning outside Activity, even after another action succeeds, until a new session/terminal cleanup. This avoids disguising an uncertain side effect as a failure that is safe to repeat.
+
+![Optional Activity opened for diagnostics](design/remote-activity.png)
+
+![Unknown warning remains visible with Activity collapsed](design/remote-unknown.png)
+
+Both screenshots use the real service with fake action adapters. Settings navigation/grouping, Spotify-specific player targeting, and QR artwork are separate future work.
 
 ## Verification and limits
 
@@ -90,4 +104,4 @@ The earlier UI checkpoint passed **54 frontend tests**, **202 browser checks**, 
 
 The connection checkpoint adds authenticated phone rendering and fail-closed server routing, without changing saved schema, app/storage/protocol identifiers, or desktop authority. Unit coverage includes late/canceled responses, hidden-page suspension, uncertain actions and bounded requests; actual-service browser coverage includes pairing, real HTTP/WSS snapshots, saved fake actions, live revisions, conflict resync, revocation and offline/auth boundaries. The coordinator independently passed **93 frontend tests**, **202 local UI browser checks**, **62 actual-service HTTPS browser checks**, and **70 default Rust tests**, plus typecheck and production/Tauri debug builds. See the README for reproducible checks.
 
-Swipeable panels within pages and per-page themes remain planned migrations; appearance controls are still global. Physical iPhone/Android installation, Safari/Brave behavior, actual Tailscale Serve, native visual correctness/bundled phone-asset resolution, and real OBS/audio execution remain unverified. A later AMD/Wayland check with isolated data passes after aligning the Nix shell's Mesa EGL/GBM loaders with its glibc and guarding GTK's unset DPI before WebKit starts. It verifies native welcome/build/try/editor geometry (positive pixel ratio, viewport/font sizes, content widths and no overflow), not comprehensive visual QA. The user also confirmed that the collapsed native layout is fixed. An isolated Chromium HTTPS test is not a real-device result.
+Swipeable panels within pages and per-page themes remain planned migrations; appearance controls are still global. Physical iPhone/Android installation, Safari/Brave-specific behavior, bundled phone-asset resolution, and the full real OBS/audio checklist remain unverified. The user reports successful phone connection after manually setting up Tailscale Serve, but media play/pause did not affect the intended player; read-only inspection found Gwenview first in the default MPRIS player list. A later AMD/Wayland check with isolated data passes after aligning the Nix shell's Mesa EGL/GBM loaders with its glibc and guarding GTK's unset DPI before WebKit starts. It verifies native welcome/build/try/editor/Settings geometry (positive pixel ratio, viewport/font sizes, content widths, disclosure and numbered-step alignment, and no overflow), not comprehensive visual QA. The user also confirmed that the collapsed native layout is fixed. An isolated Chromium HTTPS test is not a real-device result.

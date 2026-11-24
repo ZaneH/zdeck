@@ -48,51 +48,47 @@ export function RemoteSettingsCard() {
     <section className="settings-card" aria-labelledby="remote-heading">
       <h2 id="remote-heading">Phone connection</h2>
       <p>
-        Starts a private service on this computer that listens only on
-        127.0.0.1:45829. That port is loopback-only, so your phone cannot reach
-        this app until you separately set up a private HTTPS Tailscale Serve
-        proxy. This app never configures Tailscale for you.
+        Connect your phone privately. Keep Tailscale turned on on both devices.
       </p>
 
-      <ol className="remote-steps">
-        <li>
-          Start the local service below for this computer's exact tailnet DNS
-          name, for example <code>https://computer.tailnet-name.ts.net</code>.
-        </li>
-        <li>
-          On this desktop, review <code>tailscale serve status</code> in a
-          terminal, then configure a private HTTPS proxy to the loopback
+      <ol className="remote-steps" role="list">
+        <li>Start the desktop service below.</li>
+        <li>Publish its address with Tailscale Serve.</li>
+        <li>Open that address on your phone, then scan the QR.</li>
+        <li>Request access, then approve this phone here.</li>
+      </ol>
+
+      <details className="remote-help">
+        <summary className="disclosure">Connection help</summary>
+        <p>
+          This app never configures Tailscale for you. Its local service at
+          127.0.0.1:45829 is loopback-only: Wi-Fi alone does not make it reachable
+          from your phone.
+        </p>
+        <p>
+          On this desktop, review <code>tailscale serve status</code> before
+          changing anything, then point a private HTTPS proxy at the loopback
           service, for example{" "}
           <code>tailscale serve --bg --https=443 http://127.0.0.1:45829</code>.
           Do not enable Funnel, and do not overwrite an existing Serve config
           without reviewing it first.
-        </li>
-        <li>
-          Open the root tailnet URL on your phone and confirm the phone shows
-          “Connect your phone” before you create or scan a pairing invitation.
-        </li>
-        <li>Request approval from the phone, then approve it here.</li>
-      </ol>
-
-      <details className="remote-help">
-        <summary>Connection help</summary>
-        <p>
-          Port 45829 is loopback-only. Being on the same WiFi does not publish
-          this app. The phone or browser must use the tailnet DNS name (for
-          example <code>computer.tailnet-name.ts.net</code> — an example, not
-          your host). This app does not detect whether DNS or Serve is working.
         </p>
         <p>
-          On iPhone, open the root address in Safari and install it first, then
-          paste a fresh pairing link inside the installed app. A QR code scanned
-          with the camera usually opens the browser, so it does not pair an
-          installed app's session. Opening a pairing link never approves a
+          The phone must use the tailnet DNS name (for example{" "}
+          <code>computer.tailnet-name.ts.net</code> — an example, not your
+          host). This app does not detect whether DNS or Serve is working.
+        </p>
+        <p>
+          On iPhone, open the root address in Safari and install the app first,
+          then paste a fresh pairing link inside the installed app. A QR code
+          scanned with the camera usually opens the browser, so it does not pair
+          an installed app's session. Opening a pairing link never approves a
           phone; approval is always separate.
         </p>
       </details>
 
       <label className="field">
-        <span>HTTPS tailnet origin</span>
+        <span>This computer’s Tailscale address</span>
         <input
           type="url"
           inputMode="url"
@@ -105,9 +101,7 @@ export function RemoteSettingsCard() {
         />
       </label>
       <p className="field-note">
-        Example: https://computer.tailnet-name.ts.net — HTTPS with no path,
-        query, credentials, or non-default port. The desktop app validates the
-        origin before starting.
+        Use https:// followed by this computer’s Tailscale name. No port needed.
       </p>
 
       <div className="settings-actions">
@@ -149,9 +143,8 @@ export function RemoteSettingsCard() {
       {running ? (
         <>
           <p className="muted">
-            Session-only: stopping the local service or restarting the app
-            clears every device, so each phone must pair again. The origin is
-            kept for this session only and is disabled while the service runs.
+            Stopping the service or restarting zDeck disconnects all phones.
+            Pair again next time.
           </p>
 
           <div className="settings-actions">
@@ -199,12 +192,7 @@ export function RemoteSettingsCard() {
                 label="Pairing QR code. Scan with your phone camera to open the pairing link."
               />
               <p className="muted remote-qr-caption">
-                Scanning opens the link in the phone browser; you still approve
-                the phone here.
-              </p>
-              <p className="muted">
-                Sharing this link does not approve a phone. Approve the request
-                below after the phone opens it.
+                Scan with your phone, then approve its request below.
               </p>
             </div>
           ) : null}

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Opt-in headful WebKit layout check: temporary data and setup navigation only.
+// Opt-in headful WebKit layout check: temporary data and setup/Settings navigation only.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -48,7 +48,7 @@ try {
   assert(document.revision > 0 && document.deck.pages.length > 0, "Frontend did not initialize its native deck.");
   const reports = output.split("\n").filter(line => line.startsWith("ZDECK_NATIVE_LAYOUT "))
     .map(line => JSON.parse(line.slice("ZDECK_NATIVE_LAYOUT ".length)));
-  for (const step of ["welcome", "build", "try", "editor"]) {
+  for (const step of ["welcome", "build", "try", "editor", "settings"]) {
     const report = reports.find(report => report.step === step);
     assert(report, `Missing ${step} layout report; build with --features native-smoke.\n${output}`);
     assert(report.dpr > 0 && report.dpr <= 8, `Invalid WebKit pixel ratio: ${JSON.stringify(report)}`);
@@ -56,6 +56,15 @@ try {
     assert(!report.overflow, `Horizontal overflow: ${JSON.stringify(report)}`);
     if (step === "editor") {
       assert(report.workspace?.width >= 700 && report.grid?.width >= 200 && report.inspector?.width >= 250, JSON.stringify(report));
+    } else if (step === "settings") {
+      assert.equal(report.disclosures.length, 3, JSON.stringify(report));
+      assert.equal(new Set(report.disclosures.map(row => row.x)).size, 1, JSON.stringify(report));
+      assert.equal(new Set(report.disclosures.map(row => row.height)).size, 1, JSON.stringify(report));
+      for (const row of report.disclosures) {
+        assert(row.arrow === "solid" && Math.abs(row.labelOffset) <= 1.5 && Math.abs(row.closedGap) <= 2, JSON.stringify(row));
+      }
+      assert.equal(report.steps.length, 4, JSON.stringify(report));
+      for (const item of report.steps) assert(item.circle === "50%" && Math.abs(item.labelOffset) <= 1.5, JSON.stringify(item));
     } else {
       assert(report.story?.width >= 500 && report.heading?.width >= 500 && report.heading?.height < 100, JSON.stringify(report));
       if (step === "welcome") assert(report.key?.width >= 70 && report.key?.height >= 70, JSON.stringify(report));
@@ -64,7 +73,7 @@ try {
     console.log(`PASS native WebKit ${step} layout: ${report.width}×${report.height}, pixel ratio ${report.dpr}.`);
   }
   console.log("PASS native frontend initialized its isolated deck without EGL/GBM loader errors.");
-  console.log("Only setup navigation exercised; no real OBS/audio/media or phone-service actions.");
+  console.log("Only setup/Settings navigation exercised; no real OBS/audio/media or phone-service actions.");
 } catch (error) {
   console.error(output);
   throw error;

@@ -189,15 +189,24 @@ describe("local service clarity", () => {
     expect(html).not.toContain("Phone access is not checked.");
   });
 
-  it("shows the required separate Tailscale Serve setup steps", () => {
+  it("keeps four short ordered steps with the exact command in Connection help", () => {
     const html = render();
-    expect(html).toContain("tailscale serve status");
-    expect(html).toContain(
+    const start = html.indexOf('<ol class="remote-steps" role="list">');
+    expect(start).toBeGreaterThan(-1);
+    const steps = html.slice(start, html.indexOf("</ol>", start));
+    expect((steps.match(/<li>/g) ?? []).length).toBe(4);
+    expect(steps).toContain("Start the desktop service below.");
+    expect(steps).toContain("Publish its address with Tailscale Serve.");
+    expect(steps).toContain("Open that address on your phone, then scan the QR.");
+    expect(steps).toContain("Request access, then approve this phone here.");
+    const help = html.slice(html.indexOf('<details class="remote-help">'));
+    expect(help).toContain("tailscale serve status");
+    expect(help).toContain(
       "tailscale serve --bg --https=443 http://127.0.0.1:45829",
     );
-    expect(html).toContain("Connect your phone");
+    expect(help).toContain("Do not enable Funnel");
+    expect(help).toContain("install the app first");
     expect(html).toContain("never configures Tailscale");
-    expect(html).toContain("Do not enable Funnel");
     expect(html).toContain("loopback-only");
   });
 });

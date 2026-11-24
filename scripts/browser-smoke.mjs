@@ -478,6 +478,8 @@ try {
   check("settings opens from the topbar", await editor.waitFor("!!document.querySelector('.settings-view')"));
   check("active settings control toggles back to the editor", await editor.eval("document.querySelector('[aria-label=\"Back to editor\"]')?.getAttribute('href') === '#/' && document.querySelector('[aria-label=\"Back to editor\"]').getAttribute('aria-current') === 'page'"));
   check("closed About this preview reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.preview-scope'); const s = d.querySelector('summary'); return !d.open && getComputedStyle(d).display === 'block' && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
+  check("closed Storage details reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.storage-details'); const s = d.querySelector('summary'); return !d.open && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
+  check("Storage and About disclosures share one row geometry and chevron", await editor.eval("(() => { const rows = [document.querySelector('.storage-details > summary'), document.querySelector('.preview-scope > summary')]; return rows.every((el) => !!el && el.classList.contains('disclosure')) && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().left))).size === 1 && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().height))).size === 1 && getComputedStyle(rows[0], '::before').content !== 'none' && getComputedStyle(rows[0], '::before').borderRightStyle === 'solid'; })()"));
   await editor.eval(click('[aria-label="Back to editor"]'));
   check("clicking the same settings control returns to the editor", await editor.waitFor("!!document.querySelector('.canvas-panel') && !document.querySelector('.settings-view')"));
   await editor.eval(click('[aria-label="Open settings"]'));
@@ -685,6 +687,16 @@ try {
   ` });
   await admin.navigate(`${BASE}/#/settings`);
   check('desktop pairing status distinguishes local service from phone access', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Phone access is not checked.')"));
+  check('pairing steps are four numbered circles', await admin.eval("(() => { const items = [...document.querySelectorAll('.remote-steps > li')]; return items.length === 4 && items.every((li) => { const mark = getComputedStyle(li, '::before'); return mark.borderRadius === '50%' && mark.content !== 'none' && parseFloat(mark.width) > 0; }); })()"));
+  check('Connection, Storage, and About disclosures share one row geometry and chevron', await admin.eval("(() => { const rows = [document.querySelector('.remote-help > .disclosure'), document.querySelector('.storage-details > summary'), document.querySelector('.preview-scope > summary')]; return rows.every((el) => !!el && el.classList.contains('disclosure')) && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().left))).size === 1 && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().height))).size === 1 && getComputedStyle(rows[0], '::before').borderRightStyle === 'solid'; })()"));
+  check('step text is vertically centered with each number circle', await admin.eval("[...document.querySelectorAll('.remote-steps > li')].every(li => { const text = document.createRange(); text.selectNodeContents(li); const r = li.getBoundingClientRect(), t = text.getBoundingClientRect(); return Math.abs((t.top + t.height / 2) - (r.top + r.height / 2)) <= 1.5; })"));
+  await admin.eval("document.querySelector('.remote-help > summary').focus()");
+  await pressKey(admin, 'Enter', 'Enter', 13, '\r');
+  check('Connection help opens with the keyboard and exposes setup commands', await admin.waitFor("document.querySelector('.remote-help')?.open && document.querySelector('.remote-help').textContent.includes('tailscale serve status')"));
+  await admin.eval("document.querySelector('.remote-help > summary').click()");
+  await admin.waitFor("!document.querySelector('.remote-help').open");
+  await admin.eval("document.querySelector('.remote-steps').scrollIntoView({block:'center'})");
+  await admin.screenshot('/tmp/deck-design-pairing-steps.png');
   await admin.eval(clickText('.settings-card button', 'Create pairing link'));
   check('desktop pairing creates a local SVG QR', await admin.waitFor("!!document.querySelector('.pairing-qr path')"));
   check('pairing expiry sits directly below the field and above Copy', await admin.eval("(() => { const invite = document.querySelector('.remote-invite'); const field = invite.querySelector('.field').getBoundingClientRect(), expiry = invite.querySelector('.remote-invite-expiry').getBoundingClientRect(), copy = invite.querySelector('button').getBoundingClientRect(); return expiry.top >= field.bottom && copy.top >= expiry.bottom; })()"));
@@ -695,6 +707,8 @@ try {
   await admin.screenshot('/tmp/deck-design-pairing.png');
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
   check('pairing instructions and QR fit a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.pairing-qr').getBoundingClientRect().width >= 180"));
+  check('narrow disclosures align their arrows and centered labels', await admin.eval("(() => { const rows = [...document.querySelectorAll('.settings-view .disclosure')]; return rows.length === 3 && new Set(rows.map(el => Math.round(el.getBoundingClientRect().left))).size === 1 && rows.every(el => { const range = document.createRange(); range.selectNodeContents(el); const r = el.getBoundingClientRect(), t = range.getBoundingClientRect(); return Math.abs(t.top + t.height / 2 - r.top - r.height / 2) <= 1.5; }); })()"));
+  await admin.screenshot('/tmp/deck-design-pairing-narrow.png');
   await admin.eval(clickText('.settings-card button', 'Replace pairing link'));
   check('replacement invitation replaces the QR', await admin.waitFor(`document.querySelector('.pairing-qr path')?.getAttribute('d') !== ${JSON.stringify(originalQr)}`));
   check('expiry removes both the pairing link and QR', await admin.waitFor("!document.querySelector('.remote-invite, .pairing-qr')", 5000));
@@ -722,6 +736,7 @@ try {
   check("a saved light deck goes straight to the editor", await lightSetup.waitFor("!!document.querySelector('.app-shell') && document.documentElement.dataset.theme === 'light'"));
   await lightSetup.eval(click('[aria-label="Open settings"]'));
   await lightSetup.waitFor("!!document.querySelector('.settings-view')");
+  check("light-theme disclosures keep the shared chevron geometry", await lightSetup.eval("(() => { const rows = [document.querySelector('.storage-details > summary'), document.querySelector('.preview-scope > summary')]; return document.documentElement.dataset.theme === 'light' && rows.every((el) => !!el && el.classList.contains('disclosure')) && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().left))).size === 1 && getComputedStyle(rows[0], '::before').borderRightColor !== 'rgba(0, 0, 0, 0)'; })()"));
   await lightSetup.eval(clickText('.settings-view button', 'Replay setup'));
   await lightSetup.waitFor("!!document.querySelector('.setup-shell')");
   check("replay setup keeps the light theme", await lightSetup.eval("document.documentElement.dataset.theme === 'light' && getComputedStyle(document.body).backgroundColor === 'rgb(244, 245, 246)'"));
@@ -830,6 +845,8 @@ try {
   livePages.push(phonePortrait);
   check("phone shell renders", await phonePortrait.waitFor("!!document.querySelector('.phone-shell')"));
   check("real phone portrait hides desktop chrome and keeps two columns", await phonePortrait.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none' && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 2"));
+  check("phone preview heading shows no control count", await phonePortrait.eval("!document.querySelector('.phone-page-count') && !/\\d+\\s+controls/.test(document.querySelector('.phone-page-heading').textContent)"));
+  check("narrow phone preview shows a single 44px top-right Close preview", await phonePortrait.eval("(() => { const el = document.querySelector('.preview-close-narrow'); if (!el) return false; const r = el.getBoundingClientRect(); return getComputedStyle(el).display !== 'none' && getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none' && el.getAttribute('aria-label') === 'Close preview' && el.getAttribute('title') === 'Close preview' && r.width >= 44 && r.height >= 44 && r.right <= innerWidth + 1 && !document.querySelector('.phone-back'); })()"));
   await phonePortrait.eval(clickText('.phone-page-tab', 'Stream'));
   await phonePortrait.waitFor("document.querySelector('.phone-page-heading h1').textContent === 'Stream'");
   check("phone controls have at least 44px touch targets", await phonePortrait.eval("[...document.querySelectorAll('.tile-primary')].every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })"));
@@ -847,6 +864,8 @@ try {
   check("phone page targets are at least 44px", await phonePortrait.eval("[...document.querySelectorAll('.phone-page-tab')].every(el => el.getBoundingClientRect().height >= 44)"));
   check("phone fader is horizontal", await phonePortrait.eval("(() => { const r = document.querySelector('.tile-volume input').getBoundingClientRect(); return r.width > r.height && r.height >= 44; })()"));
   await phonePortrait.screenshot("/tmp/deck-smoke-phone-portrait.png");
+  await phonePortrait.eval("document.querySelector('.preview-close-narrow').click()");
+  check("narrow Close preview returns to the editor", await phonePortrait.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.phone-shell')"));
 
   const phoneLandscape = await openPage("phone-landscape", `${BASE}/#/phone`, {
     width: 844,
@@ -889,7 +908,10 @@ try {
   check("portrait toggle reports its pressed state", await desktopPhone.eval("document.querySelector('[aria-label=\"Preview orientation\"] [aria-pressed=\"true\"]').textContent === 'Portrait'"));
   check("long pages scroll inside the desktop frame", await desktopPhone.eval("(() => { const shell = document.querySelector('.phone-shell'); return shell.scrollHeight > shell.clientHeight; })()"));
   check("page navigation stays reachable inside the frame", await desktopPhone.eval("(() => { const footer = document.querySelector('.phone-footer'); const shell = document.querySelector('.phone-shell'); return !!footer.querySelector('.phone-page-tab') && footer.getBoundingClientRect().bottom <= shell.getBoundingClientRect().bottom + 1; })()"));
+  check("desktop preview puts a 44px Close preview in the outer chrome", await desktopPhone.eval("(() => { const el = document.querySelector('.preview-close-desktop'); const bar = document.querySelector('.phone-preview-bar'); if (!el || !bar) return false; const r = el.getBoundingClientRect(); return bar.contains(el) && getComputedStyle(document.querySelector('.preview-close-narrow')).display === 'none' && el.getAttribute('aria-label') === 'Close preview' && el.getAttribute('title') === 'Close preview' && r.width >= 44 && r.height >= 44; })()"));
   await desktopPhone.screenshot('/tmp/deck-design-preview-portrait.png');
+  await desktopPhone.eval("document.querySelector('.preview-close-desktop').click()");
+  check("desktop Close preview returns to the editor", await desktopPhone.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.phone-shell')"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: previewCtx });
 
   // ------------------------------------------------------------ narrow action picker categories
@@ -1065,6 +1087,8 @@ try {
     "deck-design-light.png",
     "deck-design-preview-landscape.png",
     "deck-design-preview-portrait.png",
+    "deck-design-pairing-narrow.png",
+    "deck-design-pairing-steps.png",
     "deck-smoke-phone-portrait.png",
     "deck-smoke-phone-landscape.png",
     "deck-smoke-offline-shell.png",

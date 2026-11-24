@@ -15,6 +15,8 @@ interface ControlTileProps {
   selected?: boolean;
   pressed?: boolean;
   disabled?: boolean;
+  /** In-flight remote action; announced without a separate routine toast. */
+  busy?: boolean;
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
   semantics?: "preview" | "remote";
   onPrimary?: () => void;
@@ -25,7 +27,7 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit,
+  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit,
 }: ControlTileProps) {
   const remote = semantics === "remote";
   const volumeGesture = useRef<string | null>(null);
@@ -47,7 +49,7 @@ export function ControlTile({
   return (
     <article
       className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}`}
-      data-action={control.action} data-variant={variant}
+      data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
     >
       {control.action === "volume" && variant === "phone" ? (
         <div className="tile-primary tile-primary-static">{content}</div>

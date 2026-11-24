@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { X } from "lucide-react";
 import { clampVolume, controlVolume } from "../lib/actions";
 import { activePage, findPage } from "../lib/deck";
 import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
@@ -96,6 +96,9 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
             Landscape
           </button>
         </div>
+        <a href="#/" className="icon-button preview-close preview-close-desktop" aria-label="Close preview" title="Close preview">
+          <X size={18} aria-hidden="true" />
+        </a>
       </div>
       <div className="phone-device">
       <div className="phone-shell">
@@ -104,9 +107,8 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
         <div className="phone-brand">
           <BrandMark />
         </div>
-        <a href="#/" className="phone-back">
-          <ArrowLeft size={16} aria-hidden="true" />
-          Editor
+        <a href="#/" className="icon-button preview-close preview-close-narrow" aria-label="Close preview" title="Close preview">
+          <X size={18} aria-hidden="true" />
         </a>
       </header>
 
@@ -115,7 +117,6 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
       <main className="phone-main">
         <div className="phone-page-heading">
           <h1>{page.name}</h1>
-          <span className="phone-page-count">{page.controls.length} controls</span>
         </div>
 
         <div className="phone-grid">

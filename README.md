@@ -2,7 +2,7 @@
 
 > Project name: **zDeck**. Internal names `deck-editor` (npm), `deck` (Rust), and `com.deck.local` (Tauri app identifier) are retained so the display rename does not move existing app data. Storage/protocol identifiers are unchanged.
 
-zDeck is a free, MIT-licensed desktop control deck with a Tauri editor and an authenticated phone PWA. The standalone browser build remains a local editor and simulated phone preview. The native desktop app can switch OBS program scenes and, on Linux, mute the default system microphone, set default output volume, and play/pause the default MPRIS player. Approved phones run those saved controls through an explicitly enabled private HTTPS service. Pairing, live edits, actions, revocation, and offline safety are tested against the actual Rust service with fake adapters and isolated Chrome; real Tailscale and physical-phone validation remain open.
+zDeck is a free, MIT-licensed desktop control deck with a Tauri editor and an authenticated phone PWA. The standalone browser build remains a local editor and simulated phone preview. The native desktop app can switch OBS program scenes and, on Linux, mute the default system microphone, set default output volume, and play/pause the default MPRIS player. Approved phones run those saved controls through an explicitly enabled private HTTPS service. Pairing, live edits, actions, revocation, and offline safety are tested against the actual Rust service with fake adapters and isolated Chrome; the user also reports a successful phone connection after manually configuring Tailscale Serve. Full physical-device installation and action validation remain open.
 
 ## Design checkpoint
 
@@ -52,9 +52,9 @@ npm run smoke:remote  # Linux/Nix, installed google-chrome and openssl; fake act
 
 `npm run build` also runs the TypeScript check before the production Vite build. The production bundle is written to `dist/`.
 
-`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 212 checks exercise all four onboarding rehearsals, validation, save/skip/replay, full-page limits, keyboard focus and reduced motion, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/short/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. An owned fake-IPC desktop Settings context additionally verifies QR rendering, expiry below the link field/above Copy, copy feedback, narrow layout, and link/QR cleanup on replacement, expiry and stop; it never invokes real native actions. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
+`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 225 checks exercise all four onboarding rehearsals, validation, save/skip/replay, full-page limits, keyboard focus and reduced motion, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/short/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. An owned fake-IPC desktop Settings context additionally verifies QR rendering, expiry below the link field/above Copy, copy feedback, narrow layout, and link/QR cleanup on replacement, expiry and stop. It also checks centered instruction circles, aligned disclosure rows, keyboard access, and desktop/narrow Close-preview navigation; it never invokes real native actions. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
 
-`npm run smoke:remote` builds the frontend and runs the opt-in Rust browser fixture. It starts the actual service with a temporary deck and fake action runner, then uses a disposable certificate, loopback HTTPS proxy, host-resolver mapping, and isolated Chrome profile. Host/Origin/cookies are forwarded unchanged; hostile Host/Origin probes must fail. It covers explicit pairing/approval, fresh-context link paste, authenticated GET/WSS, saved actions and results, deliberate slider commits, live edits, conflict resync, lost-response Unknown/no replay, revocation, and remote-only offline caching. The connection checkpoint passed **62 checks**, alongside **93 frontend tests**, **202 local UI browser checks**, and **70 default Rust tests**. Later pairing presentation coverage adds **12 frontend tests** and **10 local UI browser checks**; the GTK DPI guard adds one Rust test. TypeScript, production build, and Tauri debug no-bundle build also pass. Certificate bypasses exist **only in this disposable test**, never as phone setup guidance. The fixture is ignored by default and has a 120-second deadline; no real system controls or Tailscale settings are touched.
+`npm run smoke:remote` builds the frontend and runs the opt-in Rust browser fixture. It starts the actual service with a temporary deck and fake action runner, then uses a disposable certificate, loopback HTTPS proxy, host-resolver mapping, and isolated Chrome profile. Host/Origin/cookies are forwarded unchanged; hostile Host/Origin probes must fail. It covers explicit pairing/approval, fresh-context link paste, authenticated GET/WSS, saved actions and results, deliberate slider commits, live edits, conflict resync, lost-response Unknown/no replay, revocation, and remote-only offline caching. Current checks pass **65 HTTPS integration checks**, **107 frontend tests**, **225 local UI browser checks**, and **71 default Rust tests**. Routine action outcomes are kept in a collapsed Activity view (ten recent entries, memory only); ambiguous outcomes retain a visible check-the-desktop warning. TypeScript, production build, and Tauri debug no-bundle build also pass. Certificate bypasses exist **only in this disposable test**, never as phone setup guidance. The fixture is ignored by default and has a 120-second deadline; no real system controls or Tailscale settings are touched.
 
 ### Production build preview
 
@@ -71,7 +71,7 @@ Open <http://localhost:4173>. This is also the useful way to exercise the servic
 - The service worker is generated at build time (`build/serviceWorkerPlugin.ts`) from the real `dist/` output; there is no hand-written `public/sw.js`. Its cache name embeds a hash of the shell and hashed asset contents, so a new frontend build always produces a new worker and a distinct cache.
 - It precaches only an exact allowlist: `index.html`, the manifest, the icons, and the hashed files under `assets/`. It never handles query strings, API-shaped paths, cross-origin requests, or non-GET requests, so server auth/API responses are never cached. The navigation fallback serves the cached `index.html` only for `/` and `/index.html`.
 - A waiting worker installs into its own cache and never mutates the live cache or reloads the page. The app shows a **Reload** banner; the user applies the update, the previous cache is deleted, and only then does the page reload. Set `VITE_BUILD_MARKER` at build time to produce a distinguishable build when exercising the update lifecycle.
-- Installation requires a browser-accepted secure context. **Physical iPhone/Android installation and real Tailscale Serve are not yet verified.** The phone UI and local HTTPS integration are implemented; LAN-only trusted HTTPS remains a release requirement.
+- Installation requires a browser-accepted secure context. **The user reports that phone connection worked after manually setting up Tailscale Serve. Physical iPhone/Android installation and the full action checklist remain unverified.** The phone UI and local HTTPS integration are implemented; LAN-only trusted HTTPS remains a release requirement.
 
 ## Tauri desktop shell
 
@@ -244,7 +244,7 @@ authority. If your Serve proxy rewrites `Host` or `Origin` differently, adjust
 the proxy configuration or report the mismatch; the backend does not trust
 arbitrary forwarded headers.
 
-#### First physical-phone check (manual; not yet verified)
+#### Physical-phone checklist (connection user-reported; full checklist still open)
 
 1. Launch the native desktop app. In **Settings → Phone connection**, enter the
    root `https://computer.tailnet-name.ts.net` origin and choose **Start local service**.
@@ -352,7 +352,8 @@ It builds the native debug app with an opt-in `native-smoke` feature, briefly
 opens a real window with isolated temporary data/config/cache, and checks native
 deck initialization **and WebKit layout geometry**: positive pixel ratio,
 viewport/font size, onboarding welcome/build/try widths, editor grid/Inspector,
-and no horizontal overflow. Test navigation only advances/skips setup; no real
+Settings disclosure/numbered-step alignment, and no horizontal overflow. Test
+navigation only advances/skips setup and opens Settings; no real
 OBS/audio/media or phone service is started. The test hook requires both the
 build feature and its launcher-set environment flag, and is absent from normal
 builds. This check passes on the current AMD/Wayland machine with matching EGL
@@ -442,9 +443,9 @@ action state.
 
 ## Honest limitations
 
-- The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. Physical iPhone/Android PWAs, real Tailscale Serve, native desktop admin lifecycle, and packaged asset resolution remain unverified. There is no automatic Serve setup or LAN HTTPS implementation. The service is explicit-enable only.
+- The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. The user reports a successful phone connection after manually setting up Tailscale Serve, but physical iPhone/Android installation, native desktop admin lifecycle, and packaged asset resolution remain unverified. There is no automatic Serve setup or LAN HTTPS implementation. The service is explicit-enable only.
 - Execution is limited to OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS play/pause, from the native Inspector or approved phone. Local phone preview and toolbar tile presses remain simulated. Windows/macOS system actions are not implemented (typed `unsupported`).
-- The system adapter is tested with a fake process runner; it has not been run against a live PipeWire session or a real media player, so runtime behavior on this machine's actual audio setup is unverified. OBS credentials are session-only; OS keychain persistence is not implemented.
+- The system adapter is tested with a fake process runner. The user reports that media play/pause did not control the intended player; read-only diagnosis found Gwenview listed first by `playerctl`, ahead of Brave and Strawberry. The default MPRIS target is not a Spotify-specific binding. No agent-triggered live playback/audio actions were performed; full runtime action validation remains open. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.
 - Both browser suites run locally against isolated headless Chrome (`npm run smoke`, `npm run smoke:remote`); no physical-phone, pixel-regression, or real-network claim is made.
 - Native startup is verified in a bounded real-window smoke with temporary app-data/config/cache; the frontend creates its native deck successfully. Normal user data was not touched. Visual correctness, desktop admin lifecycle, remote bundled-asset serving, live OBS/audio actions, and deb/AppImage packaging remain unverified.

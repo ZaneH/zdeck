@@ -46,6 +46,8 @@ function stateLabel(state: string): string {
       return "Failed";
     case "unknown":
       return "Unknown";
+    case "info":
+      return "Info";
     default:
       return state;
   }
@@ -263,7 +265,6 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
       <main className="phone-main" id="main">
         <div className="phone-page-heading">
           <h1>{page.name}</h1>
-          <span className="phone-page-count">{page.controls.length} controls</span>
         </div>
 
         <div className="phone-grid">
@@ -276,6 +277,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
               disabled={controlsDisabled}
               volume={targets[control.id] ?? controlVolume(control)}
               pressed={false}
+              busy={remote.busyControlId === control.id}
               onPrimary={() => remote.press(control)}
               onVolumeChange={(value) =>
                 setTargets((current) => ({ ...current, [control.id]: value }))
@@ -296,21 +298,31 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
           </p>
         ) : null}
 
-        <p
-          className="remote-status"
-          data-kind={remote.resultKind}
-          role="status"
-          aria-live="polite"
-        >
-          {remote.result
-            ? `${stateLabel(remote.result.state)}: ${remote.result.message}`
-            : remote.statusText}
-        </p>
+        {remote.warning ? (
+          <p className="remote-warning" data-kind="unknown" role="status" aria-live="polite">
+            {remote.warning}
+          </p>
+        ) : null}
 
         {remote.phase === "disconnected" ? (
-          <p className="remote-warning">
+          <p className="remote-warning" data-kind="connection">
             Controls are disabled until the desktop connection returns.
           </p>
+        ) : null}
+
+        {remote.activity.length > 0 ? (
+          <details className="remote-activity">
+            <summary className="disclosure">Activity</summary>
+            <ol className="remote-activity-list">
+              {remote.activity.map((entry) => (
+                <li key={entry.id} data-state={entry.state}>
+                  <span className="remote-activity-label">{entry.label}</span>
+                  <span className="remote-activity-state">{stateLabel(entry.state)}</span>
+                  <span className="remote-activity-message">{entry.message}</span>
+                </li>
+              ))}
+            </ol>
+          </details>
         ) : null}
       </main>
 

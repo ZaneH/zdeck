@@ -571,6 +571,46 @@ describe("connection lifecycle", () => {
     expect(calls.filter((call) => call.path === "/api/v1/state").length).toBe(stateCalls);
   });
 
+  it("keeps a bounded newest-first activity log of completed outcomes", async () => {
+    let sequence = 0;
+    const { connection } = await driveToActive((_path, init) => jsonResponse(200, {
+      id: JSON.parse(String(init.body)).id, state: "confirmed", message: `Outcome ${++sequence}`,
+    }));
+    const control = sampleDeck.pages[0].controls[0];
+    for (let index = 0; index < 15; index += 1) {
+      connection.pressControl(control);
+      await flush();
+    }
+    const activity = connection.getSnapshot().activity;
+    expect(activity).toHaveLength(10);
+    expect(activity[0]).toMatchObject({ label: control.label, state: "confirmed", message: "Outcome 15" });
+    expect(activity[9].message).toBe("Outcome 6");
+    expect(new Set(activity.map((entry) => entry.id)).size).toBe(10);
+    expect(connection.getSnapshot().warning).toBeNull();
+  });
+
+  it("retains a visible unknown warning and clears the log on a new session", async () => {
+    let fail = true;
+    const { connection } = await driveToActive((_path, init) => {
+      if (fail) throw new Error("network lost");
+      return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed" });
+    });
+    const control = sampleDeck.pages[0].controls[0];
+    connection.pressControl(control);
+    await flush();
+    expect(connection.getSnapshot().warning).toContain("Check the desktop before trying again");
+    expect(connection.getSnapshot().activity[0]).toMatchObject({ label: control.label, state: "unknown" });
+    fail = false;
+    connection.pressControl(control);
+    await flush();
+    expect(connection.getSnapshot().activity.map((entry) => entry.state)).toEqual(["confirmed", "unknown"]);
+    expect(connection.getSnapshot().warning).toContain(control.label);
+
+    connection.start();
+    expect(connection.getSnapshot().activity).toEqual([]);
+    expect(connection.getSnapshot().warning).toBeNull();
+  });
+
   it("does not revive a stopped instance from a stale response", async () => {
     const { deps, sockets } = makeStandardHarness();
     const connection = new RemotePhoneConnection(deps);

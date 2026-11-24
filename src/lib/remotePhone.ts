@@ -14,6 +14,8 @@ import type { Control, Deck } from "./types";
 export const REMOTE_PROTOCOL_VERSION = 1;
 export const MAX_SNAPSHOT_CHARS = 512 * 1024;
 export const POLL_INTERVAL_MS = 2000;
+/** Bounded in-memory history of completed action outcomes. */
+export const MAX_ACTIVITY = 10;
 const MAX_INPUT_CHARS = 4096;
 const MAX_NAME_BYTES = 64;
 const MAX_MESSAGE_CHARS = 300;
@@ -46,6 +48,14 @@ export interface CommandResultView {
   message: string;
 }
 
+/** One completed outcome, plus the saved control label when one is known. */
+export interface ActivityEntry {
+  id: string;
+  label: string;
+  state: CommandState | "info";
+  message: string;
+}
+
 export interface RemotePhoneSnapshot {
   phase: RemotePhase;
   deck: Deck | null;
@@ -58,6 +68,10 @@ export interface RemotePhoneSnapshot {
   result: CommandResultView | null;
   /** "info" marks a non-mutating resync prompt; otherwise mirrors `result.state`. */
   resultKind: "none" | "info" | CommandState;
+  /** Newest-first completed outcomes, capped at MAX_ACTIVITY. Never persisted. */
+  activity: ActivityEntry[];
+  /** Visible safety warning for an unknown outcome; cleared on a new session. */
+  warning: string | null;
 }
 
 export interface RemoteResponse {
@@ -273,7 +287,19 @@ function initialSnapshot(): RemotePhoneSnapshot {
     busyControlId: null,
     result: null,
     resultKind: "none",
+    activity: [],
+    warning: null,
   };
+}
+
+/** Label for a command target, searched across every saved page. */
+function findControlLabel(deck: Deck | null, controlId: string): string | null {
+  if (!deck) return null;
+  for (const page of deck.pages) {
+    const control = page.controls.find((candidate) => candidate.id === controlId);
+    if (control) return control.label;
+  }
+  return null;
 }
 
 export class RemotePhoneConnection {
@@ -293,6 +319,7 @@ export class RemotePhoneConnection {
   private reconnectAttempt = 0;
   private lastRevision = 0;
   private approved = false;
+  private activitySeq = 0;
   private readonly requests = new Set<AbortController>();
 
   constructor(deps: RemotePhoneDeps) {
@@ -329,10 +356,34 @@ export class RemotePhoneConnection {
     this.statusInFlight = false;
     this.commandInFlight = false;
     if (this.snap.busyControlId !== null) {
+      const controlId = this.snap.busyControlId;
+      const message = "The connection changed during this action. Check the desktop before retrying.";
       this.update({ busyControlId: null, resultKind: "unknown", result: {
-        state: "unknown", message: "The connection changed during this action. Check the desktop before retrying.",
+        state: "unknown", message,
       } });
+      this.flagUnknown(controlId, message);
     }
+  }
+
+  private recordActivity(controlId: string, state: ActivityEntry["state"], message: string): void {
+    const label = findControlLabel(this.snap.deck, controlId) ?? "Control";
+    const entry: ActivityEntry = { id: `act_${(this.activitySeq += 1)}`, label, state, message };
+    this.update({ activity: [entry, ...this.snap.activity].slice(0, MAX_ACTIVITY) });
+  }
+
+  /** An unknown outcome is both logged and kept as a visible safety warning. */
+  private flagUnknown(controlId: string, message: string): void {
+    this.recordActivity(controlId, "unknown", message);
+    const label = findControlLabel(this.snap.deck, controlId);
+    this.update({
+      warning: label
+        ? `${label}: Check the desktop before trying again.`
+        : "Check the desktop before trying again.",
+    });
+  }
+
+  private resetActivity(): void {
+    this.update({ activity: [], warning: null });
   }
 
   private async request(path: string, init: RequestInit = {}): Promise<RemoteResponse> {
@@ -365,6 +416,7 @@ export class RemotePhoneConnection {
     this.clearPoll();
     this.clearReconnect();
     this.nextEpoch();
+    this.resetActivity();
     const epoch = this.epoch;
     this.approved = false;
     this.reconnectAttempt = 0;
@@ -385,6 +437,7 @@ export class RemotePhoneConnection {
     this.stopped = false;
     this.foreground = this.deps.isVisible();
     this.nextEpoch();
+    this.resetActivity();
     this.approved = false;
     this.closeSocket();
     this.clearPoll();
@@ -518,6 +571,7 @@ export class RemotePhoneConnection {
   /** Stop polling and drop the local invite. Server denial is not promised. */
   cancelPairing(): void {
     this.nextEpoch();
+    this.resetActivity();
     this.approved = false;
     this.clearPoll();
     this.clearReconnect();
@@ -592,6 +646,7 @@ export class RemotePhoneConnection {
     this.closeSocket();
     this.clearReconnect();
     this.nextEpoch();
+    this.resetActivity();
     this.approved = true;
     const epoch = this.epoch;
     this.reconnectAttempt = 0;
@@ -781,6 +836,7 @@ export class RemotePhoneConnection {
     this.commandInFlight = false;
     this.pairInFlight = false;
     this.statusInFlight = false;
+    this.resetActivity();
     this.update({
       phase,
       invite: null,
@@ -811,14 +867,13 @@ export class RemotePhoneConnection {
     } catch {
       if (this.isStale(epoch)) return;
       this.commandInFlight = false;
+      const message = "No reply from the desktop. Check the desktop before retrying.";
       this.update({
         busyControlId: null,
-        result: {
-          state: "unknown",
-          message: "No reply from the desktop. Check the desktop before retrying.",
-        },
+        result: { state: "unknown", message },
         resultKind: "unknown",
       });
+      this.flagUnknown(controlId, message);
       return;
     }
     if (this.isStale(epoch)) return;
@@ -828,26 +883,24 @@ export class RemotePhoneConnection {
       return;
     }
     if (response.status === 409) {
+      const message = "The saved deck changed. Check the current page, then press again.";
       this.update({
         busyControlId: null,
-        result: {
-          state: "unknown",
-          message: "The saved deck changed. Check the current page, then press again.",
-        },
+        result: { state: "unknown", message },
         resultKind: "info",
       });
+      this.recordActivity(controlId, "info", message);
       this.resync();
       return;
     }
     if (response.status >= 500) {
+      const message = "The desktop gave no usable result. Check the desktop before retrying.";
       this.update({
         busyControlId: null,
-        result: {
-          state: "unknown",
-          message: "The desktop gave no usable result. Check the desktop before retrying.",
-        },
+        result: { state: "unknown", message },
         resultKind: "unknown",
       });
+      this.flagUnknown(controlId, message);
       return;
     }
     if (!response.ok) {
@@ -860,29 +913,33 @@ export class RemotePhoneConnection {
         result: { state: "not_applied", message },
         resultKind: "not_applied",
       });
+      this.recordActivity(controlId, "not_applied", message);
       return;
     }
     const body = await safeJson(response);
     if (this.isStale(epoch)) return;
     const parsed = parseCommandResult(body, id);
     if (!parsed) {
+      const message = "The desktop reply was unreadable. Check the desktop before retrying.";
       this.update({
         busyControlId: null,
-        result: {
-          state: "unknown",
-          message: "The desktop reply was unreadable. Check the desktop before retrying.",
-        },
+        result: { state: "unknown", message },
         resultKind: "unknown",
       });
+      this.flagUnknown(controlId, message);
       return;
     }
     if (parsed.state === "pending") {
+      const message = "The desktop is still processing this action. Check the desktop before retrying.";
       this.update({ busyControlId: null, resultKind: "unknown", result: {
-        state: "unknown", message: "The desktop is still processing this action. Check the desktop before retrying.",
+        state: "unknown", message,
       } });
+      this.flagUnknown(controlId, message);
       return;
     }
     this.update({ busyControlId: null, result: parsed, resultKind: parsed.state });
+    if (parsed.state === "unknown") this.flagUnknown(controlId, parsed.message);
+    else this.recordActivity(controlId, parsed.state, parsed.message);
   }
 
   /** A tapped control. Volume never sends through this path. */
@@ -979,6 +1036,7 @@ export class RemotePhoneConnection {
     this.stopped = true;
     this.foreground = true;
     this.nextEpoch();
+    this.resetActivity();
     this.closeSocket();
     this.clearPoll();
     this.clearReconnect();

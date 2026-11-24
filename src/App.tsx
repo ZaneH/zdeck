@@ -534,7 +534,7 @@ export default function App() {
             <h2>Storage</h2>
             <p>{storageSummary}</p>
             <details className="storage-details">
-              <summary>Storage details</summary>
+              <summary className="disclosure">Storage details</summary>
             {nativeMode ? (
               <p className="muted">
                 Saved as a versioned, validated JSON document in{" "}
@@ -554,7 +554,7 @@ export default function App() {
           </section>
 
           <details className="settings-card preview-scope">
-            <summary>About this preview</summary>
+            <summary className="disclosure">About this preview</summary>
             <p>
               Toolbar tile presses and the phone preview are local only. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
