@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Clapperboard, Mic, MicOff, Pause, Play } from "lucide-react";
-import { ACTION_CATALOG, clampVolume, createControl } from "../lib/actions";
+import { ACTION_CATALOG, actionDefinition, clampVolume, createControl } from "../lib/actions";
 import type { Control } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
+import { BrandMark } from "./BrandMark";
 import { ControlTile } from "./ControlTile";
 
 type Step = "welcome" | "build" | "try";
@@ -82,14 +83,14 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
   return (
     <div className="setup-shell">
       <header className="setup-header">
-        <span className="brand">Deck</span>
+        <span className="brand"><BrandMark /></span>
         <button type="button" className="button quiet" onClick={onDismiss}>Skip setup</button>
       </header>
       <main className="setup-main" id="main">
         <section className={`setup-story setup-${step}`} aria-labelledby="setup-title" key={step}>
           <div className="setup-heading">
-            <h1 id="setup-title" ref={heading} tabIndex={-1}>{step === "welcome" ? "Start with one button." : step === "build" ? "Choose what it does." : draft.action === "volume" ? "Give it a slide." : "Give it a press."}</h1>
-            <p>{step === "welcome" ? "Give a desktop action a home on your phone." : step === "build" ? "Pick an action and give it a name." : draft.action === "volume" ? "Move the slider and watch the volume change here." : "Press your button and watch what happens here."}</p>
+            <h1 id="setup-title" ref={heading} tabIndex={-1}>{step === "welcome" ? "Start with one button." : step === "build" ? "Make it yours." : draft.action === "volume" ? "Give it a slide." : "Give it a press."}</h1>
+            <p>{step === "welcome" ? "Give a desktop action a home on your phone." : step === "build" ? "Give your control a name." : draft.action === "volume" ? "Move the slider and watch the volume change here." : "Press your button and watch what happens here."}</p>
           </div>
 
           {step === "welcome" ? (
@@ -99,6 +100,7 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
                   {ACTION_CATALOG.map((action) => (
                     <button type="button" className={`setup-demo-key${demo.action === action.kind && demoPresses % 2 ? " is-down" : ""}`} key={action.kind} aria-label={`Rehearse ${action.name}`} onClick={() => {
                       setDemo(createControl(action.kind));
+                      setDraft((current) => current.action === action.kind ? current : createControl(action.kind));
                       setDemoPresses((current) => demo.action === action.kind ? current + 1 : 1);
                     }}>
                       <ActionIcon kind={action.kind} size={24} />
@@ -114,6 +116,8 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
             </>
           ) : step === "build" ? (
             <form onSubmit={(event) => { event.preventDefault(); if (valid) changeStep("try"); }}>
+              <details className="setup-action-change">
+                <summary aria-label="Change action"><ActionIcon kind={draft.action} size={20} /><span>{actionDefinition(draft.action).name}</span><span className="setup-change-label">Change action</span></summary>
               <fieldset className="setup-choices">
                 <legend className="sr-only">Action</legend>
                 {ACTION_CATALOG.map((action) => (
@@ -124,6 +128,7 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
                   </label>
                 ))}
               </fieldset>
+              </details>
               <div className="setup-fields">
                 <label className="field"><span>Button label</span><input name="label" value={draft.label} maxLength={40} required onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
                 {draft.action === "obs-scene" ? <label className="field"><span>OBS scene name</span><input name="scene" value={draft.scene} maxLength={40} required onChange={(event) => setDraft({ ...draft, scene: event.target.value })} /></label> : null}
@@ -146,9 +151,10 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
               </div>
               <p className="setup-result" role="status" aria-live="polite">{tried ? (draft.action === "obs-scene" ? outcome : `Rehearsal: ${outcome}`) : draft.action === "volume" ? "Slide to try it." : "Your button is ready to try."}</p>
               <p className="setup-hint">Nothing runs on your desktop during setup.</p>
-              <div className="setup-actions"><button type="button" className="button quiet" onClick={() => changeStep("build")}><ArrowLeft size={15} aria-hidden="true" /> Edit button</button><button type="button" className="button primary" disabled={!tried || !canAdd} onClick={() => { if (!onFinish(draft)) setFinishError(true); }}>Add to {pageName} <ArrowRight size={15} aria-hidden="true" /></button></div>
+              <p className="setup-destination">Page: {pageName}</p>
+              <div className="setup-actions"><button type="button" className="button quiet" onClick={() => changeStep("build")}><ArrowLeft size={15} aria-hidden="true" /> Edit button</button><button type="button" className="button primary" disabled={!tried || !canAdd} onClick={() => { if (!onFinish(draft)) setFinishError(true); }}>Add to page <ArrowRight size={15} aria-hidden="true" /></button></div>
               {!canAdd || finishError ? <p className="setup-error" role="status">This page is full. Skip setup to make room or choose another page.</p> : null}
-              <p className="setup-limitation">Phone pairing isn’t connected yet. You can keep building and previewing locally.</p>
+              <p className="setup-limitation">Phone pairing isn’t connected yet.</p>
             </>
           )}
           {storageAlert ? <p className="storage-alert" role="status">{storageAlert}</p> : null}

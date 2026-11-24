@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Deck — Local Preview",
-  "short_name": "Deck",
+  "name": "zDeck — Local Preview",
+  "short_name": "zDeck",
   "description": "A local editor and phone preview for a compact stream deck. Preview only; no desktop connection yet.",
   "lang": "en",
   "dir": "ltr",

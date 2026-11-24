@@ -1,12 +1,12 @@
-# Deck
+# zDeck
 
-> Working name **Deck** is provisional. The npm package name is `deck-editor`, and the placeholder Tauri identifier is `com.deck.local`.
+> Project name: **zDeck**. Internal names `deck-editor` (npm), `deck` (Rust), and `com.deck.local` (Tauri app identifier) are retained so the display rename does not move existing app data. Storage/protocol identifiers are unchanged.
 
-Deck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend, but no desktop admin or phone UI is wired to it yet, and it has not been exercised against a real tailnet or phone.
+zDeck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend, but no desktop admin or phone UI is wired to it yet, and it has not been exercised against a real tailnet or phone.
 
 ## Design checkpoint
 
-The current coordinator-led pass combines Touch Portal’s direct button editing with Hex’s focused onboarding and tactile controls. One compact toolbar, shallow pressable keys, an adjacent Inspector (stacked on narrow screens), and on-demand action/page dialogs keep the editor tight. Full-window setup lets you choose, name, and rehearse a control before adding it. Skip is remembered; Settings → Replay setup never resets existing work. Nothing runs on your desktop during rehearsal.
+The current coordinator-led pass combines Touch Portal’s direct button editing with Hex’s focused onboarding and tactile controls. One compact toolbar, shallow pressable keys, an adjacent Inspector (stacked on narrow screens), and on-demand action/page dialogs keep the editor tight. Full-window setup carries your welcome rehearsal choice into naming and practice, with action changes tucked behind a disclosure. Skip is remembered; Settings → Replay setup never resets existing work. The navbar uses a key-shaped z logo; the action picker has category groups/filters, both dialogs dismiss on backdrop clicks, and the Settings button toggles back to the editor. Nothing runs on your desktop during rehearsal.
 
 This replaces the rejected inline-guide pass and is ready for feedback, not an approved final design. See the [animated walkthrough, desktop, and phone screenshots](docs/design.md). No reference code/assets or new dependencies were added. The self-hosted Geist font is licensed under the [SIL Open Font License](src/assets/Geist-OFL.txt). Existing deck data and native execution guards are unchanged.
 
@@ -20,7 +20,7 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 - Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
 - Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” Phone pairing remains unavailable in the UI; onboarding and Settings state that explicitly.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
-- Phone preview route at `#/phone` using the same components and saved deck in the same origin. It is not a paired remote controller.
+- Phone preview route at `#/phone` using the same components and saved deck in the same origin. Desktop preview offers Landscape (default) and Portrait frames; real phone viewports follow their natural orientation. It is not a paired remote controller.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
 - Minimal Tauri 2 Rust shell and configuration that points at the same built frontend. It exposes the four narrow OBS commands, six narrow system commands, two narrow native-deck persistence commands, and nine native-only private-service admin commands described below, plus no plugins.
 - Vitest tests for schema/persistence validation, page/control editing edge cases, the native save queue, and the native OBS/system error and fallback handling. Rust tests cover the OBS adapter and the system adapter through an injected fake runner, plus the atomic deck store against owned temporary directories.
@@ -51,7 +51,7 @@ npm run smoke
 
 `npm run build` also runs the TypeScript check before the production Vite build. The production bundle is written to `dist/`.
 
-`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 160 checks exercise all four onboarding rehearsals, validation, save/skip/replay, full-page limits, keyboard focus and reduced motion, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/short/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
+`npm run smoke` builds two frontend versions, then drives installed `google-chrome` headless over raw CDP in a throwaway `--user-data-dir` (no personal browser, no browser dependency). Its 202 checks exercise all four onboarding rehearsals, validation, save/skip/replay, full-page limits, keyboard focus and reduced motion, modal focus/search/keyboard behavior, page/control editing and removal confirmation, refresh persistence, same-origin cross-tab sync, phone page switching and slider keyboard/touch input, dark/light, narrow/short/portrait/landscape layouts, the offline shell, and a two-build service-worker update lifecycle. Screenshots and a pass/fail summary are written under `/tmp`. The final `dist/` is left as the unmarked build.
 
 ### Production build preview
 
@@ -101,14 +101,14 @@ Setup in OBS:
 1. Open **Tools → WebSocket Server Settings**.
 2. Check **Enable WebSocket server**.
 3. Keep **Server Port** at the default `4455`, or enter the port you set in
-   Deck's **Settings → OBS Studio**.
+   zDeck's **Settings → OBS Studio**.
 4. If **Enable Authentication** is on, copy the generated password and paste it
-   into Deck. Deck only ever connects to `127.0.0.1`/`::1`; it accepts no host,
+   into zDeck. zDeck only ever connects to `127.0.0.1`/`::1`; it accepts no host,
    URL, or path.
 
 Behavior:
 
-- Deck reads the scene list and current program scene from OBS on demand. Scene
+- zDeck reads the scene list and current program scene from OBS on demand. Scene
   state is never shown as live without a successful OBS query.
 - **Run scene** in the Inspector switches the program scene, then reads the
   program scene back. A mismatch shows as *Not applied*, a rejected request as
@@ -147,8 +147,8 @@ Behavior and safety:
   refresh clears the observed value instead of leaving a stale one advertised as
   live. Each action reads the state back and reports **confirmed**,
   **not applied**, **failed**, or **unknown**; a timeout is never retried blindly.
-- Volume is validated to a finite `0-100` before applying, so Deck never requests
-  overdrive. If the OS itself reports a boost above 100%, Deck displays it
+- Volume is validated to a finite `0-100` before applying, so zDeck never requests
+  overdrive. If the OS itself reports a boost above 100%, zDeck displays it
   honestly rather than clamping the number.
 - Microphone mute uses an explicit target derived from the observed state, not a
   blind toggle. Media play/pause reads the current status first, so a missing
@@ -159,7 +159,7 @@ Behavior and safety:
   `unsupported` error instead of breaking the build. No Windows or macOS
   implementation exists yet.
 
-MPRIS player selection policy: Deck does not pick or persist a specific player.
+MPRIS player selection policy: zDeck does not pick or persist a specific player.
 It uses playerctl's default selection (no `--player` flag), which chooses among
 the available MPRIS players. Selecting a specific player is future work.
 

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import type { Deck, Page } from "../lib/types";
 
 interface PageListProps {
@@ -16,6 +17,7 @@ export function PageList({
   deck, activePageId, onSelect, onAdd, onRename, onRemove, onMove,
 }: PageListProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  useDialogBackdrop(dialogRef);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const activeIndex = deck.pages.findIndex((page) => page.id === activePageId);

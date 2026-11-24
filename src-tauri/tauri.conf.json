@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Deck",
+  "productName": "zDeck",
   "version": "0.1.0",
   "identifier": "com.deck.local",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Deck",
+        "title": "zDeck",
         "width": 960,
         "height": 680,
         "minWidth": 760,

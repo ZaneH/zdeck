@@ -1,6 +1,6 @@
 # Project roadmap
 
-> Working name: **TBD**. Status: **implementation started; remaining choices stay provisional**.
+> Project name: **zDeck** (chosen by the user). Status: **implementation started; remaining choices stay provisional**.
 > Initial scope approved: MIT, KDE Wayland/Linux first, Tailscale-first private prototype, OBS scenes, microphone mute, media play/pause, and volume. LAN-only remains a release requirement.
 
 ### Confirmed decisions
@@ -12,7 +12,10 @@
 - Controls: **buttons and a slider first**; a dial is a follow-up once shared state and interaction behavior are proven.
 - Phone platform remains unknown; do not claim real-device validation until a target phone is tested.
 - User has authorized implementation and coordinated subworkers. Use bounded, sequential tasks and independently verify their results.
-- User rejected the initial visual design. Coordinator/ChatGPT owns a structural design pass before more feature/UI delegation; current direction is awaiting user feedback, not design-approved.
+- Coordinator/ChatGPT owns visual direction. The user likes the rehearsal-based onboarding, side Inspector, and phone preview; the latest refinement pass still awaits feedback. Earlier dashboard, colored-console, and inline-guide directions were rejected.
+- Product terminology: a **page** is the named layout; future **panels** are alternative groups within a page, switched by vertical swipe with an accessible non-gesture alternative. Panels are planned, not implemented.
+- Future themes belong to individual pages. The prototype’s global appearance setting is not the final page-theme model.
+- Display branding is zDeck. Keep existing storage keys, protocol names, and app identifier stable until an explicit migration is designed.
 - Make reviewable Git checkpoint commits as work progresses. Do not push without authorization.
 
 ## 1. Product
@@ -62,7 +65,8 @@ Open the desktop app, create two pages, add a few real actions, pair a phone, in
 
 - Distinguish **pressed locally**, **pending**, **confirmed**, **failed**, **disabled**, and **disconnected**. A tap animation is not proof that an action succeeded.
 - Live toggle states come from the integration, not optimistic guesses. Clearly mark actions whose underlying API cannot confirm the final result.
-- A small token-based theme system: dark default, light alternative, configurable accent. Later: theme import/export and page backgrounds.
+- A small token-based theme system: dark default, light alternative, configurable accent. User requirement: page-specific themes so each page can look different; the current global appearance control is a prototype. Later: theme import/export and page backgrounds.
+- Add multiple panels of controls within a page, with swipe up/down to quickly reach alternative groupings. Preserve slider interaction and offer visible/keyboard navigation instead of requiring gestures. This needs an explicit schema/storage/protocol migration, not just a preview animation.
 - Compact visual density without tiny hit areas: aim for 44×44 CSS-pixel phone targets, visible focus, readable contrast, and reduced-motion support.
 - Use one modern, openly licensed font, preferably self-hosted. System fallback, clear icons, no color-only status information.
 - Short labels; inline detail only when useful; actionable errors instead of unexplained codes.
@@ -158,7 +162,7 @@ The categories below cover the requested direction and researched Touch Portal c
 | Pages and decks | Create, rename, duplicate, delete, reorder; select starting page; switch from phone | Folders, device-specific assignments, richer layouts/backgrounds, page templates |
 | Buttons | Icons, short labels, color, grid position, clear feedback, one action | Multi-cell controls, hold/release, long press, sliders/dials, dynamic styling |
 | Editor | Searchable categorized actions, drag/drop and accessible move controls, live preview | Multi-select, undo/redo, reusable button templates, richer device previews |
-| Themes | Dark/light, accent, shared desktop/phone tokens | Page overrides, import/export, community themes |
+| Themes | Prototype dark/light, accent, shared desktop/phone tokens | Per-page themes (user requirement), import/export, community themes |
 | Media/System | One useful real action family chosen after OS spike | Media transport, volume, app launch, hotkeys, text input, mouse, HTTP/OSC as supported |
 | OBS | Recommended early integration; exact inclusion needs approval | Scenes, sources, audio/mute, recording/streaming state, richer controls through OBS WebSocket |
 | Twitch | Deferred | OAuth/account connection, chat/moderation and stream actions within API permissions; never bypass platform restrictions |
@@ -198,7 +202,8 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 ### M0 — Decisions and feasibility
 
 - [x] Choose MIT, KDE Wayland/Linux first, Tailscale-first prototype, and initial action targets (OBS scenes, microphone mute, media play/pause, volume).
-- [ ] Choose project name and phone/browser targets; clarify microphone mute scope.
+- [x] Choose project name: **zDeck**.
+- [ ] Choose phone/browser targets; confirm the provisional default-system-input microphone scope.
 - [ ] Prove trusted HTTPS/WSS + Home Screen installation on a real target phone over Tailscale.
 - [ ] Select and prove a LAN-only trusted HTTPS path, including reconnect after desktop restart and certificate lifecycle notes.
 - [ ] If a Tailscale-only prototype is approved, label it explicitly; retain LAN proof as a release gate.
@@ -212,7 +217,7 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 - [x] Scaffold shared web frontend and minimal Tauri shell with documented commands. Repository-local Nix shell is pinned; coordinator verified cargo check/test and a debug no-bundle Tauri build on x86_64-linux. No native runtime or packaging claim yet.
 - [x] Establish design tokens, dark/light themes, desktop editor, and same-origin phone preview.
-- [ ] Obtain user acceptance of the implemented redesign. The user rejected the inline-guide pass and requested Touch Portal’s direct editing combined with Hex’s focused, animated onboarding and tactile depth. The new pass has full-window draft → rehearsal → Add setup, a compact 960×680 desktop, adjacent Inspector, pressable keys, plain status text, 160 coordinator-verified Chrome checks, 54 frontend tests, reviewed screenshots, and a browser motion recording. No final visual acceptance yet. Earlier dashboard and colored-console directions were also rejected.
+- [ ] Obtain final user acceptance of the implemented redesign. The user likes rehearsal-based onboarding, the side Inspector, and phone preview. Follow-up refinements carry the welcome choice into configuration, tuck action changes behind a disclosure, use “Add to page,” shorten the pairing note, enable backdrop dismissal and a Settings toggle, add category navigation and desktop portrait/landscape previews, improve Remove visibility/Settings spacing, and introduce the zDeck logo. Coordinator verified 202 Chrome checks and 54 frontend tests; screenshots and motion recording are updated. Further visual feedback remains welcome.
 - [x] Add minimal deck/page/button schema, sample data, and validated browser-local persistence. Coordinator verified 29 tests plus 36 Chrome smoke checks, including cross-tab edits and refresh persistence. Desktop-owned atomic file persistence remains M2 work.
 - [ ] Add CI for formatting, type checking, unit tests, and desktop build checks on Linux/Windows/macOS.
 - [x] Add PWA manifest and generated icons.
@@ -253,7 +258,9 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 - [ ] User-facing values and button-state bindings.
 - [ ] Events and reusable flows with bounded execution, cancellation, failure handling, and trace logs.
 - [ ] Twitch and Home Assistant integration spikes followed by scoped releases.
-- [ ] Multiple-device behavior, richer controls, page templates, theme/page customization, and improved import/export.
+- [ ] Swipeable panels within a page, with accessible non-gesture navigation and explicit schema/protocol migration.
+- [ ] Page-specific themes (not only a global theme), page templates, and improved import/export.
+- [ ] Multiple-device behavior and richer controls.
 - [ ] Revisit parity gaps against current Touch Portal documentation and user priorities.
 
 **Exit:** important automation tasks work safely without building a flow engine or extension for every button.

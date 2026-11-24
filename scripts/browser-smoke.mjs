@@ -265,6 +265,18 @@ async function pressKey(page, key, code, vk, text) {
   await page.send("Input.dispatchKeyEvent", { type: text === undefined ? "rawKeyDown" : "keyDown", ...base, ...(text === undefined ? {} : { text }) });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
 }
+async function pointerClick(page, x, y) {
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1, buttons: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1, buttons: 1 });
+}
+async function chooseSetupAction(page, kind) {
+  if (!await page.eval("document.querySelector('.setup-action-change').open")) {
+    await page.eval(click('[aria-label="Change action"]'));
+  }
+  await page.eval(click(`.setup-choice input[value="${kind}"]`));
+}
+const rectOf = (selector) =>
+  `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; })()`;
 
 // ---------------------------------------------------------------- build two versions
 const buildA = mkdtempSync(join(tmpdir(), "deck-build-a-"));
@@ -308,6 +320,12 @@ try {
   check("a skipped setup stays closed after reload", await editor.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
   check("skipped first run still shows the sample deck", await editor.eval("document.querySelectorAll('.control-tile').length === 4 && !localStorage.getItem('deck.local.v1')"));
   check("self-hosted Geist font loads", await editor.eval("document.fonts.ready.then(() => [...document.fonts].some(face => face.family === 'Geist' && face.status === 'loaded'))"));
+  check("display branding uses zDeck in the title, meta, and PWA fields", await editor.eval("document.title === 'zDeck — Local editor' && document.querySelector('meta[name=\"description\"]').content.startsWith('zDeck') && document.querySelector('meta[name=\"apple-mobile-web-app-title\"]').content === 'zDeck'"));
+  check("navbar logo is the zDeck brand mark labelled as the editor", await editor.eval("(() => { const a = document.querySelector('.topbar .brand'); return a.getAttribute('aria-label') === 'zDeck editor' && !!a.querySelector('svg[aria-label=\"zDeck\"]'); })()"));
+  const webManifest = await editor.eval("fetch('/manifest.webmanifest').then((response) => response.json())");
+  check("PWA manifest keeps the zDeck display name", webManifest.name.startsWith('zDeck') && webManifest.short_name === 'zDeck', JSON.stringify({ name: webManifest.name, short_name: webManifest.short_name }));
+  const tauriConfig = JSON.parse(readFileSync(join(ROOT, 'src-tauri/tauri.conf.json'), 'utf8'));
+  check("Tauri display names use zDeck while the identifier stays put", tauriConfig.productName === 'zDeck' && tauriConfig.app.windows[0].title === 'zDeck' && tauriConfig.identifier === 'com.deck.local', JSON.stringify({ productName: tauriConfig.productName, title: tauriConfig.app.windows[0].title, identifier: tauriConfig.identifier }));
   check("desktop workspace has no horizontal overflow", await editor.eval("document.documentElement.scrollWidth <= innerWidth"));
   check("single topbar carries the editor chrome", await editor.eval("document.querySelectorAll('.topbar').length === 1"));
   check("no sidebar or floating deck frame", await editor.eval("!document.querySelector('.sidebar, .deck-frame, .right-panel')"));
@@ -339,37 +357,66 @@ try {
   check("search no-match state names the query", await editor.eval("!!document.querySelector('.action-library .empty-note')?.textContent.includes('zzzz') && document.querySelectorAll('.action-library .action-row').length === 0"));
   await editor.eval(setValue("#action-search", ""));
   check("clearing search resets the full list", await editor.eval("document.querySelectorAll('.action-library .action-row').length === 4"));
+  check("picker groups actions under their catalog categories", await editor.eval("[...document.querySelectorAll('.action-group-title')].map((n) => n.textContent).join('|') === 'OBS|System|Media'"));
+  await editor.eval(clickText('.action-category', 'System'));
+  check("category button filters the list and marks itself pressed", await editor.eval("document.querySelector('.action-category[aria-pressed=\"true\"]').textContent === 'System' && document.querySelectorAll('.action-library .action-row').length === 1 && document.querySelector('.action-row-name').textContent.includes('Microphone')"));
+  await editor.eval(setValue("#action-search", "volume"));
+  check("search combines with the active category filter", await editor.eval("document.querySelectorAll('.action-library .action-row').length === 0 && !!document.querySelector('.action-library .empty-note')"));
+  await editor.eval(clickText('.action-category', 'All'));
+  check("All restores the searched list across categories", await editor.eval("document.querySelectorAll('.action-library .action-row').length === 1 && document.querySelector('.action-row-name').textContent.includes('Volume')"));
+  await editor.eval(setValue("#action-search", ""));
 
   await editor.eval("document.querySelector('#action-search').focus()");
   await pressKey(editor, "Tab", "Tab", 9);
   await sleep(40);
-  check("Tab moves focus from search into the action list", await editor.eval("document.querySelector('.action-library').contains(document.activeElement) && document.activeElement.classList.contains('action-row')"));
+  check("Tab moves focus from search into the category controls", await editor.eval("document.querySelector('.action-library').contains(document.activeElement) && document.activeElement.classList.contains('action-category')"));
   const visited = new Set();
   let enteredBackground = false;
   // Chrome may hand Tab to browser chrome between cycles; app controls must remain inert.
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 16; index += 1) {
     await pressKey(editor, "Tab", "Tab", 9);
-    const focus = await editor.eval("({ inside: document.querySelector('.action-library').contains(document.activeElement), tag: document.activeElement.tagName, name: document.activeElement.getAttribute('aria-label') })");
+    const focus = await editor.eval("({ inside: document.querySelector('.action-library').contains(document.activeElement), tag: document.activeElement.tagName, name: document.activeElement.getAttribute('aria-label') || document.activeElement.textContent.trim() })");
     if (focus.inside) visited.add(focus.name);
     else if (focus.tag !== 'BODY') enteredBackground = true;
   }
-  check("Tab reaches every picker control without entering the background app", !enteredBackground && visited.size === 6, JSON.stringify([...visited]));
+  check("Tab reaches every picker control without entering the background app", !enteredBackground && visited.size === 10, JSON.stringify([...visited]));
+  await editor.eval("[...document.querySelectorAll('.action-category')].find((button) => button.textContent === 'Media').focus()");
+  await pressKey(editor, "Enter", "Enter", 13, "\r");
+  check("category buttons are keyboard operable", await editor.eval("document.querySelector('.action-category[aria-pressed=\"true\"]').textContent === 'Media' && document.querySelectorAll('.action-library .action-row').length === 2"));
+  await editor.eval(clickText('.action-category', 'All'));
   await pressKey(editor, "Escape", "Escape", 27);
   check("Escape closes the action picker", await editor.waitFor("!document.querySelector('.action-library').open"));
   check("focus returns to the Add control button", await editor.eval("document.activeElement.classList.contains('add-control')"));
+
+  // Native backdrop dismissal driven by real pointer input.
+  await editor.eval(click('.add-control'));
+  await editor.waitFor("document.querySelector('.action-library').open");
+  const pickerBox = await editor.eval(rectOf('.action-library'));
+  await pointerClick(editor, pickerBox.cx, pickerBox.top + 6);
+  check("clicking inside the action picker padding keeps it open", await editor.eval("document.querySelector('.action-library').open"));
+  const dragBox = await editor.eval(rectOf('.action-library'));
+  await editor.send("Input.dispatchMouseEvent", { type: "mousePressed", x: dragBox.cx, y: dragBox.cy, button: "left", clickCount: 1, buttons: 1 });
+  await editor.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.max(5, dragBox.left - 60), y: dragBox.cy, button: "left", clickCount: 1, buttons: 1 });
+  check("a drag starting inside the picker and ending outside keeps it open", await editor.eval("document.querySelector('.action-library').open"));
+  await pointerClick(editor, Math.max(5, pickerBox.left - 40), pickerBox.cy);
+  check("a backdrop click closes the action picker", await editor.waitFor("!document.querySelector('.action-library').open"));
+
   await editor.eval(click('.add-control'));
   check("reopening the picker focuses search again", await editor.eval("document.activeElement.id === 'action-search'"));
   await editor.eval(setValue('#action-search', 'volume'));
+  await editor.eval(clickText('.action-category', 'Media'));
   await editor.eval(click('[aria-label="Close action picker"]'));
   await editor.waitFor("document.getElementById('action-search').value === ''");
   await editor.eval(click('.add-control'));
-  check("closing the picker resets its search", await editor.eval("document.getElementById('action-search').value === '' && document.querySelectorAll('.action-row').length === 4"));
+  check("closing the picker resets search and category", await editor.eval("document.getElementById('action-search').value === '' && document.querySelector('.action-category[aria-pressed=\"true\"]').textContent === 'All' && document.querySelectorAll('.action-row').length === 4"));
   await editor.eval(click('[aria-label="Close action picker"]'));
 
   // ------------------------------------------------------------ clean phone + volume (before fixture edits)
   const designPhone = await openPage('design-phone', `${BASE}/#/phone`, { width: 390, height: 844, mobile: true });
   livePages.push(designPhone);
   await designPhone.waitFor("!!document.querySelector('.phone-shell')");
+  check("phone header shows the zDeck brand mark, not a wordmark", await designPhone.eval("!!document.querySelector('.phone-header .phone-brand svg[aria-label=\"zDeck\"]')"));
+  check("real phone viewport hides the desktop preview chrome", await designPhone.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none'"));
   await designPhone.eval('document.fonts.ready.then(() => true)');
   await designPhone.screenshot('/tmp/deck-design-phone.png');
   check("clean phone preview shows the two sample pages", await designPhone.eval("document.querySelectorAll('.phone-page-tab').length === 2"));
@@ -403,6 +450,7 @@ try {
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live'));
   await editor.waitFor("!!document.querySelector('.inspector-form')");
   check("selecting a key opens its inspector", await editor.eval("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live'"));
+  check("remove button keeps danger text with a visible tinted surface and border", await editor.eval("(() => { const cs = getComputedStyle(document.querySelector('.inspector-actions .button.danger')); return cs.color === 'rgb(239, 167, 176)' && cs.borderTopWidth === '1px' && cs.borderTopColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.boxShadow !== 'none'; })()"));
   await editor.eval(setValue('.inspector-form input[type="text"]', 'Go live edited'));
   check("inspector rename persists in the field", await editor.waitFor("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live edited'"));
 
@@ -428,6 +476,12 @@ try {
   // ------------------------------------------------------------ settings + theme segmented control
   await editor.eval(click('[aria-label="Open settings"]'));
   check("settings opens from the topbar", await editor.waitFor("!!document.querySelector('.settings-view')"));
+  check("active settings control toggles back to the editor", await editor.eval("document.querySelector('[aria-label=\"Back to editor\"]')?.getAttribute('href') === '#/' && document.querySelector('[aria-label=\"Back to editor\"]').getAttribute('aria-current') === 'page'"));
+  check("closed About this preview reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.preview-scope'); const s = d.querySelector('summary'); return !d.open && getComputedStyle(d).display === 'block' && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
+  await editor.eval(click('[aria-label="Back to editor"]'));
+  check("clicking the same settings control returns to the editor", await editor.waitFor("!!document.querySelector('.canvas-panel') && !document.querySelector('.settings-view')"));
+  await editor.eval(click('[aria-label="Open settings"]'));
+  await editor.waitFor("!!document.querySelector('.settings-view')");
   check("settings shows the segmented theme buttons", await editor.eval("document.querySelectorAll('.segmented button').length === 2"));
   await editor.eval(clickText('.segmented .button', 'Light'));
   check("theme segmented control switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
@@ -448,6 +502,7 @@ try {
   livePages.push(firstRun);
   await firstRun.waitFor("!!document.querySelector('.setup-shell')");
   check("fresh profile starts on the setup welcome step", await firstRun.eval("document.querySelector('.setup-story').classList.contains('setup-welcome')"));
+  check("setup header shows the zDeck brand mark, not a wordmark", await firstRun.eval("!!document.querySelector('.setup-header .brand svg[aria-label=\"zDeck\"]')"));
   const rehearsalHint = () => firstRun.eval("document.querySelector('.setup-hint').textContent");
 
   // welcome: every catalog action rehearses locally, scene presses repeat safely
@@ -474,8 +529,11 @@ try {
 
   // build: radio arrows, blank validation, draft survives Back
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Make a button'));
-  check("guide advances to build with the heading focused", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('#setup-title').textContent === 'Choose what it does.' && document.activeElement.id === 'setup-title'"));
-  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelectorAll('.setup-choice input').length === 4 && document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Scene 1' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+  check("guide advances to build with the heading focused", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('#setup-title').textContent === 'Make it yours.' && document.activeElement.id === 'setup-title'"));
+  check("welcome rehearsal choice carries into build", await firstRun.eval("document.querySelectorAll('.setup-choice input').length === 4 && document.querySelector('.setup-choice input:checked').value === 'volume' && document.querySelector('input[name=\"label\"]').value === 'Volume' && !document.querySelector('input[name=\"scene\"]')"));
+  check("configuration shows the chosen action without asking for a second selection", await firstRun.eval("!document.querySelector('.setup-action-change').open && document.querySelector('.setup-action-change summary').textContent.includes('Volume slider')"));
+  await chooseSetupAction(firstRun, 'obs-scene');
+  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Scene 1' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
   await firstRun.eval("[...document.querySelectorAll('.setup-choice input')].find((el) => el.value === 'obs-scene').focus()");
   await pressKey(firstRun, "ArrowRight", "ArrowRight", 39);
   check("arrow keys move through the action radios", await firstRun.waitFor("document.querySelector('.setup-choice input:checked').value === 'mic-mute' && document.querySelector('input[name=\"label\"]').value === 'Mic mute' && !document.querySelector('input[name=\"scene\"]')"));
@@ -486,7 +544,7 @@ try {
     ['mic-mute', 'Rehearsal: Microphone muted.', 'Rehearsal: Microphone unmuted.'],
     ['media-play-pause', 'Rehearsal: Playback started.', 'Rehearsal: Playback paused.'],
   ]) {
-    await firstRun.eval(click(`.setup-choice input[value="${kind}"]`));
+    await chooseSetupAction(firstRun, kind);
     await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
     await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try')");
     check(`${kind} practice requires an interaction`, await firstRun.eval("document.querySelector('.setup-actions .primary').disabled"));
@@ -497,7 +555,7 @@ try {
     await firstRun.eval(clickText('.setup-actions .button.quiet', 'Edit button'));
     await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')");
   }
-  await firstRun.eval(click('.setup-choice input[value="obs-scene"]'));
+  await chooseSetupAction(firstRun, 'obs-scene');
 
   await firstRun.eval(setValue('input[name="label"]', ''));
   check("blank label blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"label\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
@@ -506,13 +564,16 @@ try {
   check("blank scene blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"scene\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
   await firstRun.eval(setValue('input[name="scene"]', 'Practice'));
   check("a complete draft enables the build submit", await firstRun.eval("!document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  await firstRun.eval(click('[aria-label="Change action"]'));
+  check("closing action choices preserves the configured draft", await firstRun.eval("!document.querySelector('.setup-action-change').open && document.querySelector('input[name=\"label\"]').value === 'Practice scene'"));
   await sleep(500);
   await firstRun.screenshot("/tmp/deck-design-setup-build.png");
 
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
   check("guide advances to try and requires a rehearsal", await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try') && document.querySelector('#setup-title').textContent === 'Give it a press.'"));
   check("try step starts with Add disabled", await firstRun.eval("document.querySelector('.setup-result').textContent === 'Your button is ready to try.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => button.disabled)"));
-  check("try step promises no desktop action", await firstRun.eval("document.querySelector('.setup-hint').textContent === 'Nothing runs on your desktop during setup.' && document.querySelector('.setup-limitation').textContent.includes('Phone pairing')"));
+  check("try step promises no desktop action", await firstRun.eval("document.querySelector('.setup-hint').textContent === 'Nothing runs on your desktop during setup.'"));
+  check("try step shows the destination separately and the exact pairing limitation", await firstRun.eval("document.querySelector('.setup-destination').textContent === 'Page: Stream' && document.querySelector('.setup-limitation').textContent === 'Phone pairing isn’t connected yet.'"));
   await sleep(500);
   await firstRun.screenshot("/tmp/deck-design-setup-try.png");
   await firstRun.eval(clickText('.setup-actions .button.quiet', 'Edit button'));
@@ -531,7 +592,7 @@ try {
   check("nothing is saved before Add", deckBeforeAdd === null, String(deckBeforeAdd && deckBeforeAdd.slice(0, 60)));
   await sleep(300);
   await firstRun.screenshot("/tmp/deck-design-setup-result.png");
-  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to Stream'));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to page'));
   check("Add closes setup and shows the new editor", await firstRun.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
   check("Add returns focus to the page title", await firstRun.waitFor("document.activeElement.id === 'page-title'"));
   const addedDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
@@ -552,20 +613,36 @@ try {
   check("Replay setup opens the full-window guide on welcome", await firstRun.waitFor("!!document.querySelector('.setup-shell') && location.hash === '#/' && document.querySelector('.setup-story').classList.contains('setup-welcome') && document.activeElement.id === 'setup-title'"));
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Make a button'));
   await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-build')");
-  await firstRun.eval(click('.setup-choice input[value="volume"]'));
+  await chooseSetupAction(firstRun, 'volume');
   await firstRun.eval(setValue('input[name="label"]', 'Replay volume'));
   check("volume choice swaps the scene field for nothing extra", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'volume' && !document.querySelector('input[name=\"scene\"]') && !document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Try this control'));
   await firstRun.waitFor("document.querySelector('.setup-story').classList.contains('setup-try') && !!document.querySelector('.setup-practice-key input[type=\"range\"]')");
   await firstRun.eval(setValue('.setup-practice-key input[type="range"]', '35'));
   check("sliding the rehearsal volume enables Add", await firstRun.waitFor("document.querySelector('.setup-result').textContent === 'Rehearsal: Volume changed to 35%.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => !button.disabled)"));
-  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to Stream'));
+  await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to page'));
   await firstRun.waitFor("!!document.querySelector('.app-shell')");
   const replayDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
   const replayPage = replayDeck.pages.find((deckPage) => deckPage.id === replayDeck.activePageId);
   const replayVolume = replayPage.controls.filter((control) => control.label === 'Replay volume');
   check("replay preserves the existing deck and adds once", replayPage.controls.length === 6 && replayPage.controls.filter((control) => control.label === 'Practice scene').length === 1 && replayVolume.length === 1 && replayVolume[0].volume === 35, JSON.stringify(replayDeck.pages[0].controls.map((c) => c.label)));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: firstRunCtx });
+
+  // ------------------------------------------------------------ welcome choice continuity on a fresh profile
+  const { browserContextId: continuityCtx } = await cdp.send('Target.createBrowserContext');
+  const continuity = await openPage('continuity', `${BASE}/`, { width: 960, height: 680 }, continuityCtx);
+  livePages.push(continuity);
+  await continuity.waitFor("!!document.querySelector('.setup-shell')");
+  await continuity.eval(click('[aria-label="Rehearse Volume slider"]'));
+  await continuity.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  check("a rehearsed Volume choice lands on the build step as Volume", await continuity.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('.setup-choice input:checked').value === 'volume' && document.querySelector('input[name=\"label\"]').value === 'Volume' && !document.querySelector('input[name=\"scene\"]')"));
+  await chooseSetupAction(continuity, 'obs-scene');
+  await continuity.eval(setValue('input[name="label"]', 'Kept label'));
+  await continuity.eval(clickText('.setup-actions .button.quiet', 'Back'));
+  await continuity.waitFor("document.querySelector('.setup-story').classList.contains('setup-welcome')");
+  await continuity.eval(clickText('.setup-actions .button.primary', 'Make a button'));
+  check("Back then Next keeps the chosen kind and draft without a reset", await continuity.waitFor("document.querySelector('.setup-story').classList.contains('setup-build') && document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Kept label' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: continuityCtx });
 
   // ------------------------------------------------------------ setup on narrow and short viewports
   const { browserContextId: tightCtx } = await cdp.send('Target.createBrowserContext');
@@ -620,9 +697,18 @@ try {
   await manage.waitFor("!!document.querySelector('.app-shell')");
   const initialPages = await manage.eval("document.querySelectorAll('#page-switcher option').length");
   check("isolated deck starts with two pages", initialPages === 2, `pages=${initialPages}`);
+  await manage.eval("document.querySelector('[aria-label=\"Manage pages\"]').focus()");
   await manage.eval(click('[aria-label="Manage pages"]'));
   check("page manager opens as a modal dialog", await manage.eval("document.querySelector('.page-dialog').open"));
   check("page manager initially focuses inside the dialog", await manage.eval("document.querySelector('.page-dialog').contains(document.activeElement)"));
+  const pageBox = await manage.eval(rectOf('.page-dialog'));
+  await pointerClick(manage, pageBox.cx, pageBox.top + 6);
+  check("clicking inside the page manager padding keeps it open", await manage.eval("document.querySelector('.page-dialog').open"));
+  await pointerClick(manage, Math.max(5, pageBox.left - 40), pageBox.cy);
+  check("a backdrop click closes the page manager", await manage.waitFor("!document.querySelector('.page-dialog').open"));
+  check("focus returns to the Manage pages button", await manage.eval("document.activeElement.getAttribute('aria-label') === 'Manage pages'"));
+  await manage.eval(click('[aria-label="Manage pages"]'));
+  await manage.waitFor("document.querySelector('.page-dialog').open");
 
   await manage.eval(click('.page-dialog .page-actions [title="Rename page"]'));
   await manage.eval(setValue('.page-dialog .page-rename input', 'Cancel me'));
@@ -693,6 +779,7 @@ try {
   });
   livePages.push(phonePortrait);
   check("phone shell renders", await phonePortrait.waitFor("!!document.querySelector('.phone-shell')"));
+  check("real phone portrait hides desktop chrome and keeps two columns", await phonePortrait.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none' && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 2"));
   await phonePortrait.eval(clickText('.phone-page-tab', 'Stream'));
   await phonePortrait.waitFor("document.querySelector('.phone-page-heading h1').textContent === 'Stream'");
   check("phone controls have at least 44px touch targets", await phonePortrait.eval("[...document.querySelectorAll('.tile-primary')].every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })"));
@@ -720,7 +807,52 @@ try {
   await phoneLandscape.waitFor("!!document.querySelector('.phone-shell')");
   const landscapeOverflow = await phoneLandscape.eval("document.documentElement.scrollWidth - window.innerWidth");
   check("phone landscape has no horizontal overflow", landscapeOverflow <= 1, `overflow=${landscapeOverflow}px`);
+  check("real phone landscape hides desktop chrome and keeps four columns", await phoneLandscape.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none' && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 4"));
   await phoneLandscape.screenshot("/tmp/deck-smoke-phone-landscape.png");
+
+  // ------------------------------------------------------------ desktop phone preview orientation
+  const { browserContextId: previewCtx } = await cdp.send('Target.createBrowserContext');
+  const desktopPhone = await openPage('phone-desktop', `${BASE}/#/phone`, { width: 1024, height: 900 }, previewCtx);
+  livePages.push(desktopPhone);
+  const longPhoneDeck = {
+    version: 1, theme: 'dark', accent: '#4cc9f0', activePageId: 'p1',
+    pages: [
+      { id: 'p1', name: 'Long page', controls: Array.from({ length: 12 }, (_, index) => ({ id: `c${index}`, label: `Control ${index}`, action: 'mic-mute' })) },
+      { id: 'p2', name: 'Second', controls: [] },
+    ],
+  };
+  await desktopPhone.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(longPhoneDeck))})`);
+  await desktopPhone.reload();
+  await desktopPhone.waitFor("!!document.querySelector('.phone-shell')");
+  check("desktop preview puts the orientation toggle outside the device frame", await desktopPhone.eval("(() => { const bar = document.querySelector('.phone-preview-bar'); return !!bar && bar.contains(document.querySelector('[aria-label=\"Preview orientation\"]')) && !document.querySelector('.phone-shell').contains(bar); })()"));
+  check("desktop preview defaults to landscape", await desktopPhone.eval("document.querySelector('.phone-preview').classList.contains('is-landscape') && document.querySelector('[aria-label=\"Preview orientation\"] [aria-pressed=\"true\"]').textContent === 'Landscape'"));
+  const desktopLandscapeCols = await desktopPhone.eval("getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length");
+  const desktopLandscapeBox = await desktopPhone.eval("(() => { const r = document.querySelector('.phone-shell').getBoundingClientRect(); return { width: r.width, height: r.height }; })()");
+  check("desktop landscape preview uses four columns within ~760x430", desktopLandscapeCols === 4 && desktopLandscapeBox.width <= 760 && desktopLandscapeBox.height <= 431, JSON.stringify({ cols: desktopLandscapeCols, ...desktopLandscapeBox }));
+  await desktopPhone.screenshot('/tmp/deck-design-preview-landscape.png');
+  await desktopPhone.eval(clickText('.phone-preview-bar button', 'Portrait'));
+  await desktopPhone.waitFor("document.querySelector('.phone-preview').classList.contains('is-portrait')");
+  const desktopPortraitCols = await desktopPhone.eval("getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length");
+  const desktopPortraitBox = await desktopPhone.eval("(() => { const r = document.querySelector('.phone-shell').getBoundingClientRect(); return { width: r.width, height: r.height }; })()");
+  check("portrait toggle actually changes the grid to two columns", desktopPortraitCols === 2, `cols=${desktopPortraitCols}`);
+  check("desktop portrait frame is ~390px wide and under 780px tall", Math.abs(desktopPortraitBox.width - 390) <= 1 && desktopPortraitBox.height <= 781, JSON.stringify(desktopPortraitBox));
+  check("portrait toggle reports its pressed state", await desktopPhone.eval("document.querySelector('[aria-label=\"Preview orientation\"] [aria-pressed=\"true\"]').textContent === 'Portrait'"));
+  check("long pages scroll inside the desktop frame", await desktopPhone.eval("(() => { const shell = document.querySelector('.phone-shell'); return shell.scrollHeight > shell.clientHeight; })()"));
+  check("page navigation stays reachable inside the frame", await desktopPhone.eval("(() => { const footer = document.querySelector('.phone-footer'); const shell = document.querySelector('.phone-shell'); return !!footer.querySelector('.phone-page-tab') && footer.getBoundingClientRect().bottom <= shell.getBoundingClientRect().bottom + 1; })()"));
+  await desktopPhone.screenshot('/tmp/deck-design-preview-portrait.png');
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: previewCtx });
+
+  // ------------------------------------------------------------ narrow action picker categories
+  const { browserContextId: catCtx } = await cdp.send('Target.createBrowserContext');
+  const narrowPicker = await openPage('picker-narrow', `${BASE}/`, { width: 240, height: 640, mobile: true }, catCtx);
+  livePages.push(narrowPicker);
+  await narrowPicker.waitFor("!!document.querySelector('.setup-shell')");
+  await narrowPicker.eval(clickText('.setup-header .button', 'Skip setup'));
+  await narrowPicker.waitFor("!!document.querySelector('.app-shell')");
+  await narrowPicker.eval(click('.add-control'));
+  await narrowPicker.waitFor("document.querySelector('.action-library').open");
+  check("narrow action picker categories wrap without overflow", await narrowPicker.eval("(() => { const nav = document.querySelector('.action-categories'); const dialog = document.querySelector('.action-library'); const rows = new Set([...document.querySelectorAll('.action-category')].map((button) => Math.round(button.getBoundingClientRect().top))); const dialogRect = dialog.getBoundingClientRect(); return getComputedStyle(nav).flexWrap === 'wrap' && rows.size > 1 && nav.getBoundingClientRect().right <= dialogRect.right + 1 && dialogRect.left >= -1 && dialogRect.right <= innerWidth + 1; })()"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: catCtx });
 
   // Long names and a full page get their own storage, not the editor/sync fixtures.
   const { browserContextId } = await cdp.send('Target.createBrowserContext');
@@ -881,6 +1013,8 @@ try {
     "deck-design-phone.png",
     "deck-design-volume.png",
     "deck-design-light.png",
+    "deck-design-preview-landscape.png",
+    "deck-design-preview-portrait.png",
     "deck-smoke-phone-portrait.png",
     "deck-smoke-phone-landscape.png",
     "deck-smoke-offline-shell.png",

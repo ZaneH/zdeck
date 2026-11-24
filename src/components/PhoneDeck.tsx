@@ -6,6 +6,7 @@ import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
 import type { LoadStatus } from "../lib/persistence";
 import { applyTheme } from "../lib/theme";
 import type { Control, Deck } from "../lib/types";
+import { BrandMark } from "./BrandMark";
 import { ControlTile } from "./ControlTile";
 import { UpdateBanner } from "./UpdateBanner";
 
@@ -23,6 +24,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
   const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
   const [pressedId, setPressedId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
   const pressTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -83,13 +85,24 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
   };
 
   return (
-    <div className="phone-shell">
+    <div className={`phone-preview is-${orientation}`}>
+      <div className="phone-preview-bar">
+        <span className="phone-preview-title">Phone preview</span>
+        <div className="segmented" role="group" aria-label="Preview orientation">
+          <button type="button" className="button secondary" aria-pressed={orientation === "portrait"} onClick={() => setOrientation("portrait")}>
+            Portrait
+          </button>
+          <button type="button" className="button secondary" aria-pressed={orientation === "landscape"} onClick={() => setOrientation("landscape")}>
+            Landscape
+          </button>
+        </div>
+      </div>
+      <div className="phone-device">
+      <div className="phone-shell">
       <UpdateBanner />
       <header className="phone-header">
         <div className="phone-brand">
-          <div className="brand-copy">
-            <strong>Deck</strong>
-          </div>
+          <BrandMark />
         </div>
         <a href="#/" className="phone-back">
           <ArrowLeft size={16} aria-hidden="true" />
@@ -149,6 +162,8 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
           ))}
         </nav>
       </footer>
+      </div>
+      </div>
     </div>
   );
 }

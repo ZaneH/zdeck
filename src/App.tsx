@@ -50,6 +50,7 @@ import { applyTheme } from "./lib/theme";
 import { useObsConsole } from "./lib/useObsConsole";
 import { useSystemConsole } from "./lib/useSystemConsole";
 import { ActionLibrary } from "./components/ActionLibrary";
+import { BrandMark } from "./components/BrandMark";
 import { ControlTile } from "./components/ControlTile";
 import { Inspector } from "./components/Inspector";
 import { ObsSettingsCard } from "./components/ObsSettingsCard";
@@ -432,7 +433,7 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
     >
       <header className="topbar">
-        <a className="brand" href="#/" aria-label="Deck editor">Deck</a>
+        <a className="brand" href="#/" aria-label="zDeck editor"><BrandMark /></a>
         {route === "editor" ? (
           <PageList
             deck={deck} activePageId={page.id} onSelect={handleSelectPage}
@@ -457,7 +458,13 @@ export default function App() {
           <span>Preview</span>
         </a>
 
-        <a href="#/settings" className="icon-button" aria-label="Open settings" title="Settings" aria-current={route === "settings" ? "page" : undefined}>
+        <a
+          href={route === "settings" ? "#/" : "#/settings"}
+          className="icon-button"
+          aria-label={route === "settings" ? "Back to editor" : "Open settings"}
+          title={route === "settings" ? "Back to editor" : "Settings"}
+          aria-current={route === "settings" ? "page" : undefined}
+        >
           <Settings size={17} aria-hidden="true" />
         </a>
       </header>
