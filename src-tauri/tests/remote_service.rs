@@ -209,7 +209,7 @@ fn default_obs() -> Arc<ObsState> {
 fn default_actions() -> Arc<deck_lib::actions::ActionDispatcher> {
     Arc::new(deck_lib::actions::ActionDispatcher::new(
         default_obs(), default_system(Arc::new(FakeRunner::new(vec![]))),
-        Arc::new(deck_lib::plugin::PluginState::default()),
+        Arc::new(deck_lib::plugin::PluginRegistry::default()),
     ))
 }
 
@@ -236,7 +236,7 @@ struct TestEnv {
     _dir: TempDir,
     system: Arc<SystemState>,
     deck: Arc<DeckStore>,
-    plugin: Arc<deck_lib::plugin::PluginState>,
+    plugin: Arc<deck_lib::plugin::PluginRegistry>,
 }
 
 async fn save_default_deck(store: &DeckStore) {
@@ -254,7 +254,7 @@ async fn env_with(
     let store = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
     save_default_deck(&store).await;
     let system = default_system(runner);
-    let plugin = Arc::new(deck_lib::plugin::PluginState::default());
+    let plugin = Arc::new(deck_lib::plugin::PluginRegistry::default());
     let config = ServiceConfig {
         origin: ORIGIN.to_string(),
         mode: ConnectionMode::default(),
@@ -587,7 +587,7 @@ async fn connection_mode_defaults_and_local_origin_canonicalization() {
     let dir = TempDir::new("local-origins");
     let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
     save_default_deck(&deck).await;
-    let mut default = ServiceConfig::new(ORIGIN,deck.clone(),default_obs(),default_system(Arc::new(FakeRunner::new(vec![]))),Arc::new(deck_lib::plugin::PluginState::default()),default_assets());
+    let mut default = ServiceConfig::new(ORIGIN,deck.clone(),default_obs(),default_system(Arc::new(FakeRunner::new(vec![]))),Arc::new(deck_lib::plugin::PluginRegistry::default()),default_assets());
     assert_eq!(default.mode,ConnectionMode::Tailscale); default.port=0;
     let service=start(default).await.unwrap();
     assert_eq!(service.status().await.mode,Some(ConnectionMode::Tailscale));service.stop().await;
@@ -660,7 +660,7 @@ async fn local_proxy_pairing_actions_and_websocket_require_exact_authority_and_a
         save_default_deck(&deck).await;
         let runner=Arc::new(FakeRunner::new(vec![ok(""),ok("Volume: 0.50")]));
         let mut config=transport_config(origin,ConnectionMode::LocalHttps,deck);
-        config.actions=Arc::new(deck_lib::actions::ActionDispatcher::new(default_obs(),default_system(runner.clone()),Arc::new(deck_lib::plugin::PluginState::default())));
+        config.actions=Arc::new(deck_lib::actions::ActionDispatcher::new(default_obs(),default_system(runner.clone()),Arc::new(deck_lib::plugin::PluginRegistry::default())));
         let service=start(config).await.unwrap();let port=service.port();
         let host=origin.strip_prefix("https://").unwrap();let bare=host.strip_suffix(":8443").unwrap();
         let command=json!({"id":"local-action","revision":1,"controlId":"ctl_volume"}).to_string();
@@ -1329,8 +1329,42 @@ async fn disconnected_plugin_and_phone_payload_injection_are_rejected() {
     assert_eq!(response.status,200);
     assert_eq!(response.json()["state"],"failed");
     assert_eq!(response.json()["code"],"plugin_unavailable");
-    assert_eq!(env.plugin.snapshot().await.status,deck_lib::plugin::ConnectionStatus::Disconnected);
+    assert_eq!(env.plugin.snapshot("fake").await.unwrap().status,deck_lib::plugin::ConnectionStatus::Disconnected);
     env.service.stop().await;
+}
+
+#[tokio::test]
+async fn phone_saved_plugin_ids_route_independently_and_disabling_one_keeps_the_other_live() {
+    let env=default_env().await;
+    let node=std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for isolated multi-plugin test");assert!(node.status.success());
+    let node=String::from_utf8(node.stdout).unwrap().trim().to_owned();
+    let mut deck=env.deck.load().await.unwrap().deck;
+    for (id,volume) in [("alpha",17),("beta",83)] {
+        let entry=env._dir.path.join(format!("{id}.cjs"));
+        let source=format!("const pluginId={};\n",json!(id))+r#"
+let count=0;require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),base={protocolVersion:1,id:r.id,type:'result'};
+ if(r.type==='describe'){process.stdout.write(JSON.stringify({...base,manifest:{id:pluginId,version:'0.1.0',protocolVersion:1,actions:[{id:'set-volume',title:'Volume',config:{volume:{type:'integer',minimum:0,maximum:100}}}]}})+'\n');return;}
+ if(r.type==='execute')count++;
+ process.stdout.write(JSON.stringify({...base,state:{pluginId,count,volume:r.args?.volume??0}})+'\n');
+});
+"#;
+        std::fs::write(&entry,source).unwrap();env.plugin.connect(id,node.clone(),entry.to_str().unwrap().into()).await.unwrap();
+        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
+    }
+    env.deck.save(1,deck).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
+    for (id,volume) in [("alpha",17),("beta",83)] {
+        let command=json!({"id":format!("run_{id}"),"revision":2,"controlId":format!("ctl_{id}")}).to_string();
+        let response=http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        assert_eq!(response.status,200);let result=response.json();assert_eq!(result["state"],"confirmed");assert_eq!(result["observed"]["pluginId"],id);assert_eq!(result["observed"]["volume"],volume);assert_eq!(result["observed"]["count"],1);
+    }
+    env.plugin.disconnect("alpha").await.unwrap();assert_eq!(env.plugin.snapshots().await.len(),1);
+    for id in ["alpha","beta"] {
+        let command=json!({"id":format!("after_{id}"),"revision":2,"controlId":format!("ctl_{id}")}).to_string();
+        let response=http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        let result=response.json();if id=="alpha" {assert_eq!(result["code"],"plugin_unavailable");}else{assert_eq!(result["state"],"confirmed");assert_eq!(result["observed"]["count"],2);assert_eq!(result["observed"]["pluginId"],"beta");}
+    }
+    env.plugin.disconnect("beta").await.unwrap();env.service.stop().await;
 }
 
 #[tokio::test]
@@ -1356,7 +1390,7 @@ rl.on('line',line=>{
         std::fs::write(&entrypoint,source).unwrap();
         let node = std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for remote fake-plugin test; not skipped");
         assert!(node.status.success());
-        let snapshot = env.plugin.connect(String::from_utf8(node.stdout).unwrap().trim().into(),entrypoint.to_str().unwrap().into()).await.unwrap();
+        let snapshot = env.plugin.connect("fake",String::from_utf8(node.stdout).unwrap().trim().into(),entrypoint.to_str().unwrap().into()).await.unwrap();
         assert!(snapshot.state.is_none());
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1,"connect must describe only");
         let (_,token) = approved_device(&env,"Plugin").await;
@@ -1366,10 +1400,10 @@ rl.on('line',line=>{
         let result = first.json();
         if crash {
             assert_eq!(result["state"],"unknown"); assert_eq!(result["code"],"plugin_outcome_unknown");
-            assert_eq!(env.plugin.snapshot().await.status,deck_lib::plugin::ConnectionStatus::Stopped);
+            assert_eq!(env.plugin.snapshot("fake").await.unwrap().status,deck_lib::plugin::ConnectionStatus::Stopped);
         } else {
             assert_eq!(result["state"],"confirmed"); assert_eq!(result["observed"]["volume"],50);
-            assert_eq!(env.plugin.snapshot().await.state.unwrap()["count"],1,"desktop sees remote result");
+            assert_eq!(env.plugin.snapshot("fake").await.unwrap().state.unwrap()["count"],1,"desktop sees remote result");
         }
         let repeated = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
         assert_eq!(repeated.json(),result);
@@ -1391,7 +1425,7 @@ rl.on('line',line=>{
             assert_eq!(r.json()["state"],"failed"); assert_eq!(r.json()["code"],"plugin_setup_required");
             assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),2,"unknown action must not reach process");
         }
-        env.plugin.disconnect().await;
+        env.plugin.disconnect("fake").await.unwrap();
         env.service.stop().await;
     }
 }
@@ -2733,7 +2767,7 @@ mod browser_smoke {
             mode: ConnectionMode::default(),
             port: 0,
             deck: store.clone(),
-            actions: Arc::new(deck_lib::actions::ActionDispatcher::new(default_obs(), default_system(runner.clone()), Arc::new(deck_lib::plugin::PluginState::default()))),
+            actions: Arc::new(deck_lib::actions::ActionDispatcher::new(default_obs(), default_system(runner.clone()), Arc::new(deck_lib::plugin::PluginRegistry::default()))),
             assets: Arc::new(DiskAssets { root: dist }),
             clock: default_clock(),
             limits: Limits::default(),

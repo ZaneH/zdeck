@@ -5,7 +5,7 @@
 //! returned verbatim; the remainder is discarded.
 //! State is plugin-authored JSON, not trusted/sanitized support-log material.
 
-use std::{collections::{BTreeMap, HashSet}, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::{BTreeMap, HashSet}, path::PathBuf, process::Stdio, sync::{Arc, Mutex as MapMutex}, time::Duration};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}, sync::Mutex, time::timeout};
@@ -356,6 +356,91 @@ impl Inner {
             }
             Operation::Stop => unreachable!(),
         }
+    }
+}
+
+const MAX_PLUGINS: usize = 16;
+struct RegistryEntry { state: Arc<PluginState>, gate: Arc<Mutex<()>>, transient: bool }
+/// Independent session-local plugins. The map lock never spans plugin I/O.
+#[derive(Default, Clone)]
+pub struct PluginRegistry { entries: Arc<MapMutex<BTreeMap<String, Arc<RegistryEntry>>>> }
+fn registry_error(code: &'static str, hint: &'static str) -> PluginError {
+    let mut error = PluginError::new(ErrorKind::Unavailable, Outcome::NotStarted);
+    error.code = Some(code); error.hint = hint; error
+}
+fn disconnected() -> PluginSnapshot { Session::default().snapshot() }
+impl PluginRegistry {
+    pub(crate) async fn manage<F, Fut, T>(&self, id: &str, create: bool, remove: bool, operation: F) -> Result<T, PluginError>
+    where F: FnOnce(Arc<PluginState>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
+        T: Send + 'static,
+    {
+        if !identifier(id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let (entry, guard) = loop {
+            let entry = {
+                let mut entries = self.entries.lock().expect("plugin registry lock");
+                if let Some(entry) = entries.get(id) { entry.clone() }
+                else {
+                    if !create { return Err(registry_error("not_enabled", "Enable this trusted plugin explicitly from the catalog first.")); }
+                    // Removals get a bounded extra budget even when all enabled slots are occupied.
+                    if entries.len() >= MAX_PLUGINS * 2 || (!remove && entries.values().filter(|entry| !entry.transient).count() >= MAX_PLUGINS) {
+                        return Err(registry_error("capacity", "Disable a plugin or wait for pending removals; at most 16 enabled or stopped sessions are retained."));
+                    }
+                    let entry = Arc::new(RegistryEntry { state: Arc::new(PluginState::default()), gate: Arc::new(Mutex::new(())), transient: remove });
+                    entries.insert(id.to_owned(), entry.clone()); entry
+                }
+            };
+            let guard = entry.gate.clone().lock_owned().await;
+            if self.entries.lock().expect("plugin registry lock").get(id).is_some_and(|current| Arc::ptr_eq(current, &entry)) { break (entry, guard); }
+        };
+        let entries = self.entries.clone(); let id = id.to_owned();
+        // An admitted lifecycle operation must finish even if its IPC caller leaves.
+        tokio::spawn(async move {
+            let _guard = guard;
+            let result = operation(entry.state.clone()).await;
+            let empty = entry.state.snapshot().await.status == ConnectionStatus::Disconnected;
+            if (remove && result.is_ok()) || empty {
+                let mut entries = entries.lock().expect("plugin registry lock");
+                if entries.get(&id).is_some_and(|current| Arc::ptr_eq(current, &entry)) { entries.remove(&id); }
+            }
+            result
+        }).await.unwrap_or_else(|_| Err(PluginError::new(ErrorKind::Unavailable, Outcome::Unknown)))
+    }
+    /// Trusted Rust-only helper; no manual launch IPC is registered.
+    pub async fn connect(&self, id: &str, program: String, entrypoint: String) -> Result<PluginSnapshot, PluginError> {
+        if !identifier(id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let expected_id = id.to_owned();
+        self.manage(id, true, false, move |state| async move {
+            let snapshot = state.connect(program, entrypoint).await?;
+            if snapshot.manifest.as_ref().is_none_or(|m| m.id != expected_id) {
+                state.disconnect().await;
+                return Err(PluginError::new(ErrorKind::InvalidManifest, Outcome::NotStarted));
+            }
+            Ok(snapshot)
+        }).await
+    }
+    pub async fn disconnect(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
+        let result = self.manage(id, false, true, |state| async move { Ok(state.disconnect().await) }).await;
+        match result { Err(error) if error.code == Some("not_enabled") => Ok(disconnected()), other => other }
+    }
+    pub async fn snapshot(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
+        if !identifier(id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let entry = self.entries.lock().expect("plugin registry lock").get(id).cloned();
+        Ok(if let Some(entry) = entry { entry.state.snapshot().await } else { disconnected() })
+    }
+    pub async fn snapshots(&self) -> BTreeMap<String, PluginSnapshot> {
+        let entries = self.entries.lock().expect("plugin registry lock").clone();
+        let mut snapshots = BTreeMap::new();
+        for (id, entry) in entries { if !entry.transient { snapshots.insert(id, entry.state.snapshot().await); } }
+        snapshots
+    }
+    pub async fn state(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
+        self.manage(id, false, false, |state| async move { state.state().await }).await
+    }
+    pub async fn execute(&self, id: String, action: String, args: Value) -> Result<PluginSnapshot, PluginError> {
+        if !identifier(&id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let plugin_id = id.clone();
+        self.manage(&id, false, false, move |state| async move { state.execute(plugin_id, action, args).await }).await
     }
 }
 

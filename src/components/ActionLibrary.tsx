@@ -21,11 +21,11 @@ interface ActionLibraryProps {
   pageName: string;
   disabled?: boolean;
   dialogRef: RefObject<HTMLDialogElement | null>;
-  manifest?: PluginManifest | null;
+  manifests?: PluginManifest[];
   onAdd: (kind: ActionKind, options?: ControlOptions) => void;
 }
 
-export function ActionLibrary({ pageName, disabled = false, dialogRef, manifest, onAdd }: ActionLibraryProps) {
+export function ActionLibrary({ pageName, disabled = false, dialogRef, manifests = [], onAdd }: ActionLibraryProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("All");
   useDialogBackdrop(dialogRef);
@@ -35,14 +35,14 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifest,
     setCategory("All");
   };
   const close = () => { reset(); dialogRef.current?.close(); };
-  const categories = CATEGORIES.filter((item) => item !== "Plugins" || manifest);
+  const categories = CATEGORIES.filter((item) => item !== "Plugins" || manifests.length > 0);
   const needle = query.trim().toLowerCase();
   const catalog = [
     ...ACTION_CATALOG.map((action) => ({ ...action, options: undefined as ControlOptions | undefined })),
-    ...(manifest?.actions.map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
+    ...manifests.flatMap((manifest) => manifest.actions.map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
       description: `${manifest.id} · ${action.id}`, note: "Trusted local plugin", defaultLabel: action.title,
       options: { label: action.title, pluginId: manifest.id, pluginAction: action.id, pluginArgs: pluginDefaults(action) },
-    })) ?? []),
+    }))),
   ];
   const filtered = catalog.filter(
     (action) =>
@@ -88,8 +88,8 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifest,
               <h3 className="action-group-title">{item}</h3>
               {actions.map((action) => (
                 <button
-                  key={`${action.kind}-${action.options?.pluginAction ?? ""}`} type="button" className="action-row" disabled={disabled}
-                  aria-label={`Add ${action.name} to ${pageName}`}
+                  key={`${action.kind}-${action.options?.pluginId ?? ""}-${action.options?.pluginAction ?? ""}`} type="button" className="action-row" disabled={disabled}
+                  aria-label={`Add ${action.name}${action.options?.pluginId ? ` (${action.options.pluginId})` : ""} to ${pageName}`}
                   onClick={() => { onAdd(action.kind, action.options); close(); }}
                 >
                   <ActionIcon kind={action.kind} size={20} />

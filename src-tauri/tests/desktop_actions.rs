@@ -1,7 +1,7 @@
 //! Native saved-control tests: temporary stores and fake adapters only. No
 //! private service, phone credential, live OBS, system tool or media action.
 use std::{collections::VecDeque, future::Future, path::PathBuf, pin::Pin, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}, time::Duration};
-use deck_lib::{actions::{ActionDispatcher, ActionErrorCode, CommandResult, CommandState, DesktopActions, DesktopCommand}, deck::{default_deck, Control, ControlAction, DeckStore, DECK_FILE_NAME}, obs::ObsState, plugin::PluginState, system::{CommandRunner, CommandSpec, RunOutput, SystemError, SystemState, Timeouts}};
+use deck_lib::{actions::{ActionDispatcher, ActionErrorCode, CommandResult, CommandState, DesktopActions, DesktopCommand}, deck::{default_deck, Control, ControlAction, DeckStore, DECK_FILE_NAME}, obs::ObsState, plugin::PluginRegistry, system::{CommandRunner, CommandSpec, RunOutput, SystemError, SystemState, Timeouts}};
 use serde_json::{json, Value};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -29,14 +29,14 @@ impl CommandRunner for FakeRunner {
         })
     }
 }
-struct Env { dir:TempDir, store:Arc<DeckStore>, dispatcher:Arc<ActionDispatcher>, desktop:Arc<DesktopActions>, runner:Arc<FakeRunner>, plugin:Arc<PluginState> }
+struct Env { dir:TempDir, store:Arc<DeckStore>, dispatcher:Arc<ActionDispatcher>, desktop:Arc<DesktopActions>, runner:Arc<FakeRunner>, plugin:Arc<PluginRegistry> }
 impl Env {
     async fn new(outputs:&[&str],delay:Duration,deadline:Duration) -> Self {
         let dir=TempDir::new(); let store=Arc::new(DeckStore::new(dir.0.join(DECK_FILE_NAME)));
         store.save(0,default_deck()).await.unwrap();
         let runner=Arc::new(FakeRunner::new(outputs,delay));
         let system=Arc::new(SystemState::with_runner_and_timeouts(runner.clone(),Timeouts {command:deadline}));
-        let plugin=Arc::new(PluginState::default());
+        let plugin=Arc::new(PluginRegistry::default());
         let dispatcher=Arc::new(ActionDispatcher::new(Arc::new(ObsState::default()),system,plugin.clone()));
         let desktop=Arc::new(DesktopActions::new(dispatcher.clone()));
         Self {dir,store,dispatcher,desktop,runner,plugin}
@@ -230,7 +230,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
 "#;
         std::fs::write(&entry,source).unwrap();
         let node=std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for fake desktop plugin test; not skipped");assert!(node.status.success());
-        env.plugin.connect(String::from_utf8(node.stdout).unwrap().trim().into(),entry.to_str().unwrap().into()).await.unwrap();
+        env.plugin.connect("fake",String::from_utf8(node.stdout).unwrap().trim().into(),entry.to_str().unwrap().into()).await.unwrap();
         assert!(!log.exists(),"connect describes only");
         let mut deck=default_deck();deck.pages[0].controls.push(Control {id:"plugin".into(),label:"Plugin".into(),action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:json!({"n":7}).as_object().unwrap().clone()}});
         env.store.save(1,deck).await.unwrap();
@@ -242,7 +242,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
         let repeated=env.desktop.run(&env.store,command("execute",2,"plugin",None)).await.unwrap();
         assert_eq!(serde_json::to_value(result).unwrap(),serde_json::to_value(repeated).unwrap());
         let lines=std::fs::read_to_string(&log).unwrap();assert_eq!(lines.lines().count(),1);assert_eq!(serde_json::from_str::<Value>(lines.trim()).unwrap(),json!({"n":7}));
-        env.plugin.disconnect().await;
+        env.plugin.disconnect("fake").await.unwrap();
         assert!(env.runner.calls().is_empty());
     }
 }

@@ -38,7 +38,7 @@ use url::Url;
 use crate::deck::{ControlAction, DeckSnapshot, DeckStore};
 use crate::obs::ObsState;
 use crate::system::SystemState;
-use crate::plugin::PluginState;
+use crate::plugin::PluginRegistry;
 use crate::actions::{command_value, find_control, interrupted_result, validate_action_value, validate_command_fields, ActionDispatcher};
 pub use crate::actions::{CommandResult, CommandState};
 
@@ -154,7 +154,7 @@ impl ServiceConfig {
         deck: Arc<DeckStore>,
         obs: Arc<ObsState>,
         system: Arc<SystemState>,
-        plugin: Arc<PluginState>,
+        plugin: Arc<PluginRegistry>,
         assets: Arc<dyn AssetProvider>,
     ) -> Self {
         Self {

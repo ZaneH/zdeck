@@ -77,6 +77,75 @@ lines.on('line', line => {
 lines.on('close',()=> { if(mode==='stubborn') setInterval(()=>{},1000); });
 "#;
 
+struct RegistryFixture { dir: PathBuf, node: String }
+impl RegistryFixture {
+    fn new() -> Self {
+        let node=Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for fake registry tests");assert!(node.status.success());
+        let dir=std::env::temp_dir().join(format!("zdeck-registry-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
+        std::fs::create_dir(&dir).unwrap();Self {dir,node:String::from_utf8(node.stdout).unwrap().trim().into()}
+    }
+    fn entry(&self,id:&str,mode:&str)->String {
+        let log=self.dir.join(format!("{id}.log"));
+        let source=SCRIPT.replace("const [mode, log] = process.argv.slice(1);",&format!("const mode={},log={};",json!(mode),json!(log.to_str().unwrap())))
+            .replace("id:'fake'",&format!("id:{}",json!(id))).replace("),100);","),1000);");
+        let entry=self.dir.join(format!("{id}.cjs"));std::fs::write(&entry,source).unwrap();entry.to_str().unwrap().into()
+    }
+    fn calls(&self,id:&str)->Vec<String>{std::fs::read_to_string(self.dir.join(format!("{id}.log"))).unwrap_or_default().lines().map(str::to_owned).collect()}
+    fn reaped(&self,id:&str){for call in self.calls(id){let pid=call.split(':').nth(2).unwrap();let output=Command::new(&self.node).args(["-e","try {process.kill(Number(process.argv[1]),0);process.exit(1)}catch(e){process.exit(e.code==='ESRCH'?0:2)}",pid]).status().unwrap();assert!(output.success(),"leaked plugin process");}}
+}
+impl Drop for RegistryFixture {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.dir);}}
+
+#[tokio::test]
+async fn registry_routes_two_plugins_and_isolates_failure_and_disabling() {
+    use deck_lib::plugin::{PluginRegistry,ConnectionStatus};
+    let f=RegistryFixture::new();let registry=PluginRegistry::default();
+    registry.connect("alpha",f.node.clone(),f.entry("alpha","ok")).await.unwrap();
+    registry.connect("beta",f.node.clone(),f.entry("beta","exit")).await.unwrap();
+    assert_eq!(registry.snapshots().await.len(),2);
+    assert_eq!(f.calls("alpha").len(),1);assert_eq!(f.calls("beta").len(),1);
+    assert_eq!(registry.execute("alpha".into(),"go".into(),json!({"n":7})).await.unwrap().state.unwrap()["count"],1);
+    let error=registry.execute("beta".into(),"go".into(),json!({"n":2})).await.unwrap_err();assert_eq!(error.outcome,Outcome::Unknown);
+    assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Stopped);
+    assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Connected);
+    registry.disconnect("beta").await.unwrap();assert_eq!(registry.snapshots().await.len(),1);
+    assert_eq!(registry.state("alpha").await.unwrap().state.unwrap()["count"],1);
+    assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Disconnected);
+    assert_eq!(registry.execute("beta".into(),"go".into(),json!({"n":2})).await.unwrap_err().outcome,Outcome::NotStarted);
+    registry.disconnect("alpha").await.unwrap();assert!(registry.snapshots().await.is_empty());
+    f.reaped("alpha");f.reaped("beta");
+}
+
+#[tokio::test]
+async fn registry_independent_io_duplicate_enable_and_cancellation_do_not_leak_hosts() {
+    use deck_lib::plugin::{PluginRegistry,ConnectionStatus};
+    let f=RegistryFixture::new();let registry=std::sync::Arc::new(PluginRegistry::default());
+    let alpha=f.entry("alpha","delay");let beta=f.entry("beta","ok");
+    registry.connect("alpha",f.node.clone(),alpha.clone()).await.unwrap();registry.connect("beta",f.node.clone(),beta).await.unwrap();
+    let other=registry.clone();let operation=tokio::spawn(async move {other.state("alpha").await});
+    tokio::time::timeout(Duration::from_secs(2),async {while f.calls("alpha").len()<2 {tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    tokio::time::timeout(Duration::from_millis(500),registry.state("beta")).await.unwrap().unwrap();operation.await.unwrap().unwrap();
+    let (first,second)=tokio::join!(registry.connect("alpha",f.node.clone(),alpha.clone()),registry.connect("alpha",f.node.clone(),alpha.clone()));
+    first.unwrap();second.unwrap();
+    let other=registry.clone();let node=f.node.clone();let task=tokio::spawn(async move {other.connect("alpha",node,alpha).await});
+    tokio::time::timeout(Duration::from_secs(2),async {while f.calls("alpha").iter().filter(|l|l.starts_with("describe:")).count()<4 {tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    task.abort();assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Connected);
+    registry.disconnect("alpha").await.unwrap();registry.disconnect("beta").await.unwrap();
+    f.reaped("alpha");f.reaped("beta");
+}
+
+#[tokio::test]
+async fn registry_capacity_is_bounded_and_disabled_slots_are_reclaimed() {
+    use deck_lib::plugin::PluginRegistry;
+    let registry=PluginRegistry::default();let missing=std::env::temp_dir().join("zdeck-no-such-runtime").to_str().unwrap().to_owned();
+    let entry=std::env::temp_dir().join("zdeck-no-such-entry.js").to_str().unwrap().to_owned();
+    for i in 0..16 {assert_eq!(registry.connect(&format!("p{i}"),missing.clone(),entry.clone()).await.unwrap_err().code,Some("runtime_missing"));}
+    assert_eq!(registry.snapshots().await.len(),16);
+    assert_eq!(registry.connect("overflow",missing.clone(),entry.clone()).await.unwrap_err().code,Some("capacity"));
+    for i in 0..32 {let id=format!("new{i}");registry.disconnect(if i==0 {"p0"} else {"unused"}).await.unwrap();registry.connect(&id,missing.clone(),entry.clone()).await.unwrap_err();registry.disconnect(&id).await.unwrap();}
+    assert_eq!(registry.snapshots().await.len(),15);
+    for i in 1..16 {registry.disconnect(&format!("p{i}")).await.unwrap();}assert!(registry.snapshots().await.is_empty());
+}
+
 #[tokio::test]
 async fn lazy_validation_correlation_and_serialization() {
     let f = Fixture::new("ok");

@@ -261,6 +261,7 @@ const setSelect = (selector, value) =>
   `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`;
 // Real input avoids synthetic change/blur racing submission in controlled rename forms.
 async function typeInput(page, selector, text) {
+  if (!await page.waitFor(`!!document.querySelector(${JSON.stringify(selector)})`)) throw new Error(`Input did not mount: ${selector}`);
   await page.send('Page.bringToFront');
   await page.eval(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.focus(); input.select(); })()`);
   await page.send('Input.insertText', { text });
@@ -679,7 +680,10 @@ try {
     window.__remoteStartOrigins = [];
     window.__desktopCalls = [];
     let savedDeck = ${JSON.stringify(adminDeck)}, savedRevision = 1;
-    let cachedPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
+    const emptyPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
+    const cachedPlugins = {};
+    window.__removedPlugins = [];
+    window.__pluginCalls = [];
     window.__pluginArgs = null;
     window.__pluginsInstalled = false;
     window.__runtimeStatus = 'detected';
@@ -706,28 +710,34 @@ try {
         if (window.__desktopError) throw {code:window.__desktopError,message:'raw secret diagnostic'};
         return {id:args.commandId,state:window.__desktopResult || 'confirmed',message:'Safe backend result.'};
       }
-      if (command === 'plugin_snapshot') return cachedPlugin;
-      if (command === 'plugin_catalog') return {
+      if (command.startsWith('plugin_')) window.__pluginCalls.push({command,args});
+      if (command === 'plugin_snapshots') return {...cachedPlugins};
+      if (command === 'plugin_snapshot') return cachedPlugins[args.pluginId] || emptyPlugin;
+      if (command === 'plugin_catalog') { const catalog = {
         directory:'/Users/fixture/.config/zdeck/plugins',
         node:window.__runtimeStatus === 'not_found' ? {status:'not_found',version:null,path:null} : {status:'detected',version:'22.18.0',path:'/detected/node'},
         plugins:window.__pluginsInstalled ? [
           {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
           {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
-          {id:'broken',name:'broken',version:'',protocolVersion:0,status:'invalid',message:'Invalid manifest.'},
+          {id:'broken',name:'broken',version:'0.1.0',protocolVersion:1,status:'invalid',message:'The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.'},
           {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.'}
-        ] : [], truncated:false
-      };
+        ].filter(entry => !window.__removedPlugins.includes(entry.id)) : [], truncated:false
+      }; if (window.__holdCatalog) await new Promise(resolve => { window.__finishCatalog = resolve; }); return catalog; }
       if (command === 'plugin_open_directory') return null;
       if (command === 'plugin_enable') {
-        if (args.pluginId !== 'spotify' || Object.keys(args).length !== 1) throw new Error('Invalid enable arguments');
-        return cachedPlugin = {status:'connected', manifest:pluginManifest, state:null, lastError:null};
+        if (!['spotify','other'].includes(args.pluginId) || Object.keys(args).length !== 1) throw new Error('Invalid enable arguments');
+        if (window.__holdEnable === args.pluginId) await new Promise(resolve => { window.__finishEnable = resolve; });
+        const manifest = args.pluginId === 'spotify' ? pluginManifest : {id:'other',version:'0.1.0',protocolVersion:1,actions:[{id:'next',title:'Other action',config:{}}]};
+        return cachedPlugins[args.pluginId] = {status:'connected', manifest, state:null, lastError:null};
       }
-      if (command === 'plugin_disconnect') return cachedPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
-      if (command === 'plugin_state') return cachedPlugin = {...cachedPlugin, state:{title:'<script>Track</script>', artist:'Artist', playback:'paused', volume:50, secret:'NEVER DISPLAY THIS'}};
+      if (command === 'plugin_disconnect') return cachedPlugins[args.pluginId] = emptyPlugin;
+      if (command === 'plugin_diagnostics') return {pluginId:args.pluginId,checks:[{name:'SDK dependency',status:'fail',message:'raw secret source symlink'}]};
+      if (command === 'plugin_uninstall') { window.__removedPlugins.push(args.pluginId); delete cachedPlugins[args.pluginId]; return null; }
+      if (command === 'plugin_state') return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:{title:'<script>Track</script>', artist:'Artist', playback:'paused', volume:50, secret:'NEVER DISPLAY THIS'}};
       if (command === 'plugin_execute') {
         window.__pluginArgs = args;
-        if (window.__failPlugin) throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
-        return cachedPlugin = {...cachedPlugin, state:{title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume}};
+        if (window.__failPlugin && args.pluginId === 'spotify') throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
+        return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
       }
       if (command === 'remote_status') return status();
       if (command === 'remote_list_devices') return [];
@@ -864,41 +874,69 @@ try {
   check('Settings remount restores the last successful address, not its unsaved draft', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
   await admin.reload();
   check('program-session reload remembers the address without auto-starting service', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'plugin_snapshot' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   // ------------------------------------------------------------ plugin UI (owned IPC fake, never osascript)
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
-  check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshot','plugin_catalog'].includes(c))"));
+  check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshots','plugin_catalog'].includes(c))"));
   check('plugin settings detects Node and explains empty installation without path inputs', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0') && document.querySelector('.plugin-settings').textContent.includes('Nothing installed yet')") && await admin.eval("!document.querySelector('.plugin-settings input[type=text]')"));
   await admin.eval(clickText('.plugin-settings button', 'Open plugin folder'));
   check('Open plugin folder invokes only the fixed native opener command', await admin.waitFor("window.__adminCalls.includes('plugin_open_directory')"));
   await admin.eval("window.__pluginsInstalled = true");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
-  check('refresh discovers copied folders and explains invalid/incompatible entries', await admin.waitFor("document.querySelector('.plugin-settings select')?.options.length === 5 && document.querySelector('.plugin-settings').textContent.includes('broken — invalid') && document.querySelector('.plugin-settings').textContent.includes('future — incompatible')"));
-  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
-  check('Enable stays disabled until selected plugin trust is acknowledged', await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  check('selected ready plugin and checked trust enable the button', await admin.eval("!document.querySelector('.plugin-settings .button.primary').disabled"));
-  await admin.eval(setSelect('.plugin-settings select', 'other'));
-  check('changing selected plugin resets trust', await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
-  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
+  const row = (id) => `.plugin-row[data-plugin-id="${id}"]`;
+  check('refresh discovers inset plugin rows without a selection dropdown', await admin.waitFor("document.querySelectorAll('.plugin-row').length === 4 && !document.querySelector('.plugin-settings select')"));
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  check('requesting Enable opens unchecked row consent without launching', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-confirm .button.primary').disabled && !window.__adminCalls.includes('plugin_enable')"));
   await admin.eval("document.querySelector('.plugin-trust input').click()");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
-  check('refresh clears selection trust without enabling anything', await admin.waitFor("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings select').value === ''") && await admin.eval("!window.__adminCalls.includes('plugin_enable')"));
+  check('refresh clears pending trust without enabling any row', await admin.waitFor("!document.querySelector('.plugin-confirm')") && await admin.eval("!window.__adminCalls.includes('plugin_enable')"));
   await admin.eval("window.__runtimeStatus = 'not_found'");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Node not found')");
-  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  check('missing runtime disables Enable even with acknowledged trust', await admin.eval("document.querySelector('.plugin-settings .button.primary').disabled"));
+  check('missing runtime disables row Enable', await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').disabled"));
   await admin.eval("window.__runtimeStatus = 'detected'");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
-  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  await admin.eval(clickText('.plugin-settings button', 'Enable plugin'));
-  check('Enable describes only, with no state read, legacy connect or execution', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin connected.')") && await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshot','plugin_catalog','plugin_open_directory','plugin_enable'].includes(c)) && window.__adminCalls.filter(c => c === 'plugin_enable').length === 1"));
-  check('connected session requires disconnect before switching', await admin.eval("document.querySelector('.plugin-settings select').disabled && document.querySelector('.plugin-settings .button.primary').disabled"));
-  await admin.eval(clickText('.plugin-settings button', 'Read state'));
+  await admin.eval("window.__holdEnable = 'spotify'");
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
+  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
+  check('one pending plugin does not disable another row', await admin.waitFor("!!window.__finishEnable") && await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').disabled && !document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').disabled"));
+  await admin.eval(click(`${row('other')} .plugin-row-actions > button`));
+  await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-trust input').click()");
+  await admin.eval(clickText(`${row('other')} button`, 'Enable plugin'));
+  await admin.waitFor("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent === 'Disable'");
+  await admin.eval("window.__holdEnable = null; window.__finishEnable()");
+  check('two plugins enable independently with no automatic state read or execute', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent === 'Disable'") && await admin.eval("!window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute') && window.__pluginCalls.filter(c=>c.command==='plugin_enable').map(c=>c.args.pluginId).sort().join(',')==='other,spotify'"));
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  check('catalog refresh preserves both enabled sessions', await admin.waitFor("!document.querySelector('.plugin-settings .settings-actions button').disabled") && await admin.eval("[...document.querySelectorAll('.plugin-row-actions > button')].filter(b=>b.textContent==='Disable').length===2"));
+  await admin.eval("document.querySelector('[data-plugin-id=broken] .plugin-menu summary').focus()");
+  await pressKey(admin, 'Enter', 'Enter', 13, '\r');
+  check('invalid SDK row has a keyboard-accessible diagnostics menu', await admin.waitFor("document.querySelector('[data-plugin-id=broken] .plugin-menu').open"));
+  await admin.eval(clickText(`${row('broken')} button`, 'Diagnostics'));
+  check('diagnostics are safe, per-row, and never launch/read/execute plugin code', await admin.waitFor("!!document.querySelector('[data-plugin-id=broken] .plugin-diagnostics')") && await admin.eval("document.querySelector('[data-plugin-id=broken]').textContent.includes('complete packaged folder') && !document.querySelector('[data-plugin-id=broken]').textContent.includes('raw secret') && !window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute')"));
+  await admin.eval(click(`${row('broken')} .plugin-menu summary`));
+  await admin.eval(clickText(`${row('broken')} button`, 'Uninstall…'));
+  check('uninstall requires confirmation and explains recoverable backup', await admin.waitFor("document.querySelector('[data-plugin-id=broken] .plugin-confirm')?.textContent.includes('plugin-backups')") && await admin.eval("!window.__adminCalls.includes('plugin_uninstall')"));
+  await admin.eval(clickText(`${row('broken')} button`, 'Cancel'));
+  check('cancelling uninstall sends no request', await admin.eval("!window.__adminCalls.includes('plugin_uninstall')"));
+  await admin.eval("window.__holdCatalog = true");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  await admin.waitFor("!!window.__finishCatalog");
+  await admin.eval(click(`${row('broken')} .plugin-menu summary`));
+  await admin.eval(clickText(`${row('broken')} button`, 'Uninstall…'));
+  await admin.eval(clickText(`${row('broken')} button`, 'Confirm uninstall'));
+  check('confirmed fake uninstall removes only its row and preserves enabled plugins', await admin.waitFor("!document.querySelector('[data-plugin-id=broken]')") && await admin.eval("window.__removedPlugins.join(',')==='broken' && [...document.querySelectorAll('.plugin-row-actions > button')].filter(b=>b.textContent==='Disable').length===2"));
+  await admin.eval("window.__holdCatalog = false; window.__finishCatalog()");
+  check('a stale catalog refresh cannot resurrect an uninstalled row', await admin.waitFor("!document.querySelector('.plugin-settings .settings-actions button').disabled") && await admin.eval("!document.querySelector('[data-plugin-id=broken]')"));
+  await admin.eval("document.querySelector('.plugin-settings').scrollIntoView({block:'start'})");
+  await admin.screenshot('/tmp/zdeck-plugin-list-desktop.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: false });
+  await admin.eval("document.querySelector('.plugin-list').scrollIntoView({block:'start'})");
+  await admin.screenshot('/tmp/zdeck-plugin-list-narrow.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
+  await admin.eval(click(`${row('spotify')} .plugin-state summary`));
+  await admin.eval(clickText(`${row('spotify')} button`, 'Read state'));
   check('explicit Read state displays only bounded supported text', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('<script>Track</script>')") && await admin.eval("!document.querySelector('.plugin-settings script') && !document.querySelector('.plugin-settings').textContent.includes('NEVER DISPLAY THIS') && document.querySelector('.plugin-settings').textContent.includes('not live')"));
   await admin.eval("document.querySelector('.plugin-settings').scrollIntoView({block:'start'})");
   await admin.screenshot('/tmp/deck-plugin-settings.png');
@@ -910,7 +948,7 @@ try {
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.add-control')");
   await admin.eval(click('.add-control'));
-  check('connected manifest action appears as escaped text in the library', await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Spotify <volume>')") && await admin.eval("!document.querySelector('.action-library volume')"));
+  check('all enabled manifests appear in the action library as escaped text', await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Spotify <volume>') && [...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Other action')") && await admin.eval("!document.querySelector('.action-library volume')"));
   await admin.eval(clickText('.action-row', 'Spotify <volume>'));
   await admin.waitFor("!!document.querySelector('.inspector-form .native-control input[type=number]')");
   check('plugin uses a configured button with sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelectorAll('.control-tile[data-action=plugin] input[type=range]').length === 0"));
@@ -933,12 +971,19 @@ try {
   check('unknown outcome is sanitized, warns, disables Run and requires explicit reconnect', await admin.waitFor("document.querySelector('.inspector-form').textContent.includes('Outcome unknown')") && await admin.eval("document.querySelector('.native-control .button.primary').disabled && !document.querySelector('.inspector-form').textContent.includes('raw secret')"));
   await admin.eval("location.hash = '#/settings'");
   await admin.waitFor("!!document.querySelector('.plugin-settings')");
-  check('failure clears trust and settings never stores launch paths', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input').checked && !JSON.stringify(localStorage).includes('/detected/node')"));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  await admin.eval(clickText('.plugin-settings button', 'Enable plugin'));
-  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin connected.')");
-  await admin.eval(clickText('.plugin-settings button', 'Disconnect'));
-  check('disconnect clears trust and leaves enabling explicit', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin disconnected.') && !document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
+  check('one failed plugin does not overwrite its healthy neighbor or retain trust', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  check('re-enabling failed row requires fresh unchecked consent', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('[data-plugin-id=spotify] .plugin-trust input').checked"));
+  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
+  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
+  await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Disable'");
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  check('disabling one row leaves the other plugin enabled', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Enable'") && await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && window.__pluginCalls.filter(c=>c.command==='plugin_disconnect').at(-1).args.pluginId==='spotify'"));
+  await admin.eval("location.hash='#/'"); await admin.waitFor("!!document.querySelector('.add-control')");
+  await admin.eval(click('.add-control')); await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el=>el.textContent==='Other action')");
+  await admin.eval(clickText('.action-row','Other action')); await admin.waitFor("!!document.querySelector('.native-control .button.primary')");
+  await admin.eval(clickText('.native-control button','Run plugin action'));
+  check('healthy plugin action stays usable after neighboring failure and disable', await admin.waitFor("window.__pluginArgs?.pluginId==='other' && window.__pluginArgs.actionId==='next'") && await admin.eval("!document.querySelector('.native-control').textContent.includes('Outcome unknown')"));
   // ------------------------------------------------------------ explicit offline desktop Live mode (fake IPC only)
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.desktop-mode')");

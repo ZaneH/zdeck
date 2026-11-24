@@ -3,7 +3,7 @@
 //! source/artifact snapshot; never state, execute or Automation.
 #![cfg(unix)]
 use std::{fs, os::unix::fs::{symlink, PermissionsExt}, path::PathBuf, sync::atomic::{AtomicU64, Ordering}, time::{Duration, Instant}};
-use deck_lib::{plugin::{ConnectionStatus, ErrorKind, Outcome, PluginState}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
+use deck_lib::{plugin::{ConnectionStatus, ErrorKind, Outcome, PluginRegistry}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
 use serde_json::{json, Value};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -54,6 +54,25 @@ impl Fixture {
             ("LICENSE", include_bytes!("../../packages/plugin-sdk/LICENSE")),
         ];
         for (name, bytes) in files { fs::write(sdk.join(name), bytes).unwrap(); }
+    }
+    fn node(&self) -> PathBuf {
+        let node=std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for isolated fake plugin management tests");assert!(node.status.success());
+        PathBuf::from(String::from_utf8(node.stdout).unwrap().trim())
+    }
+    fn fake_plugin(&self,id:&str,fail:bool)->PathBuf {
+        let folder=self.plugin(id,&manifest(id));
+        let source=format!("const manifest={},log={},fail={};\n",manifest(id),json!(self.temp.join("calls").to_str().unwrap()),fail)+r#"
+const fs=require('node:fs');let count=0;
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),base={protocolVersion:1,id:r.id,type:'result'};
+ fs.appendFileSync(log,manifest.id+':'+r.type+'\n');
+ if(r.type==='describe'){process.stdout.write(JSON.stringify({...base,manifest})+'\n');return;}
+ if(fail)process.exit(7);
+ if(r.type==='execute')count++;
+ process.stdout.write(JSON.stringify({...base,state:{count,plugin:manifest.id}})+'\n');
+});
+"#;
+        fs::write(folder.join("main.js"),source).unwrap();folder
     }
     fn calls(&self) -> Vec<String> { fs::read_to_string(self.temp.join("calls")).unwrap_or_default().lines().map(str::to_owned).collect() }
     fn protocol_runtime(&self, described: &Value) -> PathBuf {
@@ -194,7 +213,7 @@ async fn symlink_escape_aliases_and_traversal_are_rejected() {
     let c = install.catalog().await.unwrap();
     assert_eq!(c.plugins.iter().filter(|p| p.status==InstallStatus::Ready).count(), 1);
     for id in ["../outside", "/outside", "good/../outside", "escape", "alias", "file-link", "main-link"] {
-        assert_eq!(install.enable(&PluginState::default(), id).await.unwrap_err().outcome, Outcome::NotStarted);
+        assert_eq!(install.enable(&PluginRegistry::default(), id).await.unwrap_err().outcome, Outcome::NotStarted);
     }
     let root_link = f.temp.join("linked-root"); symlink(&f.root, &root_link).unwrap();
     assert!(PluginInstall::new(root_link, vec![]).unwrap().catalog().await.is_err());
@@ -207,7 +226,7 @@ async fn directory_entry_cap_is_explicit_and_enable_fails_closed_on_truncation()
     let install = f.install(vec![]);
     let c = install.catalog().await.unwrap();
     assert!(c.truncated); assert!(c.plugins.len() <= 64);
-    assert!(install.enable(&PluginState::default(), "p0").await.unwrap_err().hint.contains("64"));
+    assert!(install.enable(&PluginRegistry::default(), "p0").await.unwrap_err().hint.contains("64"));
 }
 
 #[tokio::test]
@@ -217,12 +236,12 @@ async fn enabling_revalidates_and_only_describes_never_reads_state_or_plays() {
     let install = f.install(vec![f.protocol_runtime(&m)]);
     assert_eq!(install.catalog().await.unwrap().plugins[0].status, InstallStatus::Ready);
     assert!(f.calls().is_empty(), "catalog must never launch main.js");
-    let state = PluginState::default();
+    let state = PluginRegistry::default();
     let connected = install.enable(&state, "fake").await.unwrap();
     assert_eq!(connected.status, ConnectionStatus::Connected); assert!(connected.state.is_none());
     assert_eq!(f.calls().len(), 2); assert_eq!(f.calls()[0], "launch");
     let r: Value = serde_json::from_str(&f.calls()[1]).unwrap(); assert_eq!(r["type"], "describe");
-    state.disconnect().await;
+    state.disconnect("fake").await.unwrap();
     fs::write(f.root.join("fake/manifest.json"), "{}").unwrap();
     assert!(install.enable(&state, "fake").await.is_err());
     assert_eq!(f.calls().len(), 2, "a previous ready catalog must not authorize changed files");
@@ -235,7 +254,7 @@ async fn runtime_probe_mutation_is_caught_by_final_revalidation() {
         fs::write(f.root.join("fake/manifest.json"), serde_json::to_vec(&manifest("fake")).unwrap()).unwrap();
         let runtime = f.executable("mutating-node", &format!("if [ \"$1\" = '--version' ]; then printf '%s' '{}' > '{}'; printf 'v22.18.0\\n'; else printf 'launch\\n' >> '{}'; fi",
             replacement, f.root.join("fake/manifest.json").display(), f.temp.join("calls").display()));
-        assert!(f.install(vec![runtime]).enable(&PluginState::default(), "fake").await.is_err());
+        assert!(f.install(vec![runtime]).enable(&PluginRegistry::default(), "fake").await.is_err());
         assert!(f.calls().is_empty());
     }
 }
@@ -252,10 +271,10 @@ async fn describe_must_match_entire_disk_contract_and_mismatch_stops_session() {
             "config" => actual["actions"][0]["config"] = json!({"n":{"type":"integer","minimum":0,"maximum":1}}),
             _ => unreachable!(),
         }
-        let state = PluginState::default();
+        let state = PluginRegistry::default();
         let error = f.install(vec![f.protocol_runtime(&actual)]).enable(&state, "fake").await.unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidManifest); assert_eq!(error.outcome, Outcome::NotStarted);
-        let stopped = state.snapshot().await;
+        let stopped = state.snapshot("fake").await.unwrap();
         assert_eq!(stopped.status, ConnectionStatus::Stopped); assert!(stopped.manifest.is_none()); assert!(stopped.state.is_none());
         assert_eq!(f.calls().len(), 2);
     }
@@ -269,15 +288,15 @@ async fn copied_source_snapshot_is_invalid_before_execution_until_bundled_sdk_ex
     let catalog=install.catalog().await.unwrap();
     assert_eq!(catalog.plugins[0].status,InstallStatus::Invalid);
     assert!(catalog.plugins[0].message.unwrap().contains("node_modules"));
-    let error=install.enable(&PluginState::default(),"spotify").await.unwrap_err();
+    let error=install.enable(&PluginRegistry::default(),"spotify").await.unwrap_err();
     assert_eq!(error.code,Some("missing_dependency"));assert_eq!(error.outcome,Outcome::NotStarted);
     assert!(error.hint.contains("complete packaged"));assert!(f.calls().is_empty());
     f.bundle_sdk(&folder);
     assert_eq!(install.catalog().await.unwrap().plugins[0].status,InstallStatus::Ready);
-    let state=PluginState::default();let result=install.enable(&state,"spotify").await.unwrap();
+    let state=PluginRegistry::default();let result=install.enable(&state,"spotify").await.unwrap();
     assert!(result.state.is_none());assert_eq!(f.calls().len(),2);
     let request:Value=serde_json::from_str(&f.calls()[1]).unwrap();assert_eq!(request["type"],"describe");
-    state.disconnect().await;
+    state.disconnect("spotify").await.unwrap();
 }
 
 #[tokio::test]
@@ -290,15 +309,15 @@ async fn real_node_describe_reproduces_source_failure_and_accepts_complete_snaps
     let detected=detect_node(&[alias.clone(),canonical.clone()]).await;
     assert_eq!(detected.status,NodeStatus::Detected,"Node >=22.18.0 required");
     assert_eq!(detected.path.as_deref(),alias.to_str());
-    let state=PluginState::default();
-    let error=state.connect(canonical.to_str().unwrap().into(),folder.join("main.js").to_str().unwrap().into()).await.unwrap_err();
+    let state=PluginRegistry::default();
+    let error=state.connect("spotify",canonical.to_str().unwrap().into(),folder.join("main.js").to_str().unwrap().into()).await.unwrap_err();
     assert_eq!(error.code,Some("missing_dependency"));assert_eq!(error.outcome,Outcome::NotStarted);
-    assert_eq!(state.snapshot().await.status,ConnectionStatus::Stopped);
+    assert_eq!(state.snapshot("spotify").await.unwrap().status,ConnectionStatus::Stopped);
     assert!(!serde_json::to_string(&error).unwrap().contains(f.temp.to_str().unwrap()));
     f.bundle_sdk(&folder);
     let result=f.install(vec![alias]).enable(&state,"spotify").await.unwrap();
     assert_eq!(result.status,ConnectionStatus::Connected);assert_eq!(result.manifest.unwrap().id,"spotify");assert!(result.state.is_none());
-    state.disconnect().await;
+    state.disconnect("spotify").await.unwrap();
 }
 
 #[tokio::test]
@@ -327,10 +346,87 @@ async fn nested_sdk_symlinks_missing_files_and_invalid_metadata_fail_closed_with
 async fn launch_runtime_errors_are_actionable_fixed_and_not_started() {
     let f=Fixture::new();f.plugin("fake",&manifest("fake"));
     for (candidates,code) in [(vec![],"runtime_missing"),(vec![f.runtime("old","v20.0.0")],"runtime_incompatible"),(vec![f.executable("startup-exit","if [ \"$1\" = '--version' ]; then printf 'v22.18.0\\n'; fi")],"startup_exit")] {
-        let error=f.install(candidates).enable(&PluginState::default(),"fake").await.unwrap_err();
+        let error=f.install(candidates).enable(&PluginRegistry::default(),"fake").await.unwrap_err();
         assert_eq!(error.code,Some(code));assert_eq!(error.outcome,Outcome::NotStarted);
         assert!(error.hint.contains("22.18.0"));assert!(!serde_json::to_string(&error).unwrap().contains(f.temp.to_str().unwrap()));
     }
+}
+
+#[tokio::test]
+async fn diagnostics_explain_source_sdk_link_without_executing_or_exposing_paths() {
+    let f=Fixture::new();let folder=f.spotify_source_snapshot();f.bundle_sdk(&folder);
+    let sdk=folder.join("node_modules/@zdeck/plugin-sdk");fs::rename(&sdk,f.temp.join("private-secret-sdk")).unwrap();
+    symlink("../../../../packages/plugin-sdk",&sdk).unwrap();
+    let install=f.install(vec![f.runtime("node","v22.18.0")]);
+    let result=install.diagnostics("spotify").await.unwrap();assert_eq!(result.plugin_id,"spotify");assert_eq!(result.checks.len(),6);
+    let sdk=result.checks.iter().find(|c|c.name=="sdk").unwrap();assert_eq!(sdk.status,"fail");assert!(sdk.message.contains("npm source-development"));assert!(sdk.message.contains("distribution"));
+    assert!(result.checks.iter().filter(|c|c.name!="sdk").all(|c|c.status=="pass"));
+    let serialized=serde_json::to_string(&result).unwrap();assert!(!serialized.contains("private-secret") && !serialized.contains(f.temp.to_str().unwrap()));
+    assert!(f.calls().is_empty());assert!(fs::symlink_metadata(&sdk_path(&folder)).unwrap().file_type().is_symlink());
+    assert!(install.diagnostics("../spotify").await.is_err());
+    fs::write(folder.join("manifest.json"),"private-secret malformed").unwrap();
+    let result=install.diagnostics("spotify").await.unwrap();assert_eq!(result.checks.iter().find(|c|c.name=="manifest").unwrap().status,"fail");
+    assert!(!serde_json::to_string(&result).unwrap().contains("private-secret"));
+    let absent=Fixture::new();let result=absent.install(vec![]).diagnostics("missing").await.unwrap();assert_eq!(result.checks.len(),6);assert!(!absent.root.exists());
+}
+fn sdk_path(folder:&std::path::Path)->PathBuf{folder.join("node_modules/@zdeck/plugin-sdk")}
+
+#[tokio::test]
+async fn uninstall_preserves_bytes_in_unique_reversible_backups_and_leaves_other_plugin_running() {
+    let f=Fixture::new();let alpha=f.fake_plugin("alpha",false);f.fake_plugin("beta",false);
+    let original=fs::read(alpha.join("main.js")).unwrap();let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    install.enable(&registry,"alpha").await.unwrap();install.enable(&registry,"beta").await.unwrap();
+    assert_eq!(f.calls(),vec!["alpha:describe","beta:describe"]);
+    install.uninstall(&registry,"alpha").await.unwrap();assert!(!alpha.exists());
+    assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Disconnected);
+    assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Connected);
+    assert_eq!(registry.execute("beta".into(),"play".into(),json!({})).await.unwrap().state.unwrap()["plugin"],"beta");
+    let backups=f.root.parent().unwrap().join("plugin-backups");let first=fs::read_dir(&backups).unwrap().next().unwrap().unwrap().path();
+    assert!(first.file_name().unwrap().to_str().unwrap().starts_with("alpha-"));assert_eq!(fs::read(first.join("main.js")).unwrap(),original);
+    fs::rename(&first,&alpha).unwrap();install.enable(&registry,"alpha").await.unwrap();
+    fs::create_dir(&first).unwrap();fs::write(first.join("keep"),"existing backup").unwrap();
+    install.uninstall(&registry,"alpha").await.unwrap();let second=fs::read_dir(&backups).unwrap().map(Result::unwrap).find(|e|e.path()!=first).unwrap().path();assert_ne!(first,second);
+    assert_eq!(fs::read_to_string(first.join("keep")).unwrap(),"existing backup");
+    assert_eq!(fs::read(second.join("main.js")).unwrap(),original);
+    // Invalid source/dependency trees can be removed without executing them.
+    let invalid=f.spotify_source_snapshot();let bytes=fs::read(invalid.join("main.js")).unwrap();
+    fs::create_dir_all(invalid.join("node_modules/@zdeck")).unwrap();symlink("../../../../packages/plugin-sdk",sdk_path(&invalid)).unwrap();
+    install.uninstall(&registry,"spotify").await.unwrap();assert!(!invalid.exists());
+    let backup=fs::read_dir(&backups).unwrap().map(Result::unwrap).find(|e|e.file_name().to_str().unwrap().starts_with("spotify-")).unwrap().path();assert_eq!(fs::read(backup.join("main.js")).unwrap(),bytes);
+    assert_eq!(fs::read_link(sdk_path(&backup)).unwrap(),PathBuf::from("../../../../packages/plugin-sdk"));
+    assert_eq!(registry.state("beta").await.unwrap().status,ConnectionStatus::Connected);registry.disconnect("beta").await.unwrap();
+}
+
+#[tokio::test]
+async fn uninstall_rejects_traversal_aliases_and_unsafe_backups_without_touching_other_sessions() {
+    let f=Fixture::new();let alpha=f.fake_plugin("alpha",false);f.fake_plugin("beta",false);
+    let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    install.enable(&registry,"alpha").await.unwrap();install.enable(&registry,"beta").await.unwrap();
+    let outside=f.temp.join("outside");fs::create_dir(&outside).unwrap();fs::write(outside.join("keep"),"private-secret").unwrap();symlink(&outside,f.root.join("alias")).unwrap();
+    for id in ["../outside","/outside","alias","missing"] {let error=install.uninstall(&registry,id).await.unwrap_err();assert!(!serde_json::to_string(&error).unwrap().contains("private-secret"));}
+    assert!(alpha.exists());assert_eq!(registry.snapshots().await.len(),2);
+    symlink(&outside,f.root.parent().unwrap().join("plugin-backups")).unwrap();
+    let error=install.uninstall(&registry,"alpha").await.unwrap_err();assert!(error.hint.contains("not a symlink"));assert!(alpha.exists());
+    assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Disconnected);
+    assert_eq!(registry.state("beta").await.unwrap().status,ConnectionStatus::Connected);
+    assert_eq!(fs::read_to_string(outside.join("keep")).unwrap(),"private-secret");registry.disconnect("beta").await.unwrap();
+}
+
+#[tokio::test]
+async fn duplicate_enable_and_uninstall_are_serialized_for_the_same_plugin() {
+    let f=Fixture::new();let folder=f.fake_plugin("alpha",false);let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    let (one,two,removed)=tokio::join!(install.enable(&registry,"alpha"),install.enable(&registry,"alpha"),install.uninstall(&registry,"alpha"));
+    one.unwrap();two.unwrap();removed.unwrap();assert!(!folder.exists());assert!(registry.snapshots().await.is_empty());assert_eq!(f.calls(),vec!["alpha:describe","alpha:describe"]);
+    assert!(install.enable(&registry,"alpha").await.is_err());assert!(registry.snapshots().await.is_empty());
+}
+
+#[tokio::test]
+async fn uninstall_disabled_folder_works_when_all_session_slots_are_occupied() {
+    let f=Fixture::new();let folder=f.plugin("unused",&manifest("unused"));let registry=PluginRegistry::default();
+    let missing=f.temp.join("missing-runtime").to_str().unwrap().to_owned();let entry=f.temp.join("missing.js").to_str().unwrap().to_owned();
+    for i in 0..16 {assert_eq!(registry.connect(&format!("p{i}"),missing.clone(),entry.clone()).await.unwrap_err().code,Some("runtime_missing"));}
+    f.install(vec![]).uninstall(&registry,"unused").await.unwrap();assert!(!folder.exists());assert_eq!(registry.snapshots().await.len(),16);assert!(f.calls().is_empty());
+    for i in 0..16 {registry.disconnect(&format!("p{i}")).await.unwrap();}
 }
 
 #[test]

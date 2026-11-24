@@ -52,6 +52,7 @@ import { useObsConsole } from "./lib/useObsConsole";
 import { useSystemConsole } from "./lib/useSystemConsole";
 import { useDesktopActions } from "./lib/useDesktopActions";
 import { usePluginConsole } from "./lib/usePluginConsole";
+import { enabledPluginManifests } from "./lib/plugin";
 import { PluginSettingsCard } from "./components/PluginSettingsCard";
 import { ActionLibrary } from "./components/ActionLibrary";
 import { BrandMark } from "./components/BrandMark";
@@ -683,7 +684,7 @@ export default function App() {
           </section>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
-            manifest={plugin.snapshot.status === "connected" && !plugin.snapshot.lastError ? plugin.snapshot.manifest : null}
+            manifests={enabledPluginManifests(plugin.snapshots)}
             disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onAdd={handleAddControl}
           />
         </main>

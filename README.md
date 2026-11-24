@@ -61,7 +61,7 @@ npm run smoke:remote  # Linux/Nix, installed google-chrome and openssl; fake act
 Run `npm run storybook` and open <http://localhost:6006>. This renders the **real components**, using the app's Geist font, CSS tokens and a Dark/Light toolbar switch, without a native desktop or phone service. No addon pack or production refactor is required.
 
 - **Controls → Control tile:** all five action kinds, disabled, selected editor, long label and narrow volume. Presses and slider releases update local counters only.
-- **Settings → External plugin:** missing runtime, nothing installed, ready-for-trust, connected, unknown outcome and narrow trust. Selection, trust, enabling, read-state and disconnect are local fixtures; buttons never probe Node, open folders, launch plugins or control media.
+- **Settings → External plugin:** missing runtime, empty catalog, row trust confirmation, two enabled plugins, one failed/one healthy, invalid SDK diagnostics and narrow rows. Enable/Disable, read-state, diagnostics and reversible-uninstall confirmation are local fixtures; buttons never probe Node, open folders, launch plugins, move real files or control media.
 - **Onboarding → Setup guide:** first use, full page and storage unavailable. Click through the real welcome/build/try flow; blank a scene/name to inspect incomplete validation. Finishing or skipping changes only the story, and **Restart demo** resets it.
 
 The narrow stories constrain component width without an extra viewport addon. Reload/switch stories to reset local state. `RemoteSettingsCard` remains hook-coupled and is intentionally not included; extracting a pure connection view can be a separate design task.
@@ -183,6 +183,12 @@ This is covered by 20 Rust adapter tests using an owned fake runner, so no real
 live hardware verification has been performed: the real volume, mute, and
 play/pause commands have not been run on a real PipeWire session, and a real
 MPRIS player has not been exercised.**
+
+### External plugin sessions
+
+**Settings → External plugins** presents an inset list: metadata/status on the left, **Enable/Disable** and a **⋯** menu on the right. Up to 16 plugins can be enabled independently; a failed or disabled row does not disconnect healthy neighbors. Enable first opens an unchecked source/license/access consent; only a separate acknowledged confirmation starts that plugin. Trust/enabling are session-only, with no automatic reconnect, state polling or action replay. Refresh clears pending trust, not enabled sessions. The action library includes all healthy enabled manifests; Inspector and saved controls route by their own plugin ID.
+
+The row menu provides local **Diagnostics** (no plugin execution/media read) even for an invalid SDK installation with a valid folder ID, and explicitly confirmed **Uninstall…**. Uninstall stops only that plugin and moves its folder into `plugin-backups` beside the plugin directory; it is recoverable, not permanent deletion. Saved buttons remain. A source/developer npm install may create SDK symlinks and is not a distribution installation: copy the complete packaged folder with real bundled SDK files, rather than using `npm install` as end-user repair. See [installation, diagnostic and recovery instructions](docs/plugins.md).
 
 ### Private phone service
 

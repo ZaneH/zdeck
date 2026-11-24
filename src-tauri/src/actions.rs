@@ -7,7 +7,7 @@ use serde_json::Value;
 use tokio::sync::{Mutex, Semaphore};
 use crate::deck::{Control, ControlAction, Deck, DeckStore};
 use crate::obs::{ObsError, ObsState};
-use crate::plugin::{ErrorKind as PluginErrorKind, Outcome as PluginOutcome, PluginError, PluginState};
+use crate::plugin::{ErrorKind as PluginErrorKind, Outcome as PluginOutcome, PluginError, PluginRegistry};
 use crate::system::{SystemError, SystemState};
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,11 +89,11 @@ pub(crate) fn validate_action_value(control: &Control, value: Option<f64>) -> Re
 pub struct ActionDispatcher {
     obs: Arc<ObsState>,
     system: Arc<SystemState>,
-    plugin: Arc<PluginState>,
+    plugin: Arc<PluginRegistry>,
     effect: Mutex<()>,
 }
 impl ActionDispatcher {
-    pub fn new(obs: Arc<ObsState>, system: Arc<SystemState>, plugin: Arc<PluginState>) -> Self {
+    pub fn new(obs: Arc<ObsState>, system: Arc<SystemState>, plugin: Arc<PluginRegistry>) -> Self {
         Self { obs, system, plugin, effect: Mutex::new(()) }
     }
     /// Rust-only dispatcher. Transports must resolve the control from DeckStore

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
-import { canRunPlugin, pluginControlAction, pluginDefaults } from "../lib/plugin";
+import { canRunPlugin, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry } from "../lib/plugin";
 import type { PluginControl } from "../lib/types";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { PluginErrorNotice } from "./PluginSettingsCard";
@@ -68,7 +68,9 @@ function switchFeedbackText(
 }
 
 function PluginControlEditor({ control, plugin, onPatch }: { control: PluginControl; plugin: PluginConsole; onPatch: (patch: ControlPatch) => void }) {
-  const action = pluginControlAction(plugin.snapshot, control);
+  const snapshot = pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN;
+  const busy = pluginEntry(plugin.busy, control.pluginId) === true;
+  const action = pluginControlAction(snapshot, control);
   const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(control.pluginArgs).map(([key, n]) => [key, String(n)])));
   const validDraft = action && Object.entries(action.config).every(([key, field]) => drafts[key]?.trim()
     && Number.isSafeInteger(Number(drafts[key])) && Number(drafts[key]) >= field.minimum && Number(drafts[key]) <= field.maximum);
@@ -78,24 +80,24 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
       <span>{key} ({field.minimum}–{field.maximum})</span>
       <input type="number" step={1} min={field.minimum} max={field.maximum} value={drafts[key] ?? ""}
         aria-invalid={!drafts[key]?.trim() || !Number.isSafeInteger(Number(drafts[key])) || Number(drafts[key]) < field.minimum || Number(drafts[key]) > field.maximum}
-        disabled={plugin.busy} onChange={(event) => {
+        disabled={busy} onChange={(event) => {
           const text = event.target.value;
           setDrafts((current) => ({ ...current, [key]: text }));
           if (text.trim() && Number.isSafeInteger(Number(text))) onPatch({ pluginArgs: { ...control.pluginArgs, [key]: Number(text) } });
         }} />
     </label>) : <p className="field-note">Connect the matching plugin in Settings to configure and run this saved action.</p>}
-    {action ? <button type="button" className="button secondary" disabled={plugin.busy} onClick={() => {
+    {action ? <button type="button" className="button secondary" disabled={busy} onClick={() => {
       const args = pluginDefaults(action);
       setDrafts(Object.fromEntries(Object.entries(args).map(([key, n]) => [key, String(n)])));
       onPatch({ pluginArgs: args });
     }}>Use declared defaults</button> : null}
     <div className="native-actions"><button type="button" className="button primary"
-      disabled={!plugin.native || plugin.busy || !validDraft || !canRunPlugin(plugin.snapshot, control)}
-      onClick={() => void plugin.execute(control)}>{plugin.busy ? "Request pending…" : "Run plugin action"}</button></div>
+      disabled={!plugin.native || busy || !validDraft || !canRunPlugin(snapshot, control)}
+      onClick={() => void plugin.execute(control)}>{busy ? "Request pending…" : "Run plugin action"}</button></div>
     <p className="field-note">Runs on this computer. Arguments are saved button configuration, not a phone slider. No automatic retry. Preview press never runs the plugin.</p>
-    {plugin.completedId === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
-    {action && (!validDraft || !canRunPlugin(plugin.snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required integer within its declared bounds.</p> : null}
-    <PluginErrorNotice error={plugin.snapshot.lastError} />
+    {plugin.completedIds[control.pluginId] === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
+    {action && (!validDraft || !canRunPlugin(snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required integer within its declared bounds.</p> : null}
+    <PluginErrorNotice error={pluginEntry(plugin.errors, control.pluginId) ?? snapshot.lastError} />
   </div>;
 }
 
@@ -184,7 +186,7 @@ export function Inspector({
             </label>
 
             {control.action === "plugin" ? <PluginControlEditor
-              key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(plugin.snapshot, control)?.config)}`}
+              key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)?.config)}`}
               control={control} plugin={plugin} onPatch={onPatch} /> : null}
 
             {control.action === "obs-scene" ? (

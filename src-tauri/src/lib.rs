@@ -13,7 +13,7 @@ pub mod system;
 use std::sync::Arc;
 use actions::{ActionDispatcher, ActionError, ActionErrorCode, CommandResult, DesktopActions, DesktopCommand};
 
-use plugin::{PluginError, PluginSnapshot, PluginState};
+use plugin::{PluginError, PluginSnapshot, PluginRegistry};
 use deck::{Deck, DeckError, DeckStore, DECK_FILE_NAME};
 use obs::{ObsError, ObsSnapshot, ObsState, SceneSwitchResult};
 use remote::{
@@ -71,7 +71,7 @@ pub struct AppState {
     store: Result<Arc<DeckStore>, DeckError>,
     obs: Arc<ObsState>,
     system: Arc<SystemState>,
-    plugin: Arc<PluginState>,
+    plugin: Arc<PluginRegistry>,
     actions: Arc<ActionDispatcher>,
     desktop: DesktopActions,
     assets: Arc<dyn AssetProvider>,
@@ -214,19 +214,34 @@ async fn plugin_open_directory(app: tauri::AppHandle) -> Result<(), PluginError>
 
 #[tauri::command]
 async fn plugin_disconnect(
-    state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>, plugin_id: String,
 ) -> Result<PluginSnapshot, PluginError> {
-    Ok(state.plugin.disconnect().await)
+    state.plugin.disconnect(&plugin_id).await
 }
 
 #[tauri::command]
-async fn plugin_snapshot(state: tauri::State<'_, AppState>) -> Result<PluginSnapshot, PluginError> {
-    Ok(state.plugin.snapshot().await)
+async fn plugin_snapshot(state: tauri::State<'_, AppState>, plugin_id: String) -> Result<PluginSnapshot, PluginError> {
+    state.plugin.snapshot(&plugin_id).await
 }
 
 #[tauri::command]
-async fn plugin_state(state: tauri::State<'_, AppState>) -> Result<PluginSnapshot, PluginError> {
-    state.plugin.state().await
+async fn plugin_snapshots(state: tauri::State<'_, AppState>) -> Result<std::collections::BTreeMap<String, PluginSnapshot>, PluginError> {
+    Ok(state.plugin.snapshots().await)
+}
+
+#[tauri::command]
+async fn plugin_diagnostics(app: tauri::AppHandle, plugin_id: String) -> Result<plugin_install::PluginDiagnostics, PluginError> {
+    local_plugin_install(&app)?.diagnostics(&plugin_id).await
+}
+
+#[tauri::command]
+async fn plugin_uninstall(app: tauri::AppHandle, state: tauri::State<'_, AppState>, plugin_id: String) -> Result<(), PluginError> {
+    local_plugin_install(&app)?.uninstall(&state.plugin, &plugin_id).await
+}
+
+#[tauri::command]
+async fn plugin_state(state: tauri::State<'_, AppState>, plugin_id: String) -> Result<PluginSnapshot, PluginError> {
+    state.plugin.state(&plugin_id).await
 }
 
 #[tauri::command]
@@ -341,7 +356,7 @@ pub fn run() {
             });
             let obs = Arc::new(ObsState::default());
             let system = Arc::new(SystemState::default());
-            let plugin = Arc::new(PluginState::default());
+            let plugin = Arc::new(PluginRegistry::default());
             let actions = Arc::new(ActionDispatcher::new(obs.clone(), system.clone(), plugin.clone()));
             let desktop = DesktopActions::new(actions.clone());
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
@@ -366,6 +381,9 @@ pub fn run() {
             plugin_open_directory,
             plugin_disconnect,
             plugin_snapshot,
+            plugin_snapshots,
+            plugin_diagnostics,
+            plugin_uninstall,
             plugin_state,
             plugin_execute,
             remote_start,

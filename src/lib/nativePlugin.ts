@@ -1,16 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { nativeAvailable } from "./native";
-import { isPluginArgs, parsePluginCatalog, parsePluginSnapshot, pluginIdentifier, toPluginError } from "./plugin";
-import type { PluginCatalog, PluginSnapshot } from "./plugin";
+import { isPluginArgs, parsePluginCatalog, parsePluginDiagnostics, parsePluginSnapshot, parsePluginSnapshots, pluginIdentifier, toPluginError } from "./plugin";
+import type { PluginCatalog, PluginDiagnostics, PluginSnapshot, PluginSnapshots } from "./plugin";
 
 async function invokeNative(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   if (!nativeAvailable()) throw toPluginError({ kind: "unavailable", outcome: "not_started" });
   try { return await invoke<unknown>(command, args); }
   catch (error) { throw toPluginError(error); }
 }
-async function invokePlugin(command: string, args: Record<string, unknown> = {}): Promise<PluginSnapshot> {
-  const snapshot = parsePluginSnapshot(await invokeNative(command, args));
-  if (!snapshot) throw toPluginError({ kind: "protocol", outcome: command === "plugin_execute" ? "unknown" : "not_started" });
+function requireId(pluginId: string) {
+  if (!pluginIdentifier(pluginId)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
+}
+async function invokePlugin(command: string, pluginId: string, extra: Record<string, unknown> = {}): Promise<PluginSnapshot> {
+  requireId(pluginId);
+  const snapshot = parsePluginSnapshot(await invokeNative(command, { pluginId, ...extra }));
+  if (!snapshot || (snapshot.manifest && snapshot.manifest.id !== pluginId)) throw toPluginError({ kind: "protocol", outcome: command === "plugin_execute" ? "unknown" : "not_started" });
   return snapshot;
 }
 export async function pluginCatalog(): Promise<PluginCatalog> {
@@ -18,21 +22,30 @@ export async function pluginCatalog(): Promise<PluginCatalog> {
   if (!catalog) throw toPluginError({ kind: "protocol", outcome: "not_started" });
   return catalog;
 }
-export async function pluginEnable(pluginId: string): Promise<PluginSnapshot> {
-  if (!pluginIdentifier(pluginId)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
-  return invokePlugin("plugin_enable", { pluginId });
+export async function pluginSnapshots(): Promise<PluginSnapshots> {
+  const snapshots = parsePluginSnapshots(await invokeNative("plugin_snapshots"));
+  if (!snapshots) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+  return snapshots;
+}
+export function pluginEnable(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_enable", pluginId); }
+export function pluginDisconnect(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_disconnect", pluginId); }
+/** Cached metadata only; neither operation executes plugin code. */
+export function pluginSnapshot(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_snapshot", pluginId); }
+export function pluginState(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_state", pluginId); }
+export async function pluginDiagnostics(pluginId: string): Promise<PluginDiagnostics> {
+  requireId(pluginId);
+  const diagnostics = parsePluginDiagnostics(await invokeNative("plugin_diagnostics", { pluginId }), pluginId);
+  if (!diagnostics) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+  return diagnostics;
+}
+export async function pluginUninstall(pluginId: string): Promise<void> {
+  requireId(pluginId);
+  if (await invokeNative("plugin_uninstall", { pluginId }) !== null) throw toPluginError({ kind: "protocol", outcome: "unknown" });
 }
 export async function pluginOpenDirectory(): Promise<void> {
   if (await invokeNative("plugin_open_directory") !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
 }
-export function pluginDisconnect(): Promise<PluginSnapshot> { return invokePlugin("plugin_disconnect"); }
-/** Cached host metadata only: no child-process exchange or permission prompt. */
-export function pluginSnapshot(): Promise<PluginSnapshot> { return invokePlugin("plugin_snapshot"); }
-/** Intentional read: may cause macOS Automation consent. Never poll this. */
-export function pluginState(): Promise<PluginSnapshot> { return invokePlugin("plugin_state"); }
 export async function pluginExecute(pluginId: string, actionId: string, args: Record<string, number>): Promise<PluginSnapshot> {
-  if (!pluginIdentifier(pluginId) || !pluginIdentifier(actionId) || !isPluginArgs(args)) {
-    throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
-  }
-  return invokePlugin("plugin_execute", { pluginId, actionId, args });
+  if (!pluginIdentifier(actionId) || !isPluginArgs(args)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
+  return invokePlugin("plugin_execute", pluginId, { actionId, args });
 }

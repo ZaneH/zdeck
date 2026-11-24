@@ -30,6 +30,48 @@ export interface PluginCatalog {
   plugins: PluginCatalogEntry[];
   truncated: boolean;
 }
+export type PluginSnapshots = Record<string, PluginSnapshot>;
+export function pluginEntry<T>(entries: Record<string, T>, id: string): T | undefined {
+  return Object.hasOwn(entries, id) ? entries[id] : undefined;
+}
+export interface PluginDiagnostics { pluginId: string; checks: { name: string; status: "pass" | "fail" | "warning"; message: string }[] }
+export const MAX_ENABLED_PLUGINS = 16;
+const SDK_INSTALL_HINTS: Record<string, string> = {
+  "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone.": "Bundled SDK files are missing. Copy the complete packaged folder including node_modules, not the source folder.",
+  "Bundled SDK files must be readable regular local files, with valid package metadata and no symlinks. Copy the complete packaged plugin folder.": "Bundled SDK files or metadata are invalid. Copy the complete packaged folder with regular local SDK files and no symlinks.",
+  "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.": "The SDK is symlinked by a source/developer npm layout. Copy the complete generated distribution folder with regular bundled SDK files, not the source folder.",
+};
+export function parsePluginSnapshots(value: unknown): PluginSnapshots | null {
+  if (!record(value) || Object.keys(value).length > 64) return null;
+  const entries: [string, PluginSnapshot][] = [];
+  for (const [id, raw] of Object.entries(value)) {
+    const snapshot = parsePluginSnapshot(raw);
+    if (!pluginIdentifier(id) || !snapshot || (snapshot.manifest && snapshot.manifest.id !== id)) return null;
+    entries.push([id, snapshot]);
+  }
+  if (entries.filter(([, snapshot]) => snapshot.status === "connected").length > MAX_ENABLED_PLUGINS) return null;
+  return Object.fromEntries(entries);
+}
+export function enabledPluginManifests(snapshots: PluginSnapshots): PluginManifest[] {
+  return Object.values(snapshots).flatMap((snapshot) => snapshot.status === "connected" && !snapshot.lastError && snapshot.manifest ? [snapshot.manifest] : []);
+}
+export function parsePluginDiagnostics(value: unknown, expectedId: string): PluginDiagnostics | null {
+  if (!record(value) || !exact(value, ["pluginId", "checks"]) || value.pluginId !== expectedId || !pluginIdentifier(value.pluginId)
+    || !Array.isArray(value.checks) || value.checks.length > 16) return null;
+  const checks: PluginDiagnostics["checks"] = [];
+  for (const check of value.checks) {
+    if (!record(check) || !exact(check, ["name", "status", "message"]) || !boundedText(check.name, 80) || !boundedText(check.message, 500)
+      || !["pass", "fail", "warning"].includes(check.status as string)) return null;
+    const sdk = /sdk|dependenc/i.test(check.name);
+    checks.push({ name: sdk ? "SDK dependency" : /runtime|node/i.test(check.name) ? "Node runtime" : /manifest/i.test(check.name) ? "Manifest" : /entry|main/i.test(check.name) ? "Entrypoint" : "Local installation check",
+      status: check.status as "pass" | "fail" | "warning", message: check.status === "pass" ? "Check passed."
+        : sdk ? check.status === "warning" ? "SDK dependency was not verified. Check the installation before enabling; no plugin code was executed."
+          : `${Object.hasOwn(SDK_INSTALL_HINTS, check.message) ? SDK_INSTALL_HINTS[check.message] : "SDK dependency check failed. Copy the complete packaged folder including node_modules, not a source/developer npm layout."} Do not repair a distribution install with npm install.`
+          : "Check this installation before enabling. Use the complete packaged folder; review the manifest, main.js, runtime and dependencies. No plugin code was executed." });
+  }
+  return { pluginId: expectedId, checks };
+}
+
 export interface PluginSelection { pluginId: string; trusted: boolean }
 export const EMPTY_SELECTION: PluginSelection = { pluginId: "", trusted: false };
 export function pluginSelectionReducer(previous: PluginSelection, event:
@@ -88,11 +130,8 @@ export function parsePluginCatalog(value: unknown): PluginCatalog | null {
   const catalog = value as unknown as PluginCatalog;
   return { ...catalog, plugins: catalog.plugins.map((plugin) => ({ ...plugin, message: plugin.status === "ready" ? null
     : plugin.status === "incompatible" ? "Protocol version 1 is required."
-      : plugin.message === "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone."
-        ? "Required plugin SDK files are missing. Copy the complete packaged plugin folder, including node_modules—not the source folder."
-        : plugin.message === "Bundled SDK files must be readable regular local files, with valid package metadata and no symlinks. Copy the complete packaged plugin folder."
-          ? "Bundled plugin SDK files are invalid. Copy the complete packaged plugin folder without symlinks."
-          : "Invalid plugin folder. Check its name, manifest.json and main.js; symlinks are not supported." })) };
+      : plugin.message && Object.hasOwn(SDK_INSTALL_HINTS, plugin.message) ? `${SDK_INSTALL_HINTS[plugin.message]} Do not repair a distribution install with npm install.`
+          : "Invalid plugin folder. Check its name, manifest.json, main.js and bundled SDK. SDK symlinks/source npm layouts are not distribution installs: copy the complete packaged folder, including node_modules. Do not repair a distribution install with npm install." })) };
 }
 
 export function isPluginArgs(value: unknown): value is Record<string, number> {

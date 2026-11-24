@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createControl, controlSummary, ACTION_CATALOG } from "../src/lib/actions";
 import { addControl, createDefaultDeck, isDeck, normalizeDeck, updateControl } from "../src/lib/deck";
 import { canEnablePlugin, canRunPlugin, EMPTY_PLUGIN, EMPTY_SELECTION, isPluginArgs, parsePluginCatalog, parsePluginManifest, parsePluginSnapshot, pluginArgumentsValid,
-  pluginDefaults, pluginLaunchAllowed, pluginSelectionReducer, spotifyState, toPluginError } from "../src/lib/plugin";
+  pluginDefaults, pluginLaunchAllowed, pluginSelectionReducer, spotifyState, toPluginError, parsePluginSnapshots, parsePluginDiagnostics, enabledPluginManifests, pluginEntry } from "../src/lib/plugin";
 import type { PluginCatalog, PluginManifest, PluginSnapshot } from "../src/lib/plugin";
 import { loadDeck, saveDeck, STORAGE_KEY } from "../src/lib/persistence";
 import { ControlTile } from "../src/components/ControlTile";
@@ -16,6 +16,34 @@ const manifest: PluginManifest = { id: "spotify", version: "0.1.0", protocolVers
 ] };
 const snapshot: PluginSnapshot = { status: "connected", manifest, state: null, lastError: null };
 const options = { pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
+
+describe("multiple plugin sessions and installation diagnostics", () => {
+  it("validates map identity and retains independent healthy actions", () => {
+    const notes = { ...snapshot, manifest: { ...manifest, id: "notes" } };
+    const sessions = parsePluginSnapshots({ spotify: snapshot, notes });
+    expect(sessions).not.toBeNull();
+    expect(enabledPluginManifests(sessions!).map((item) => item.id)).toEqual(["spotify", "notes"]);
+    const broken = { ...snapshot, status: "stopped" as const, lastError: toPluginError({ kind: "timeout", outcome: "unknown" }) };
+    expect(enabledPluginManifests({ spotify: broken, notes }).map((item) => item.id)).toEqual(["notes"]);
+    for (const value of [{ spotify: notes }, { "../bad": snapshot }, { spotify: {} }, []]) expect(parsePluginSnapshots(value)).toBeNull();
+    const capacity = Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`p${index}`, { ...snapshot, manifest: { ...manifest, id: `p${index}` } }]));
+    expect(parsePluginSnapshots(capacity)).not.toBeNull();
+    expect(parsePluginSnapshots({ ...capacity, spotify: snapshot })).toBeNull();
+    expect(pluginEntry({}, "constructor")).toBeUndefined();
+    expect(parsePluginSnapshots({ constructor: { ...snapshot, manifest: { ...manifest, id: "constructor" } } })).not.toBeNull();
+    const html = renderToStaticMarkup(createElement(ActionLibrary, { pageName: "Stream", dialogRef: { current: null }, manifests: [manifest, notes.manifest], onAdd: () => {} }));
+    expect(html).toContain("spotify · play"); expect(html).toContain("notes · play");
+  });
+  it("bounds diagnostics, correlates IDs and replaces raw messages with safe installation guidance", () => {
+    const input = { pluginId: "spotify", checks: [{ name: "SDK dependency", status: "fail", message: "private secret path" }] };
+    const result = parsePluginDiagnostics(input, "spotify");
+    expect(result?.checks[0].message).toContain("complete packaged folder");
+    expect(JSON.stringify(result)).not.toContain("private secret");
+    for (const bad of [{ ...input, pluginId: "notes" }, { ...input, checks: Array(17).fill(input.checks[0]) },
+      { ...input, checks: [{ ...input.checks[0], status: "unknown" }] }, { ...input, checks: [{ ...input.checks[0], message: "x".repeat(501) }] }])
+      expect(parsePluginDiagnostics(bad, "spotify")).toBeNull();
+  });
+});
 
 describe("plugin boundary validation", () => {
   it("strictly validates manifest fields, schemas, IDs, versions, duplicates and byte bounds", () => {
@@ -90,6 +118,9 @@ describe("local plugin catalog and per-selection trust", () => {
     const incomplete = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", message: "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone." }] });
     expect(incomplete?.plugins[0].message).toContain("including node_modules");
     expect(incomplete?.plugins[0].message).toContain("not the source folder");
+    const linked = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", message: "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead." }] });
+    expect(linked?.plugins[0].message).toContain("SDK is symlinked");
+    expect(linked?.plugins[0].message).toContain("Do not repair a distribution install with npm install");
   });
 
   it("fails closed on malformed catalogs, paths, counts, metadata, enums and duplicate IDs", () => {
@@ -158,7 +189,7 @@ describe("generic saved plugin controls", () => {
     const tile = renderToStaticMarkup(createElement(ControlTile, { control, variant: "phone", semantics: "remote", volume: 0 }));
     expect(tile).not.toContain('type="range"');
     expect(tile).toContain("&lt;img");
-    const library = renderToStaticMarkup(createElement(ActionLibrary, { pageName: "Stream", dialogRef: { current: null }, manifest, onAdd: () => {} }));
+    const library = renderToStaticMarkup(createElement(ActionLibrary, { pageName: "Stream", dialogRef: { current: null }, manifests: [manifest], onAdd: () => {} }));
     expect(library).toContain("&lt;b&gt;Volume&lt;/b&gt;");
     expect(library).not.toContain("<b>Volume</b>");
   });

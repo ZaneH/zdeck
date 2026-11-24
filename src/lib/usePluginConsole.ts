@@ -1,88 +1,116 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { nativeAvailable } from "./native";
-import { pluginCatalog, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshot, pluginState } from "./nativePlugin";
-import { canEnablePlugin, canRunPlugin, EMPTY_PLUGIN, EMPTY_SELECTION, pluginSelectionReducer, toPluginError } from "./plugin";
-import type { PluginCatalog, PluginError, PluginSnapshot } from "./plugin";
+import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshots, pluginState, pluginUninstall } from "./nativePlugin";
+import { canRunPlugin, EMPTY_PLUGIN, MAX_ENABLED_PLUGINS, pluginEntry, pluginIdentifier, toPluginError } from "./plugin";
+import type { PluginCatalog, PluginDiagnostics, PluginError, PluginSnapshots } from "./plugin";
 import type { PluginControl } from "./types";
 
 export function usePluginConsole() {
   const native = nativeAvailable();
-  const [snapshot, setSnapshot] = useState<PluginSnapshot>(EMPTY_PLUGIN);
+  const [snapshots, setSnapshots] = useState<PluginSnapshots>({});
   const [catalog, setCatalog] = useState<PluginCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<PluginError | null>(null);
-  const [selection, select] = useReducer(pluginSelectionReducer, EMPTY_SELECTION);
-  const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
-  const generation = useRef(0);
-  const [completedId, setCompletedId] = useState<string | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState(native);
+  const [loading, setLoading] = useState(native);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, PluginError | null>>({});
+  const [diagnostics, setDiagnostics] = useState<Record<string, PluginDiagnostics>>({});
+  const [completedIds, setCompletedIds] = useState<Record<string, string | null>>({});
+  const [trustEpoch, setTrustEpoch] = useState<Record<string, number>>({});
+  const [catalogEpoch, setCatalogEpoch] = useState(0);
+  const locks = useRef(new Set<string>());
+  const enabling = useRef(new Set<string>());
+  const catalogLock = useRef(false);
+  const catalogVersion = useRef(0);
+  const mounted = useRef(false);
+  const ready = useRef(false);
+  const resetTrust = (id: string) => setTrustEpoch((current) => ({ ...current, [id]: (pluginEntry(current, id) ?? 0) + 1 }));
 
   useEffect(() => {
-    if (!native) return;
-    let active = true;
-    const token = ++generation.current;
-    lock.current = true;
-    setBusy(true);
-    // Discovery probes the runtime only. Cached snapshot does not exchange with a plugin.
-    void Promise.allSettled([pluginSnapshot(), pluginCatalog()]).then(([session, discovery]) => {
-      if (!active || generation.current !== token) return;
-      if (session.status === "fulfilled") setSnapshot(session.value);
-      if (discovery.status === "fulfilled") { setCatalog(discovery.value); setCatalogError(null); }
-      else setCatalogError({ ...toPluginError(discovery.reason), outcome: "not_started" });
-      lock.current = false;
-      setBusy(false);
-    });
-    return () => { active = false; };
+    mounted.current = true;
+    if (native) {
+      let active = true;
+      catalogLock.current = true;
+      void Promise.allSettled([pluginSnapshots(), pluginCatalog()]).then(([sessions, discovery]) => {
+        if (!active) return;
+        if (sessions.status === "fulfilled") setSnapshots(sessions.value);
+        else setCatalogError(toPluginError(sessions.reason));
+        if (discovery.status === "fulfilled") setCatalog(discovery.value);
+        else setCatalogError(toPluginError(discovery.reason));
+        ready.current = sessions.status === "fulfilled";
+        catalogLock.current = false;
+        setLoading(false); setCatalogBusy(false);
+      });
+      return () => { active = false; mounted.current = false; ready.current = false; };
+    }
+    return () => { mounted.current = false; };
   }, [native]);
 
   const localOperation = useCallback(async (operation: () => Promise<void>) => {
-    if (!native || lock.current) return;
-    lock.current = true;
-    generation.current += 1;
-    setBusy(true);
-    setCatalogError(null);
-    select({ type: "reset" });
+    if (!native || catalogLock.current) return;
+    catalogLock.current = true; setCatalogBusy(true); setCatalogError(null); setCatalogEpoch((n) => n + 1);
     try { await operation(); }
-    catch (cause) { setCatalogError({ ...toPluginError(cause), outcome: "not_started" }); }
-    finally { lock.current = false; setBusy(false); }
+    catch (cause) { if (mounted.current) setCatalogError(toPluginError(cause)); }
+    finally { catalogLock.current = false; if (mounted.current) setCatalogBusy(false); }
   }, [native]);
 
-  const run = useCallback(async (operation: () => Promise<PluginSnapshot>, controlId: string | null = null) => {
-    if (!native || lock.current) return;
-    lock.current = true;
-    generation.current += 1;
-    setBusy(true);
-    setCompletedId(null);
-    try {
-      const next = await operation();
-      setSnapshot(next);
-      if (next.lastError) select({ type: "reset" });
-      else if (next.status === "connected") setCompletedId(controlId);
-    } catch (cause) {
-      setSnapshot((previous) => ({ ...previous, status: "stopped", state: null, lastError: toPluginError(cause) }));
-      select({ type: "reset" });
+  const rowOperation = async (id: string, operation: () => Promise<void>, mutation = false) => {
+    if (!native || !ready.current || !pluginIdentifier(id) || locks.current.has(id)
+      || (!Object.hasOwn(snapshots, id) && !catalog?.plugins.some((entry) => entry.id === id))) return;
+    locks.current.add(id); setBusy((current) => ({ ...current, [id]: true }));
+    resetTrust(id); setErrors((current) => ({ ...current, [id]: null })); setCompletedIds((current) => ({ ...current, [id]: null }));
+    try { await operation(); }
+    catch (cause) {
+      if (mounted.current) {
+        const error = toPluginError(cause);
+        setErrors((current) => ({ ...current, [id]: error }));
+        if (mutation) setSnapshots((current) => ({ ...current, [id]: { ...(pluginEntry(current, id) ?? EMPTY_PLUGIN), status: "stopped", state: null, lastError: error } }));
+      }
     } finally {
-      lock.current = false;
-      setBusy(false);
+      locks.current.delete(id);
+      if (mounted.current) setBusy((current) => ({ ...current, [id]: false }));
     }
-  }, [native]);
+  };
+  const run = (id: string, operation: () => ReturnType<typeof pluginState>, completedId: string | null = null) => rowOperation(id, async () => {
+    const snapshot = await operation();
+    if (!mounted.current) return;
+    setSnapshots((current) => ({ ...current, [id]: snapshot }));
+    if (!snapshot.lastError && snapshot.status === "connected") setCompletedIds((current) => ({ ...current, [id]: completedId }));
+  }, true);
 
   return {
-    native, snapshot, catalog, catalogError, busy, completedId,
-    selectedId: selection.pluginId, trusted: selection.trusted,
-    selectPlugin: (pluginId: string) => select({ type: "select", pluginId }),
-    setTrusted: (checked: boolean) => select({ type: "trust", checked }),
+    native, snapshots, catalog, catalogError, catalogBusy, loading, sessionsReady: ready.current, busy, errors, diagnostics, completedIds, trustEpoch, catalogEpoch,
     refreshCatalog: () => localOperation(async () => {
-      select({ type: "refresh" });
-      setCatalog(null);
-      setCatalog(await pluginCatalog());
+      const version = ++catalogVersion.current;
+      const next = await pluginCatalog();
+      if (mounted.current && version === catalogVersion.current) { setCatalog(next); setCatalogEpoch((n) => n + 1); }
     }),
     openDirectory: () => localOperation(pluginOpenDirectory),
-    enable: () => snapshot.status !== "connected" && canEnablePlugin(catalog, selection)
-      ? run(() => pluginEnable(selection.pluginId)) : Promise.resolve(),
-    disconnect: () => { select({ type: "reset" }); return run(pluginDisconnect); },
-    readState: () => snapshot.status === "connected" && !snapshot.lastError ? run(pluginState) : Promise.resolve(),
-    execute: (control: PluginControl) => canRunPlugin(snapshot, control)
-      ? run(() => pluginExecute(control.pluginId, control.pluginAction, control.pluginArgs), control.id) : Promise.resolve(),
+    enable: (id: string, trusted: boolean) => {
+      const active = Object.values(snapshots).filter((snapshot) => snapshot.status === "connected").length;
+      if (!trusted || catalogLock.current || !catalog || catalog.truncated || catalog.node.status !== "detected"
+        || !catalog.plugins.some((entry) => entry.id === id && entry.status === "ready")
+        || pluginEntry(snapshots, id)?.status === "connected" || locks.current.has(id) || enabling.current.has(id)
+        || active + enabling.current.size >= MAX_ENABLED_PLUGINS) return Promise.resolve();
+      enabling.current.add(id);
+      return run(id, () => pluginEnable(id)).finally(() => { enabling.current.delete(id); });
+    },
+    disconnect: (id: string) => run(id, () => pluginDisconnect(id)),
+    readState: (id: string) => pluginEntry(snapshots, id)?.status === "connected" && !pluginEntry(snapshots, id)?.lastError ? run(id, () => pluginState(id)) : Promise.resolve(),
+    execute: (control: PluginControl) => canRunPlugin(pluginEntry(snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)
+      ? run(control.pluginId, () => pluginExecute(control.pluginId, control.pluginAction, control.pluginArgs), control.id) : Promise.resolve(),
+    diagnose: (id: string) => rowOperation(id, async () => {
+      const result = await pluginDiagnostics(id);
+      if (mounted.current) setDiagnostics((current) => ({ ...current, [id]: result }));
+    }),
+    uninstall: (id: string) => rowOperation(id, async () => {
+      await pluginUninstall(id);
+      if (!mounted.current) return;
+      catalogVersion.current += 1;
+      setSnapshots((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
+      setCatalog((current) => current ? { ...current, plugins: current.plugins.filter((entry) => entry.id !== id) } : null);
+      setDiagnostics((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
+    }, true),
   };
 }
 export type PluginConsole = ReturnType<typeof usePluginConsole>;

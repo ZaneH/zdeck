@@ -1,82 +1,107 @@
-import { canEnablePlugin, spotifyState } from "../lib/plugin";
-import type { PluginError } from "../lib/plugin";
+import { useEffect, useState } from "react";
+import { EMPTY_PLUGIN, MAX_ENABLED_PLUGINS, pluginEntry, pluginIdentifier, spotifyState } from "../lib/plugin";
+import type { PluginCatalogEntry, PluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
 
 export function PluginErrorNotice({ error }: { error: PluginError | null }) {
   if (!error) return null;
   return <div className="settings-error" role="alert">
-    <p>{error.message} {error.code ? `(${error.code})` : ""}</p>
-    <p>{error.hint}</p>
-    {error.outcome === "unknown" ? <p>Outcome unknown: the action may already have happened. Check the application state before retrying. Nothing will be replayed.</p> : null}
+    <p>{error.message} {error.code ? `(${error.code})` : ""}</p><p>{error.hint}</p>
+    {error.outcome === "unknown" ? <p>Outcome unknown: the action may already have happened. Inspect the application before retrying. Nothing will be replayed.</p> : null}
   </div>;
 }
-
-export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
-  const { snapshot, catalog } = plugin;
-  const editing = !plugin.busy && snapshot.status !== "connected";
+function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: PluginConsole }) {
+  const id = entry.id;
+  const snapshot = pluginEntry(plugin.snapshots, id) ?? EMPTY_PLUGIN;
+  const connected = snapshot.status === "connected";
+  const busy = pluginEntry(plugin.busy, id) === true;
+  const [confirmation, setConfirmation] = useState<"enable" | "uninstall" | null>(null);
+  const [trusted, setTrusted] = useState(false);
+  useEffect(() => { setConfirmation(null); setTrusted(false); }, [plugin.catalogEpoch, pluginEntry(plugin.trustEpoch, id)]);
+  const count = Object.values(plugin.snapshots).filter((item) => item.status === "connected").length;
+  const reason = entry.status !== "ready" ? "Fix this installation before enabling. Diagnostics are available in the row menu."
+    : plugin.catalog?.node.status !== "detected" ? "Node.js 22.18.0 or newer is required."
+      : plugin.catalog?.truncated ? "Resolve the truncated catalog before enabling."
+        : count >= MAX_ENABLED_PLUGINS && !connected ? "The 16 enabled plugin limit has been reached. Disable one first."
+          : !plugin.sessionsReady ? "Cached plugin sessions are unavailable. Reload the app before enabling."
+            : null;
   const state = spotifyState(snapshot);
-  const selected = catalog?.plugins.find((entry) => entry.id === plugin.selectedId && entry.status === "ready");
-  const runtime = catalog?.node;
-  const runtimeLine = !runtime ? "Runtime not checked." : runtime.status === "detected"
-    ? `Detected Node ${runtime.version}.` : runtime.status === "unsupported"
-      ? `Unsupported Node ${runtime.version}.` : "Node not found.";
+  const diagnostics = pluginEntry(plugin.diagnostics, id);
+  return <li className="plugin-row" data-plugin-id={id} aria-busy={busy || undefined}>
+    <div className="plugin-row-header">
+      <div className="plugin-row-copy">
+        <h3>{entry.name}</h3><p className="plugin-metadata">{id || "Invalid folder ID"} · {entry.version || "Unknown version"} · protocol {entry.protocolVersion}</p>
+        <p className="plugin-row-status" role="status">{busy ? "Request pending…" : connected ? "Enabled" : snapshot.status === "stopped" ? "Stopped" : "Disabled"} · {entry.status}</p>
+        {entry.message ? <p className="field-note">{entry.message}</p> : null}
+        {reason && !connected ? <p className="field-note">{reason}</p> : null}
+        <PluginErrorNotice error={pluginEntry(plugin.errors, id) ?? snapshot.lastError} />
+      </div>
+      <div className="plugin-row-actions">
+        <button type="button" className={`button ${connected ? "secondary" : "primary"}`} disabled={busy || plugin.loading || (!connected && (!!reason || plugin.catalogBusy))}
+          aria-label={`${connected ? "Disable" : "Enable"} ${entry.name}`}
+          onClick={() => { if (connected) void plugin.disconnect(id); else { setTrusted(false); setConfirmation("enable"); } }}>{connected ? "Disable" : "Enable"}</button>
+        <details className="plugin-menu">
+          <summary className="icon-button" aria-label={`More options for ${entry.name}`} title="More options">⋯</summary>
+          <div className="plugin-menu-actions">
+            <button type="button" className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={(event) => {
+              event.currentTarget.closest("details")?.removeAttribute("open"); void plugin.diagnose(id);
+            }}>Diagnostics</button>
+            <button type="button" className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={(event) => {
+              event.currentTarget.closest("details")?.removeAttribute("open"); setTrusted(false); setConfirmation("uninstall");
+            }}>Uninstall…</button>
+          </div>
+        </details>
+      </div>
+    </div>
+    {confirmation === "enable" ? <div className="plugin-confirm" role="group" aria-label={`Trust ${entry.name}`}>
+      <label className="plugin-trust"><input type="checkbox" checked={trusted} disabled={busy} onChange={(event) => setTrusted(event.target.checked)} />{" "}
+        I reviewed the source, origin and license of {entry.name} {entry.version}. I trust its code to access my user-level files, network and OS permissions. A separate process is not a sandbox.</label>
+      <div className="settings-actions"><button type="button" className="button primary" disabled={!trusted || busy || plugin.catalogBusy || !!reason}
+        onClick={() => { setConfirmation(null); setTrusted(false); void plugin.enable(id, trusted); }}>Enable plugin</button>
+        <button type="button" className="button secondary" onClick={() => { setConfirmation(null); setTrusted(false); }}>Cancel</button></div>
+    </div> : confirmation === "uninstall" ? <div className="plugin-confirm" role="group" aria-label={`Uninstall ${entry.name}`}>
+      <p>Uninstall {entry.name}? This stops only this plugin and removes its folder from the catalog. The folder is moved to <code>~/.config/zdeck/plugin-backups</code> for recovery, not permanently deleted. Saved buttons remain but cannot run until the plugin is restored and explicitly enabled.</p>
+      <div className="settings-actions"><button type="button" className="button danger" disabled={busy} onClick={() => { setConfirmation(null); void plugin.uninstall(id); }}>Confirm uninstall</button>
+        <button type="button" className="button secondary" onClick={() => setConfirmation(null)}>Cancel</button></div>
+    </div> : null}
+    {diagnostics ? <section className="plugin-diagnostics" aria-label={`Diagnostics for ${entry.name}`} role="status">
+      <h4>Installation diagnostics</h4><p className="field-note">Local checks only; no plugin code or media state was read.</p>
+      <ul>{diagnostics.checks.map((check, index) => <li key={index}><strong>{check.name} · {check.status}</strong><p>{check.message}</p></li>)}</ul>
+    </section> : null}
+    {snapshot.manifest ? <details className="plugin-state"><summary className="disclosure">Actions and last read state</summary>
+      <ul>{snapshot.manifest.actions.map((action) => <li key={action.id}>{action.title} ({action.id})</li>)}</ul>
+      <button type="button" className="button secondary" disabled={busy || !connected || !!snapshot.lastError} onClick={() => void plugin.readState(id)}>Read state</button>
+      <p className="field-note">Intentional read may prompt for macOS Automation permission. State is the last successful read, not live. No background polling.</p>
+      {state ? <dl><dt>Title</dt><dd>{state.title ?? "No track"}</dd><dt>Artist</dt><dd>{state.artist ?? "No artist"}</dd><dt>Playback</dt><dd>{state.playback}</dd><dt>Spotify volume</dt><dd>{state.volume}%</dd></dl>
+        : <p className="field-note">No supported Spotify state has been read. Arbitrary plugin state is not displayed.</p>}
+    </details> : null}
+  </li>;
+}
+export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
+  const runtime = plugin.catalog?.node;
+  const entries = [...(plugin.catalog?.plugins ?? [])];
+  // Keep an enabled/failed cached session manageable even if its folder disappeared.
+  for (const [id, snapshot] of Object.entries(plugin.snapshots)) {
+    if (snapshot.status !== "disconnected" && !entries.some((entry) => entry.id === id)) entries.push({ id, name: id,
+      version: snapshot.manifest?.version ?? "", protocolVersion: snapshot.manifest?.protocolVersion ?? 0, status: "invalid",
+      message: "Folder is not in the current catalog. Disable this session or restore the complete packaged folder before enabling again." });
+  }
   return <section className="settings-card plugin-settings" aria-labelledby="plugin-heading">
-    <h2 id="plugin-heading">External plugin</h2>
-    <p>Install a plugin folder once, then enable it here. An installed Node.js ≥22.18.0 runtime is required and detected automatically. The Spotify reference plugin requires macOS and Spotify desktop.</p>
-    {!plugin.native ? <p>This browser stays preview-only. Manage plugins in the desktop app; previews never scan folders, launch a plugin or run its actions.</p> : <>
-      <p className="obs-status" role="status" aria-live="polite">{runtimeLine}</p>
-      {runtime && runtime.status !== "detected" ? <p>Install Node.js 22.18.0 or newer from nodejs.org or your package manager, then Refresh. The SDK and plugin folder do not bundle Node. No shell setup or executable paths are needed here.</p> : null}
-      <p>Plugin folder: <code>~/.config/zdeck/plugins</code> (or the configured XDG location on Linux).</p>
-      {catalog ? <details className="plugin-locations">
-        <summary className="disclosure">Local folder and runtime details</summary>
-        <p>Plugin folder: <code>{catalog.directory}</code></p>
-        {runtime?.path ? <p>Detected runtime: <code>{runtime.path}</code></p> : null}
-      </details> : null}
-      <div className="settings-actions">
-        <button type="button" className="button secondary" disabled={plugin.busy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
-        <button type="button" className="button secondary" disabled={plugin.busy} onClick={() => void plugin.refreshCatalog()}>Refresh</button>
-      </div>
-      {catalog?.plugins.length === 0 ? <p>Nothing installed yet. Copy the complete self-contained <code>spotify</code> folder from the release into this plugin folder, then Refresh. Keep its manifest.json, main.js and node_modules together. Do not copy only the source scripts.</p> : null}
-      {catalog?.truncated ? <p className="settings-error" role="alert">The folder has more than 64 entries. Remove extras and Refresh before enabling a plugin.</p> : null}
-      {catalog && catalog.plugins.length > 0 ? <>
-        <ul aria-label="Installed plugins">{catalog.plugins.map((entry, index) => <li key={`${entry.id}-${index}`}>
-          {entry.name} — {entry.status}{entry.version ? ` · ${entry.version}` : ""}{entry.message ? `: ${entry.message}` : ""}
-        </li>)}</ul>
-        <label className="field"><span>Plugin to enable</span>
-          <select value={plugin.selectedId} disabled={!editing} onChange={(event) => plugin.selectPlugin(event.target.value)}>
-            <option value="">Choose a ready plugin</option>
-            {catalog.plugins.filter((entry) => entry.id).map((entry) => <option key={entry.id} value={entry.id} disabled={entry.status !== "ready"}>
-              {entry.name} · {entry.version || entry.status}
-            </option>)}
-          </select>
-        </label>
-      </> : null}
-      <label className="field plugin-trust">
-        <span><input type="checkbox" checked={plugin.trusted} disabled={!editing || !selected} onChange={(event) => plugin.setTrusted(event.target.checked)} />{" "}
-          I reviewed the source, origin and license of {selected ? `${selected.name} ${selected.version}` : "the selected plugin"}. I trust its code to access my user-level files, network and OS permissions. A separate process is not a sandbox.</span>
-      </label>
-      <div className="settings-actions">
-        <button type="button" className="button primary" disabled={!editing || !canEnablePlugin(catalog, { pluginId: plugin.selectedId, trusted: plugin.trusted })} onClick={() => void plugin.enable()}>Enable plugin</button>
-        <button type="button" className="button secondary" disabled={plugin.busy || snapshot.status !== "connected" || !!snapshot.lastError} onClick={() => void plugin.readState()}>Read state</button>
-        <button type="button" className="button secondary" disabled={plugin.busy || snapshot.status === "disconnected"} onClick={() => void plugin.disconnect()}>Disconnect</button>
-      </div>
-      <p className="obs-status" role="status" aria-live="polite">{plugin.busy ? "Request pending…" : `Plugin ${snapshot.status}.`}</p>
-      <p className="muted">One active plugin is supported. Disconnect before switching plugins. Enabling reads its description only, not media state. Nothing is automatically enabled, reconnected or polled; enabling and trust last only for this session. Refreshing, changing selection, disconnecting or an error clears trust.</p>
-      {snapshot.manifest ? <>
-        <p>Plugin: {snapshot.manifest.id} · version {snapshot.manifest.version} · protocol {snapshot.manifest.protocolVersion}</p>
-        <ul>{snapshot.manifest.actions.map((action) => <li key={action.id}>{action.title} ({action.id})</li>)}</ul>
-      </> : null}
-      <p className="muted">Read state and Run may prompt for macOS Automation permission. Allow the actual launching app to control Spotify in Privacy &amp; Security → Automation. Read state is intentional, not a background refresh.</p>
-      <p>State below is the last successful read, not live.</p>
-      {state ? <dl>
-        <dt>Title</dt><dd>{state.title ?? "No track"}</dd>
-        <dt>Artist</dt><dd>{state.artist ?? "No artist"}</dd>
-        <dt>Playback</dt><dd>{state.playback}</dd>
-        <dt>Spotify volume</dt><dd>{state.volume}%</dd>
-      </dl> : <p className="muted">No supported Spotify state has been read. Other plugin state is not displayed.</p>}
+    <h2 id="plugin-heading">External plugins</h2>
+    <p>Install complete plugin folders once, then enable each trusted plugin explicitly. Node.js ≥22.18.0 is detected automatically. The Spotify reference requires macOS and Spotify desktop.</p>
+    {!plugin.native ? <p>This browser stays preview-only. Previews never scan folders, launch plugins or run actions.</p> : <>
+      <p className="obs-status" role="status">{!runtime ? "Runtime not checked." : runtime.status === "detected" ? `Detected Node ${runtime.version}.` : runtime.status === "unsupported" ? `Unsupported Node ${runtime.version}. Install Node.js 22.18.0 or newer.` : "Node not found. Install Node.js 22.18.0 or newer, then Refresh."}</p>
+      <details className="plugin-locations"><summary className="disclosure">Local folder and runtime details</summary>
+        <p>Plugin folder: <code>{plugin.catalog?.directory ?? "~/.config/zdeck/plugins"}</code></p>{runtime?.path ? <p>Detected runtime: <code>{runtime.path}</code></p> : null}
+      </details>
+      <div className="settings-actions"><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
+        <button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.refreshCatalog()}>Refresh</button></div>
+      {plugin.catalog?.truncated ? <p className="settings-error" role="alert">The folder has more than 64 entries. Resolve this and Refresh before enabling.</p> : null}
+      {!plugin.sessionsReady && !plugin.loading ? <p className="settings-error" role="alert">Cached plugin sessions could not be loaded. Reload the app before enabling plugins.</p> : null}
+      {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Copy the complete self-contained packaged folder, including manifest.json, main.js and node_modules, into the plugin folder, then Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
+      <ul className="plugin-list" aria-label="Installed plugins">{entries.map((entry, index) => <PluginRow key={entry.id || `invalid-${index}`} entry={entry} plugin={plugin} />)}</ul>
+      <p className="muted">Up to 16 plugins can be enabled independently. Trust and enabling last only for this session. Nothing is automatically enabled, reconnected, read or retried. Refresh clears pending trust, not enabled sessions. Use a row’s menu for diagnostics or reversible uninstall.</p>
       <PluginErrorNotice error={plugin.catalogError} />
-      <PluginErrorNotice error={snapshot.lastError} />
-      {snapshot.status === "stopped" ? <p>Resolve the error and explicitly acknowledge trust to enable again. No action is automatically retried.</p> : null}
     </>}
   </section>;
 }

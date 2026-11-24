@@ -4,7 +4,7 @@ use std::{collections::HashSet, fs, io::Read, path::{Path, PathBuf}, process::St
 use serde::Serialize;
 use serde_json::Value;
 use tokio::{io::AsyncReadExt, process::Command, time::{timeout, Instant}};
-use crate::plugin::{identifier, manifest, ErrorKind, LaunchFailure, Manifest, Outcome, PluginError, PluginSnapshot, PluginState};
+use crate::plugin::{identifier, manifest, ErrorKind, LaunchFailure, Manifest, Outcome, PluginError, PluginSnapshot, PluginRegistry};
 
 const MAX_FOLDERS: usize = 64;
 const MAX_RUNTIMES: usize = 32;
@@ -13,6 +13,14 @@ const PROBE_BYTES: u64 = 128;
 const SDK: &str = "@zdeck/plugin-sdk";
 const SDK_MISSING: &str = "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone.";
 const SDK_INVALID: &str = "Bundled SDK files must be readable regular local files, with valid package metadata and no symlinks. Copy the complete packaged plugin folder.";
+const SDK_LINK: &str = "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDiagnostics { pub plugin_id: String, pub checks: Vec<DiagnosticCheck> }
+#[derive(Debug, Serialize)]
+pub struct DiagnosticCheck { pub name: &'static str, pub status: &'static str, pub message: &'static str }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -104,8 +112,12 @@ impl PluginInstall {
             .map_err(|_| failure("Plugin discovery failed. Check the local directory and retry explicitly."))??;
         Ok(PluginCatalog { directory: path_string(&self.directory)?, node: detect_node(&self.candidates).await, plugins, truncated })
     }
-    pub async fn enable(&self, state: &PluginState, plugin_id: &str) -> Result<PluginSnapshot, PluginError> {
+    pub async fn enable(&self, registry: &PluginRegistry, plugin_id: &str) -> Result<PluginSnapshot, PluginError> {
         if !identifier(plugin_id) { return Err(failure("Choose a valid plugin ID from the local catalog.")); }
+        let install = self.clone(); let id = plugin_id.to_owned();
+        registry.manage(plugin_id, true, false, move |state| async move { install.enable_session(&state, &id).await }).await
+    }
+    async fn enable_session(&self, state: &crate::plugin::PluginState, plugin_id: &str) -> Result<PluginSnapshot, PluginError> {
         let install = self.clone();
         let id = plugin_id.to_owned();
         let (entrypoint, expected) = tokio::task::spawn_blocking(move || {
@@ -141,6 +153,78 @@ impl PluginInstall {
         }).await.map_err(|_| failure("Plugin revalidation failed. Refresh the local catalog."))??;
         state.connect_manifest(node.path.expect("detected runtime"), path_string(&entrypoint)?, expected).await
     }
+    /// Metadata and Node --version only: never describes or reads a plugin.
+    pub async fn diagnostics(&self, plugin_id: &str) -> Result<PluginDiagnostics, PluginError> {
+        if !identifier(plugin_id) { return Err(failure("Choose a valid plugin ID from the local catalog.")); }
+        let install = self.clone(); let id = plugin_id.to_owned();
+        let mut checks = tokio::task::spawn_blocking(move || {
+            let mut checks = Vec::new();
+            let root = install.root();
+            checks.push(DiagnosticCheck { name: "catalog", status: if matches!(&root, Ok(Some(_))) { "pass" } else { "fail" }, message: "The plugin catalog must be a readable real directory, not a symlink." });
+            let folder = root.ok().flatten().and_then(|root| validated_folder(&root, &id).ok());
+            checks.push(DiagnosticCheck { name: "folder", status: if folder.is_some() { "pass" } else { "fail" }, message: "The selected folder must be a real directory directly inside the catalog." });
+            if let Some(folder) = folder {
+                let root = folder.parent().expect("validated parent");
+                let (row, _) = inspect_folder(root, &folder, &id);
+                let manifest_ok = row.protocol_version == 1;
+                checks.push(DiagnosticCheck { name: "manifest", status: if manifest_ok { "pass" } else { "fail" }, message: if manifest_ok { "Manifest ID, schema and protocol version 1 are valid." } else { "A bounded valid manifest matching the folder ID and protocol version 1 is required." } });
+                let main = folder.join("main.js");
+                let main_ok = fs::symlink_metadata(&main).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink()) && fs::File::open(&main).is_ok();
+                checks.push(DiagnosticCheck { name: "entrypoint", status: if main_ok { "pass" } else { "fail" }, message: "The fixed main.js entrypoint must be a readable regular file, not a symlink." });
+                let sdk = check_bundled_sdk(&folder);
+                checks.push(DiagnosticCheck { name: "sdk", status: if sdk.is_ok() { "pass" } else { "fail" }, message: sdk.err().unwrap_or("Declared public SDK files are valid; no plugin code or other dependencies were evaluated.") });
+            } else {
+                for name in ["manifest", "entrypoint", "sdk"] {
+                    checks.push(DiagnosticCheck { name, status: "warning", message: "Not checked because the selected folder is missing or unsafe." });
+                }
+            }
+            checks
+        }).await.map_err(|_| failure("Plugin diagnostics failed. Refresh the catalog explicitly."))?;
+        let runtime = detect_node(&self.candidates).await;
+        checks.push(DiagnosticCheck { name: "runtime", status: if runtime.status == NodeStatus::Detected { "pass" } else { "fail" }, message: match runtime.status {
+            NodeStatus::Detected => "A supported Node.js runtime was detected using version probes only.",
+            NodeStatus::Unsupported => "Node.js is too old; install Node.js 22.18.0 or newer and refresh.",
+            NodeStatus::NotFound => "No supported Node.js executable was found; install Node.js 22.18.0 or newer and refresh.",
+        } });
+        Ok(PluginDiagnostics { plugin_id: plugin_id.to_owned(), checks })
+    }
+    /// Stop one session and move its exact folder to a reversible, exclusive backup.
+    pub async fn uninstall(&self, registry: &PluginRegistry, plugin_id: &str) -> Result<(), PluginError> {
+        if !identifier(plugin_id) { return Err(failure("Choose a valid plugin ID from the local catalog.")); }
+        let install = self.clone(); let id = plugin_id.to_owned();
+        registry.manage(plugin_id, true, true, move |state| async move {
+            // Validate before stopping anything, but do not require a ready manifest/SDK.
+            let root = install.root()?.ok_or_else(|| failure("The plugin catalog is unavailable."))?;
+            validated_folder(&root, &id)?;
+            state.disconnect().await;
+            tokio::task::spawn_blocking(move || install.backup(&id)).await
+                .map_err(|_| failure("Plugin backup failed. No permanent deletion was requested."))?
+        }).await
+    }
+    fn backup(&self, id: &str) -> Result<(), PluginError> {
+        let root = self.root()?.ok_or_else(|| failure("The plugin catalog is unavailable."))?;
+        let source = validated_folder(&root, id)?;
+        let parent = root.parent().ok_or_else(|| failure("The plugin catalog has no backup parent."))?;
+        let backups = parent.join("plugin-backups");
+        match fs::create_dir(&backups) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(_) => return Err(failure("The plugin backup directory could not be created. Check local permissions.")),
+        }
+        let meta = fs::symlink_metadata(&backups).map_err(|_| failure("The plugin backup directory is unreadable."))?;
+        if !meta.is_dir() || meta.file_type().is_symlink() || fs::canonicalize(&backups).ok().as_deref() != Some(backups.as_path()) {
+            return Err(failure("The plugin backup directory must be a real local directory, not a symlink."));
+        }
+        let mut nonce = [0u8; 16];
+        getrandom::fill(&mut nonce).map_err(|_| failure("A unique plugin backup could not be generated. Nothing was deleted."))?;
+        let destination = backups.join(format!("{id}-{:032x}", u128::from_le_bytes(nonce)));
+        // Unix can replace an empty directory: reserve it exclusively first.
+        // Windows directory rename already refuses an existing destination.
+        #[cfg(not(target_os = "windows"))]
+        fs::create_dir(&destination).map_err(|_| failure("A unique plugin backup could not be reserved. Nothing was deleted."))?;
+        validated_folder(&root, id)?;
+        fs::rename(source, destination).map_err(|_| failure("Plugin backup failed. The selected plugin is stopped; its folder was not permanently deleted."))
+    }
     /// Creates only the app plugin folder. Preparing this command never opens it.
     pub fn prepare_open(&self) -> Result<Command, PluginError> {
         if self.root()?.is_none() {
@@ -169,6 +253,17 @@ impl PluginInstall {
     }
 }
 
+fn validated_folder(root: &Path, id: &str) -> Result<PathBuf, PluginError> {
+    if !identifier(id) { return Err(failure("Choose a valid plugin ID from the local catalog.")); }
+    let folder = root.join(id);
+    path_string(&folder)?;
+    let meta = fs::symlink_metadata(&folder).map_err(|_| failure("The selected plugin folder is unavailable."))?;
+    if !meta.is_dir() || meta.file_type().is_symlink() { return Err(failure("The selected plugin folder must be a real directory, not a symlink.")); }
+    let canonical = fs::canonicalize(&folder).map_err(|_| failure("The selected plugin folder is unreadable."))?;
+    if canonical.parent() != Some(root) { return Err(failure("The selected plugin must stay directly inside the catalog.")); }
+    Ok(canonical)
+}
+
 fn inspect_folder(root: &Path, folder: &Path, id: &str) -> (InstalledPlugin, Option<(PathBuf, Manifest)>) {
     let mut row = InstalledPlugin { id: id.to_owned(), name: if id.is_empty() { "Invalid plugin folder".into() } else { id.into() },
         version: String::new(), protocol_version: 0, status: InstallStatus::Invalid, message: None };
@@ -179,18 +274,14 @@ fn inspect_folder(root: &Path, folder: &Path, id: &str) -> (InstalledPlugin, Opt
         if meta.file_type().is_symlink() || !meta.is_dir() { return Err("Plugin folders must be real directories, not symlinks."); }
         let canonical = fs::canonicalize(folder).map_err(|_| "The plugin folder is unreadable.")?;
         if canonical.parent() != Some(root) { return Err("Plugin folders must stay directly inside the plugin directory."); }
-        let mut paths = Vec::new();
-        for name in ["manifest.json", "main.js"] {
-            let path = canonical.join(name);
-            let meta = fs::symlink_metadata(&path).map_err(|_| "Both a readable manifest.json and a regular main.js file are required.")?;
-            if meta.file_type().is_symlink() || !meta.is_file() { return Err("manifest.json and main.js must be regular files, not symlinks."); }
-            let resolved = fs::canonicalize(&path).map_err(|_| "Plugin files are unreadable.")?;
-            if resolved.parent() != Some(canonical.as_path()) { return Err("Plugin files must stay inside their plugin folder."); }
-            if name == "manifest.json" && meta.len() > MANIFEST_BYTES { return Err("manifest.json exceeds the 16384-byte limit."); }
-            paths.push(resolved);
-        }
+        let manifest_path = canonical.join("manifest.json");
+        let meta = fs::symlink_metadata(&manifest_path).map_err(|_| "Both a readable manifest.json and a regular main.js file are required.")?;
+        if meta.file_type().is_symlink() || !meta.is_file() { return Err("manifest.json and main.js must be regular files, not symlinks."); }
+        let manifest_path = fs::canonicalize(&manifest_path).map_err(|_| "Plugin files are unreadable.")?;
+        if manifest_path.parent() != Some(canonical.as_path()) { return Err("Plugin files must stay inside their plugin folder."); }
+        if meta.len() > MANIFEST_BYTES { return Err("manifest.json exceeds the 16384-byte limit."); }
         let mut bytes = Vec::new();
-        fs::File::open(&paths[0]).map_err(|_| "manifest.json cannot be read.")?.take(MANIFEST_BYTES + 1)
+        fs::File::open(&manifest_path).map_err(|_| "manifest.json cannot be read.")?.take(MANIFEST_BYTES + 1)
             .read_to_end(&mut bytes).map_err(|_| "manifest.json cannot be read.")?;
         if bytes.len() as u64 > MANIFEST_BYTES { return Err("manifest.json exceeds the 16384-byte limit."); }
         let mut value: Value = serde_json::from_slice(&bytes).map_err(|_| "manifest.json is not valid JSON.")?;
@@ -205,8 +296,14 @@ fn inspect_folder(root: &Path, folder: &Path, id: &str) -> (InstalledPlugin, Opt
             row.status = InstallStatus::Incompatible;
             return Err("This plugin protocol version is not supported; protocol version 1 is required.");
         }
+        let entrypoint = canonical.join("main.js");
+        let meta = fs::symlink_metadata(&entrypoint).map_err(|_| "Both a readable manifest.json and a regular main.js file are required.")?;
+        if meta.file_type().is_symlink() || !meta.is_file() { return Err("manifest.json and main.js must be regular files, not symlinks."); }
+        let entrypoint = fs::canonicalize(&entrypoint).map_err(|_| "Plugin files are unreadable.")?;
+        if entrypoint.parent() != Some(canonical.as_path()) { return Err("Plugin files must stay inside their plugin folder."); }
+        fs::File::open(&entrypoint).map_err(|_| "main.js cannot be read.")?;
         check_bundled_sdk(&canonical)?;
-        Ok((paths.remove(1), m))
+        Ok((entrypoint, m))
     })();
     match checked {
         Ok(ready) => { row.status = InstallStatus::Ready; (row, Some(ready)) }
@@ -243,7 +340,8 @@ fn check_bundled_sdk(folder: &Path) -> Result<(), &'static str> {
     for part in ["node_modules", "@zdeck", "plugin-sdk"] {
         current.push(part);
         let meta = fs::symlink_metadata(&current).map_err(|_| SDK_MISSING)?;
-        if meta.file_type().is_symlink() || !meta.is_dir() { return Err(SDK_INVALID); }
+        if meta.file_type().is_symlink() { return Err(SDK_LINK); }
+        if !meta.is_dir() { return Err(SDK_INVALID); }
     }
     for name in ["package.json", "index.js"] {
         let path = current.join(name);
