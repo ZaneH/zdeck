@@ -16,7 +16,7 @@ We inspected Touch Portal’s official [main-window guide](https://www.touch-por
 - The Settings icon toggles back to the editor when clicked again. Remove has a visible danger-tinted surface/border at rest. Closed “About this preview” no longer reserves a flex gap below its summary.
 - Default desktop window reduced from 1280×820 to **960×680** (minimum 760×540).
 
-Dark tokens remain background `#18191b`, surface `#212326`, secondary text `#b2b6bc`, and primary text `#f1f2f3`. Light mode uses neutral gray/white surfaces. Accent is configurable and used sparingly for selection/focus. One self-hosted typeface, [Geist (OFL)](../src/assets/Geist-OFL.txt). No new dependencies or external font requests.
+Dark tokens remain background `#18191b`, surface `#212326`, secondary text `#b2b6bc`, and primary text `#f1f2f3`. Light mode uses neutral gray/white surfaces. Accent is configurable and used sparingly for selection/focus. One self-hosted typeface, [Geist (OFL)](../src/assets/Geist-OFL.txt). No external font requests. The later pairing QR uses the MIT-licensed `qrcode-generator` locally.
 
 ## Onboarding in motion
 
@@ -73,6 +73,16 @@ The private service serves a separate phone surface, never the local editor or s
 ![Approved phone showing the saved fixture deck](design/remote-active.png)
 
 These are real Chrome screenshots at 390×844 against the Rust service through a disposable loopback HTTPS proxy. The fixture label distinguishes authoritative saved data from a preview fallback. No real OBS/audio action was run.
+
+## Desktop pairing presentation
+
+Settings now names **Start/Stop local service**, explicitly distinguishes loopback availability from unverified phone access, and shows the separate private Tailscale Serve setup. Open the root HTTPS address on the phone first; only generate an invitation once that route works. Port 45829 is not a phone-facing endpoint, and Wi-Fi alone does not publish the app.
+
+Expiry sits directly under the selectable link field, above **Copy link**, independently of copy feedback. The same expiring invitation is encoded into a locally generated black-on-white SVG QR with a four-module quiet zone. Replacement, expiry, stopping, or leaving Settings removes it. QR camera scanning normally opens a browser, so an installed iPhone app should still receive a fresh pasted link in its own session.
+
+![Pairing field, expiry, Copy and local QR](design/pairing.png)
+
+This screenshot uses an owned fake native-IPC adapter in an isolated browser, not a real invitation. An independent QR decoder recovered the exact fixture URL from the screenshot. Coordinator checks pass: **105 frontend tests**, **212 local UI browser checks**, **62 actual-service HTTPS checks**, native WebKit welcome/build/try/editor layout smoke, production/native debug builds, and zero npm audit findings. Physical camera scanning, DNS and Tailscale Serve reachability are separate checks; no Tailscale changes were made by these tests.
 
 ## Verification and limits
 

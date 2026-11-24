@@ -657,6 +657,54 @@ try {
   check("setup build survives a short viewport", await narrowSetup.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.setup-actions .button.primary').getBoundingClientRect().right <= innerWidth"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: tightCtx });
 
+  // ------------------------------------------------------------ desktop pairing presentation (owned IPC fake only)
+  const { browserContextId: adminCtx } = await cdp.send('Target.createBrowserContext');
+  const admin = await openPage('pairing-settings', null, { width: 960, height: 680 }, adminCtx);
+  livePages.push(admin);
+  const adminDeck = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8'));
+  await admin.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+    window.isTauri = true;
+    window.__adminCalls = [];
+    let running = true, invitationNumber = 0;
+    const origin = 'https://fixture.tailnet.ts.net';
+    const status = () => ({running, origin: running ? origin : null, port: running ? 45829 : null, pendingDevices: 0, approvedDevices: 0, connectedSockets: 0});
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      window.__adminCalls.push(command);
+      if (command === 'native_deck_load') return { exists: true, revision: 1, deck: ${JSON.stringify(adminDeck)} };
+      if (command === 'remote_status') return status();
+      if (command === 'remote_list_devices') return [];
+      if (command === 'obs_snapshot') return { connected: false, host: '127.0.0.1', port: 4455, scenes: [], currentScene: null, observedAtMs: Date.now() };
+      if (command === 'remote_stop') { running = false; return status(); }
+      if (command === 'remote_create_invitation') {
+        const invitation = (++invitationNumber % 2 ? 'a' : 'b').repeat(64);
+        return { invitation, url: origin + '/#/pair?invite=' + invitation, expiresAtMs: Date.now() + (invitationNumber === 2 ? 1500 : 60000) };
+      }
+      throw new Error('Unexpected fake IPC command: ' + command);
+    }};
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => {} } });
+  ` });
+  await admin.navigate(`${BASE}/#/settings`);
+  check('desktop pairing status distinguishes local service from phone access', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Phone access is not checked.')"));
+  await admin.eval(clickText('.settings-card button', 'Create pairing link'));
+  check('desktop pairing creates a local SVG QR', await admin.waitFor("!!document.querySelector('.pairing-qr path')"));
+  check('pairing expiry sits directly below the field and above Copy', await admin.eval("(() => { const invite = document.querySelector('.remote-invite'); const field = invite.querySelector('.field').getBoundingClientRect(), expiry = invite.querySelector('.remote-invite-expiry').getBoundingClientRect(), copy = invite.querySelector('button').getBoundingClientRect(); return expiry.top >= field.bottom && copy.top >= expiry.bottom; })()"));
+  const originalQr = await admin.eval("document.querySelector('.pairing-qr path').getAttribute('d')");
+  await admin.eval(clickText('.remote-invite button', 'Copy link'));
+  check('copy feedback does not replace the expiry timestamp', await admin.waitFor("document.querySelector('.remote-invite').textContent.includes('Link copied.') && document.querySelector('.remote-invite-expiry').textContent.includes('Expires at')"));
+  await admin.eval("document.querySelector('.remote-invite').scrollIntoView({block:'start'})");
+  await admin.screenshot('/tmp/deck-design-pairing.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
+  check('pairing instructions and QR fit a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.pairing-qr').getBoundingClientRect().width >= 180"));
+  await admin.eval(clickText('.settings-card button', 'Replace pairing link'));
+  check('replacement invitation replaces the QR', await admin.waitFor(`document.querySelector('.pairing-qr path')?.getAttribute('d') !== ${JSON.stringify(originalQr)}`));
+  check('expiry removes both the pairing link and QR', await admin.waitFor("!document.querySelector('.remote-invite, .pairing-qr')", 5000));
+  await admin.eval(clickText('.settings-card button', 'Create pairing link'));
+  await admin.waitFor("!!document.querySelector('.pairing-qr')");
+  await admin.eval(clickText('.settings-card button', 'Stop local service'));
+  check('stop removes invitation and QR immediately', await admin.waitFor("!document.querySelector('.remote-invite, .pairing-qr') && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: adminCtx });
+
   // ------------------------------------------------------------ light theme and reduced motion during setup
   const { browserContextId: motionCtx } = await cdp.send('Target.createBrowserContext');
   const lightSetup = await openPage('setup-light', `${BASE}/`, { width: 960, height: 680 }, motionCtx);
@@ -739,9 +787,11 @@ try {
   await manage.eval(click('[aria-label="Manage pages"]'));
   await manage.waitFor("document.querySelector('.page-dialog').open");
   await manage.eval(click('.page-dialog .page-actions [title="Rename page"]'));
+  await manage.waitFor("!!document.querySelector('.page-dialog .page-rename input')");
   await manage.eval(setValue('.page-dialog .page-rename input', 'Smoke page'));
+  await manage.waitFor("document.querySelector('.page-dialog .page-rename input')?.value === 'Smoke page'");
   await manage.eval(click('.page-dialog [aria-label^="Save name"]'));
-  check("test page renamed for removal", await manage.eval("[...document.querySelectorAll('.page-dialog .page-name')].some((n) => n.textContent === 'Smoke page')"));
+  check("test page renamed for removal", await manage.waitFor("[...document.querySelectorAll('.page-dialog .page-name')].some((n) => n.textContent === 'Smoke page')"));
 
   await manage.eval("window.__deckOriginalConfirm = window.confirm; window.__confirmCalls = []; window.confirm = (msg) => { window.__confirmCalls.push(msg); return false; }");
   await manage.eval(click('.page-dialog .page-actions [title="Remove page"]'));

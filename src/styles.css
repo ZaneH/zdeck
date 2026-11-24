@@ -253,6 +253,13 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .settings-card .field { max-width: 420px; }
 .settings-card .muted { color: var(--text-faint); font-size: 11px; }
 .remote-invite { display: flex; flex-direction: column; gap: 8px; }
+.remote-steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.remote-help > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.remote-help > p { margin-top: 8px; }
+.remote-invite-expiry { margin: 0; }
+.pairing-qr { display: block; width: 220px; max-width: 100%; height: auto; background: #fff; }
+.remote-qr-caption { margin-top: 4px; }
+.remote-qr-fallback { margin: 0; }
 .remote-devices { display: flex; flex-direction: column; gap: 8px; }
 .remote-devices h3 { color: var(--text-muted); font-size: 12px; font-weight: 550; }
 .remote-device-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }

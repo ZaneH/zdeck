@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PairingQrCode } from "./PairingQrCode";
 import { useRemoteConsole } from "../lib/useRemoteConsole";
 
 /**
@@ -48,10 +49,47 @@ export function RemoteSettingsCard() {
       <h2 id="remote-heading">Phone connection</h2>
       <p>
         Starts a private service on this computer that listens only on
-        127.0.0.1:45829. It is not reachable from your phone until you separately
-        configure Tailscale Serve to proxy an HTTPS tailnet address to that
-        loopback port. This app never configures Tailscale for you.
+        127.0.0.1:45829. That port is loopback-only, so your phone cannot reach
+        this app until you separately set up a private HTTPS Tailscale Serve
+        proxy. This app never configures Tailscale for you.
       </p>
+
+      <ol className="remote-steps">
+        <li>
+          Start the local service below for this computer's exact tailnet DNS
+          name, for example <code>https://computer.tailnet-name.ts.net</code>.
+        </li>
+        <li>
+          On this desktop, review <code>tailscale serve status</code> in a
+          terminal, then configure a private HTTPS proxy to the loopback
+          service, for example{" "}
+          <code>tailscale serve --bg --https=443 http://127.0.0.1:45829</code>.
+          Do not enable Funnel, and do not overwrite an existing Serve config
+          without reviewing it first.
+        </li>
+        <li>
+          Open the root tailnet URL on your phone and confirm the phone shows
+          “Connect your phone” before you create or scan a pairing invitation.
+        </li>
+        <li>Request approval from the phone, then approve it here.</li>
+      </ol>
+
+      <details className="remote-help">
+        <summary>Connection help</summary>
+        <p>
+          Port 45829 is loopback-only. Being on the same WiFi does not publish
+          this app. The phone or browser must use the tailnet DNS name (for
+          example <code>computer.tailnet-name.ts.net</code> — an example, not
+          your host). This app does not detect whether DNS or Serve is working.
+        </p>
+        <p>
+          On iPhone, open the root address in Safari and install it first, then
+          paste a fresh pairing link inside the installed app. A QR code scanned
+          with the camera usually opens the browser, so it does not pair an
+          installed app's session. Opening a pairing link never approves a
+          phone; approval is always separate.
+        </p>
+      </details>
 
       <label className="field">
         <span>HTTPS tailnet origin</span>
@@ -80,7 +118,7 @@ export function RemoteSettingsCard() {
             disabled={remote.busy}
             onClick={() => void remote.stop()}
           >
-            Stop connection
+            Stop local service
           </button>
         ) : (
           <button
@@ -89,17 +127,17 @@ export function RemoteSettingsCard() {
             disabled={remote.busy || origin.trim().length === 0}
             onClick={() => void remote.start(origin.trim())}
           >
-            {remote.busy ? "Working…" : "Start connection"}
+            {remote.busy ? "Working…" : "Start local service"}
           </button>
         )}
       </div>
 
       <p className="obs-status" role="status" aria-live="polite">
         {remote.status === null
-          ? "Checking connection…"
+          ? "Checking local service…"
           : running
-            ? `Running on 127.0.0.1:${remote.port ?? 45829}${remote.origin ? ` · ${remote.origin}` : ""}.`
-            : "Stopped."}
+            ? `Local service running on 127.0.0.1:${remote.port ?? 45829}${remote.origin ? ` · ${remote.origin}` : ""}. Phone access is not checked.`
+            : "Local service stopped."}
       </p>
 
       {remote.error ? (
@@ -111,9 +149,9 @@ export function RemoteSettingsCard() {
       {running ? (
         <>
           <p className="muted">
-            Session-only: stopping the service or restarting the app clears every
-            device, so each phone must pair again. The origin is kept for this
-            session only and is disabled while the service runs.
+            Session-only: stopping the local service or restarting the app
+            clears every device, so each phone must pair again. The origin is
+            kept for this session only and is disabled while the service runs.
           </p>
 
           <div className="settings-actions">
@@ -138,6 +176,10 @@ export function RemoteSettingsCard() {
                   onFocus={(event) => event.currentTarget.select()}
                 />
               </label>
+              <p className="muted remote-invite-expiry">
+                Expires at{" "}
+                {new Date(remote.invitation.expiresAtMs).toLocaleTimeString()}.
+              </p>
               <div className="settings-actions">
                 <button
                   type="button"
@@ -146,12 +188,20 @@ export function RemoteSettingsCard() {
                 >
                   Copy link
                 </button>
-                <span className="muted" role="status" aria-live="polite">
-                  {copyMessage?.expiresAtMs === remote.invitation.expiresAtMs
-                    ? copyMessage.text
-                    : `Expires at ${new Date(remote.invitation.expiresAtMs).toLocaleTimeString()}.`}
-                </span>
+                {copyMessage?.expiresAtMs === remote.invitation.expiresAtMs ? (
+                  <span className="muted" role="status" aria-live="polite">
+                    {copyMessage.text}
+                  </span>
+                ) : null}
               </div>
+              <PairingQrCode
+                value={remote.invitation.url}
+                label="Pairing QR code. Scan with your phone camera to open the pairing link."
+              />
+              <p className="muted remote-qr-caption">
+                Scanning opens the link in the phone browser; you still approve
+                the phone here.
+              </p>
               <p className="muted">
                 Sharing this link does not approve a phone. Approve the request
                 below after the phone opens it.
