@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { nativeAvailable } from "./native";
+import { isDeck, isRecord } from "./deck";
 import type { Deck } from "./types";
 
 /** Typed, sanitized errors returned by the native deck commands. */
@@ -78,9 +79,18 @@ function requireNative(): void {
   }
 }
 
+export function parseDeckSnapshot(value: unknown): DeckSnapshot {
+  if (!isRecord(value) || typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 0
+    || typeof value.exists !== "boolean" || !isDeck(value.deck)) {
+    throw { kind: "invalid_file", message: FALLBACK_MESSAGES.invalid_file } satisfies DeckError;
+  }
+  return { revision: value.revision, exists: value.exists, deck: value.deck };
+}
+
 export async function nativeDeckLoad(): Promise<DeckSnapshot> {
   requireNative();
-  return invoke<DeckSnapshot>("native_deck_load");
+  // Native v1 files are migrated by Rust; a legacy wire snapshot must not bypass v2 validation.
+  return parseDeckSnapshot(await invoke<unknown>("native_deck_load"));
 }
 
 export async function nativeDeckSave(
@@ -88,5 +98,5 @@ export async function nativeDeckSave(
   deck: Deck,
 ): Promise<DeckSnapshot> {
   requireNative();
-  return invoke<DeckSnapshot>("native_deck_save", { expectedRevision, deck });
+  return parseDeckSnapshot(await invoke<unknown>("native_deck_save", { expectedRevision, deck }));
 }

@@ -259,6 +259,12 @@ const setValue = (selector, value) =>
   `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); el.blur(); return true; })()`;
 const setSelect = (selector, value) =>
   `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`;
+// Real input avoids synthetic change/blur racing submission in controlled rename forms.
+async function typeInput(page, selector, text) {
+  await page.send('Page.bringToFront');
+  await page.eval(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.focus(); input.select(); })()`);
+  await page.send('Input.insertText', { text });
+}
 async function pressKey(page, key, code, vk, text) {
   await page.send("Page.bringToFront").catch(() => {});
   const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
@@ -408,7 +414,7 @@ try {
   await editor.eval(click('[aria-label="Close action picker"]'));
   await editor.waitFor("document.getElementById('action-search').value === ''");
   await editor.eval(click('.add-control'));
-  check("closing the picker resets search and category", await editor.eval("document.getElementById('action-search').value === '' && document.querySelector('.action-category[aria-pressed=\"true\"]').textContent === 'All' && document.querySelectorAll('.action-row').length === 4"));
+  check("closing the picker resets search and category", await editor.waitFor("document.getElementById('action-search').value === '' && document.querySelector('.action-category[aria-pressed=\"true\"]').textContent === 'All' && document.querySelectorAll('.action-row').length === 4"), await editor.eval("JSON.stringify({query:document.getElementById('action-search').value,category:document.querySelector('.action-category[aria-pressed=\"true\"]').textContent,rows:document.querySelectorAll('.action-row').length})"));
   await editor.eval(click('[aria-label="Close action picker"]'));
 
   // ------------------------------------------------------------ clean phone + volume (before fixture edits)
@@ -663,19 +669,76 @@ try {
   const { browserContextId: adminCtx } = await cdp.send('Target.createBrowserContext');
   const admin = await openPage('pairing-settings', null, { width: 960, height: 680 }, adminCtx);
   livePages.push(admin);
-  const adminDeck = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8'));
+  // Rust migrates this shared legacy fixture before returning native snapshots.
+  const adminDeck = { ...JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8')), version: 2 };
   await admin.send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.isTauri = true;
     window.__adminCalls = [];
-    let running = true, invitationNumber = 0;
-    const origin = 'https://fixture.tailnet.ts.net';
-    const status = () => ({running, origin: running ? origin : null, port: running ? 45829 : null, pendingDevices: 0, approvedDevices: 0, connectedSockets: 0});
+    // A reload with a saved preference simulates a new program session: service is stopped.
+    let running = !localStorage.getItem('deck.remote.origin.v1'), invitationNumber = 0;
+    window.__remoteStartOrigins = [];
+    window.__desktopCalls = [];
+    let savedDeck = ${JSON.stringify(adminDeck)}, savedRevision = 1;
+    let cachedPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
+    window.__pluginArgs = null;
+    window.__pluginsInstalled = false;
+    window.__runtimeStatus = 'detected';
+    const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
+      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}}
+    ]};
+    let origin = 'https://fixture.tailnet.ts.net', mode = 'tailscale';
+    window.__remoteStartArgs = [];
+    const status = () => ({running, mode: running ? mode : null, origin: running ? origin : null, port: running ? 45829 : null, pendingDevices: 0, approvedDevices: 0, connectedSockets: 0});
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       window.__adminCalls.push(command);
-      if (command === 'native_deck_load') return { exists: true, revision: 1, deck: ${JSON.stringify(adminDeck)} };
+      if (command === 'native_deck_load') return { exists: true, revision: savedRevision, deck: savedDeck };
+      if (command === 'native_deck_save') {
+        if (window.__holdSave) await new Promise(resolve => { window.__finishSave = resolve; });
+        if (window.__failSave) throw {kind:'io',message:'The test deck could not be saved.'};
+        if (window.__conflictSave) throw {kind:'conflict',message:'The deck was changed elsewhere.',currentRevision:savedRevision+1};
+        savedDeck = args.deck; savedRevision = args.expectedRevision + 1;
+        return { exists: true, revision: savedRevision, deck: savedDeck };
+      }
+      if (command === 'desktop_run_control') {
+        window.__desktopCalls.push(args);
+        if (Object.keys(args).some(k => !['commandId','revision','controlId','value'].includes(k)) || args.revision !== savedRevision) throw {code:'invalid_request',message:'wrong envelope'};
+        if (window.__holdDesktop) await new Promise(resolve => { window.__finishDesktop = resolve; });
+        if (window.__desktopError) throw {code:window.__desktopError,message:'raw secret diagnostic'};
+        return {id:args.commandId,state:window.__desktopResult || 'confirmed',message:'Safe backend result.'};
+      }
+      if (command === 'plugin_snapshot') return cachedPlugin;
+      if (command === 'plugin_catalog') return {
+        directory:'/Users/fixture/.config/zdeck/plugins',
+        node:window.__runtimeStatus === 'not_found' ? {status:'not_found',version:null,path:null} : {status:'detected',version:'22.18.0',path:'/detected/node'},
+        plugins:window.__pluginsInstalled ? [
+          {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
+          {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
+          {id:'broken',name:'broken',version:'',protocolVersion:0,status:'invalid',message:'Invalid manifest.'},
+          {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.'}
+        ] : [], truncated:false
+      };
+      if (command === 'plugin_open_directory') return null;
+      if (command === 'plugin_enable') {
+        if (args.pluginId !== 'spotify' || Object.keys(args).length !== 1) throw new Error('Invalid enable arguments');
+        return cachedPlugin = {status:'connected', manifest:pluginManifest, state:null, lastError:null};
+      }
+      if (command === 'plugin_disconnect') return cachedPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
+      if (command === 'plugin_state') return cachedPlugin = {...cachedPlugin, state:{title:'<script>Track</script>', artist:'Artist', playback:'paused', volume:50, secret:'NEVER DISPLAY THIS'}};
+      if (command === 'plugin_execute') {
+        window.__pluginArgs = args;
+        if (window.__failPlugin) throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
+        return cachedPlugin = {...cachedPlugin, state:{title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume}};
+      }
       if (command === 'remote_status') return status();
       if (command === 'remote_list_devices') return [];
       if (command === 'obs_snapshot') return { connected: false, host: '127.0.0.1', port: 4455, scenes: [], currentScene: null, observedAtMs: Date.now() };
+      if (command === 'remote_start') {
+        window.__remoteStartOrigins.push(args.origin);
+        window.__remoteStartArgs.push(args);
+        if (window.__holdRemoteStart) await new Promise(resolve => { window.__finishRemoteStart = resolve; });
+        if (window.__failRemoteStart) throw {kind:'invalid_origin',message:'The local service could not be started.'};
+        origin = args.origin; mode = args.mode; running = true; return status();
+      }
       if (command === 'remote_stop') { running = false; return status(); }
       if (command === 'remote_create_invitation') {
         const invitation = (++invitationNumber % 2 ? 'a' : 'b').repeat(64);
@@ -683,20 +746,38 @@ try {
       }
       throw new Error('Unexpected fake IPC command: ' + command);
     }};
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => {} } });
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (text) => {
+      if (window.__clipboardFails) throw new Error('Clipboard blocked');
+      window.__clipboardText = text;
+    } } });
   ` });
   await admin.navigate(`${BASE}/#/settings`);
   check('desktop pairing status distinguishes local service from phone access', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Phone access is not checked.')"));
+  check('background HTTPS command is visible outside Connection help', await admin.eval("document.querySelector('.remote-command pre').textContent === 'tailscale serve --bg --https=443 http://127.0.0.1:45829' && !document.querySelector('.remote-help').open && !document.querySelector('.remote-help .remote-command')"));
+  const connectionPanelSpacing = "(() => { const panel = document.querySelector('.remote-panel:not([hidden])'), hidden = document.querySelector('.remote-panel[hidden]'); const intro = panel.querySelector(':scope > p').getBoundingClientRect(), steps = panel.querySelector('.remote-steps').getBoundingClientRect(), command = panel.querySelector('.remote-command').getBoundingClientRect(), field = panel.querySelector('.field').getBoundingClientRect(); return steps.top - intro.bottom >= 11.5 && field.top - command.bottom >= 11.5 && getComputedStyle(hidden).display === 'none' && hidden.getBoundingClientRect().height === 0; })()";
+  const commandRowVisible = "(() => { const row = document.querySelector('.remote-command-row'), pre = row.querySelector('pre'), button = row.querySelector('button'); const p = pre.getBoundingClientRect(), b = button.getBoundingClientRect(); return button.textContent === 'Copy command' && b.width > 0 && b.height > 0 && b.left - p.right >= 7.5 && Math.abs((b.top + b.height / 2) - (p.top + p.height / 2)) <= 1.5 && b.top >= 0 && b.bottom <= innerHeight && b.right <= innerWidth && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('button') === button; })()";
+  check('visible connection panel restores 12px intro/field gaps and hidden panel takes no space', await admin.eval(connectionPanelSpacing));
+  await admin.eval("document.querySelector('.remote-command-row').scrollIntoView({block:'center'})");
+  check('Tailscale copy button is adjacent to the command, visible and not clipped', await admin.eval(commandRowVisible));
+  await admin.eval(clickText('.remote-command button', 'Copy command'));
+  check('Copy command copies exact background command and announces success', await admin.waitFor("document.querySelector('.remote-command [role=status]')?.textContent === 'Command copied.' && window.__clipboardText === 'tailscale serve --bg --https=443 http://127.0.0.1:45829'"));
+  await admin.eval("window.__clipboardFails = true");
+  await admin.eval(clickText('.remote-command button', 'Copy command'));
+  check('blocked clipboard provides a selectable command and manual-copy fallback', await admin.waitFor("document.querySelector('.remote-command [role=status]')?.textContent.includes('copy it manually') && document.querySelector('.remote-command pre').tabIndex === 0"));
+  await admin.eval("window.__clipboardFails = false");
+  check('running service hydrates the address without persisting session or pairing data', await admin.eval("document.querySelector('input[type=url]').value === 'https://fixture.tailnet.ts.net' && !localStorage.getItem('deck.remote.origin.v1') && !window.__adminCalls.includes('remote_start')"));
   check('pairing steps are four numbered circles', await admin.eval("(() => { const items = [...document.querySelectorAll('.remote-steps > li')]; return items.length === 4 && items.every((li) => { const mark = getComputedStyle(li, '::before'); return mark.borderRadius === '50%' && mark.content !== 'none' && parseFloat(mark.width) > 0; }); })()"));
   check('Connection, Storage, and About disclosures share one row geometry and chevron', await admin.eval("(() => { const rows = [document.querySelector('.remote-help > .disclosure'), document.querySelector('.storage-details > summary'), document.querySelector('.preview-scope > summary')]; return rows.every((el) => !!el && el.classList.contains('disclosure')) && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().left))).size === 1 && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().height))).size === 1 && getComputedStyle(rows[0], '::before').borderRightStyle === 'solid'; })()"));
   check('step text is vertically centered with each number circle', await admin.eval("[...document.querySelectorAll('.remote-steps > li')].every(li => { const text = document.createRange(); text.selectNodeContents(li); const r = li.getBoundingClientRect(), t = text.getBoundingClientRect(); return Math.abs((t.top + t.height / 2) - (r.top + r.height / 2)) <= 1.5; })"));
   await admin.eval("document.querySelector('.remote-help > summary').focus()");
   await pressKey(admin, 'Enter', 'Enter', 13, '\r');
-  check('Connection help opens with the keyboard and exposes setup commands', await admin.waitFor("document.querySelector('.remote-help')?.open && document.querySelector('.remote-help').textContent.includes('tailscale serve status')"));
+  check('Connection help opens with the keyboard and explains private reachability', await admin.waitFor("document.querySelector('.remote-help')?.open && document.querySelector('.remote-help').textContent.includes('loopback-only')"));
   await admin.eval("document.querySelector('.remote-help > summary').click()");
   await admin.waitFor("!document.querySelector('.remote-help').open");
   await admin.eval("document.querySelector('.remote-steps').scrollIntoView({block:'center'})");
   await admin.screenshot('/tmp/deck-design-pairing-steps.png');
+  await admin.eval("document.querySelector('.remote-command-row').scrollIntoView({block:'center'})");
+  await admin.screenshot('/tmp/zdeck-settings-tailscale-desktop.png');
   await admin.eval(clickText('.settings-card button', 'Create pairing link'));
   check('desktop pairing creates a local SVG QR', await admin.waitFor("!!document.querySelector('.pairing-qr path')"));
   check('pairing expiry sits directly below the field and above Copy', await admin.eval("(() => { const invite = document.querySelector('.remote-invite'); const field = invite.querySelector('.field').getBoundingClientRect(), expiry = invite.querySelector('.remote-invite-expiry').getBoundingClientRect(), copy = invite.querySelector('button').getBoundingClientRect(); return expiry.top >= field.bottom && copy.top >= expiry.bottom; })()"));
@@ -707,7 +788,11 @@ try {
   await admin.screenshot('/tmp/deck-design-pairing.png');
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
   check('pairing instructions and QR fit a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.pairing-qr').getBoundingClientRect().width >= 180"));
-  check('narrow disclosures align their arrows and centered labels', await admin.eval("(() => { const rows = [...document.querySelectorAll('.settings-view .disclosure')]; return rows.length === 3 && new Set(rows.map(el => Math.round(el.getBoundingClientRect().left))).size === 1 && rows.every(el => { const range = document.createRange(); range.selectNodeContents(el); const r = el.getBoundingClientRect(), t = range.getBoundingClientRect(); return Math.abs(t.top + t.height / 2 - r.top - r.height / 2) <= 1.5; }); })()"));
+  check('narrow connection panel keeps intro/field spacing and inactive panel stays hidden', await admin.eval(connectionPanelSpacing));
+  await admin.eval("document.querySelector('.remote-command-row').scrollIntoView({block:'center'})");
+  check('narrow Tailscale command retains an adjacent visible unclipped copy button', await admin.eval(commandRowVisible));
+  await admin.screenshot('/tmp/zdeck-settings-tailscale-narrow.png');
+  check('narrow disclosures align their arrows and centered labels', await admin.eval("(() => { const rows = [...document.querySelectorAll('.remote-help > .disclosure, .storage-details > summary, .preview-scope > summary')]; return rows.length === 3 && new Set(rows.map(el => Math.round(el.getBoundingClientRect().left))).size === 1 && rows.every(el => { const range = document.createRange(); range.selectNodeContents(el); const r = el.getBoundingClientRect(), t = range.getBoundingClientRect(); return Math.abs(t.top + t.height / 2 - r.top - r.height / 2) <= 1.5; }); })()"));
   await admin.screenshot('/tmp/deck-design-pairing-narrow.png');
   await admin.eval(clickText('.settings-card button', 'Replace pairing link'));
   check('replacement invitation replaces the QR', await admin.waitFor(`document.querySelector('.pairing-qr path')?.getAttribute('d') !== ${JSON.stringify(originalQr)}`));
@@ -716,7 +801,199 @@ try {
   await admin.waitFor("!!document.querySelector('.pairing-qr')");
   await admin.eval(clickText('.settings-card button', 'Stop local service'));
   check('stop removes invitation and QR immediately', await admin.waitFor("!document.querySelector('.remote-invite, .pairing-qr') && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('stopping preserves the running address as an editable restart fallback', await admin.eval("document.querySelector('input[type=url]').value === 'https://fixture.tailnet.ts.net' && !document.querySelector('input[type=url]').disabled"));
+  await admin.eval(setValue('input[type=url]', 'https://new.tailnet.ts.net/?token=do-not-save'));
+  check('pairing/query URLs cannot start or overwrite the saved origin', await admin.eval("[...document.querySelectorAll('.settings-actions button')].find(el => el.textContent.includes('Start local service')).disabled && !localStorage.getItem('deck.remote.origin.v1')"));
+  await admin.eval(setValue('input[type=url]', 'https://NEW.tailnet.ts.net:443/'));
+  await admin.eval("window.__failRemoteStart = true");
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  check('failed service start does not save the URL draft', await admin.waitFor("window.__remoteStartOrigins.length === 1 && !!document.querySelector('[aria-labelledby=remote-heading] .settings-error')") && await admin.eval("!localStorage.getItem('deck.remote.origin.v1')"));
+  await admin.eval("window.__failRemoteStart = false");
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  check('successful start stores only the normalized non-secret origin', await admin.waitFor("localStorage.getItem('deck.remote.origin.v1') === 'https://new.tailnet.ts.net'") && await admin.eval("window.__remoteStartOrigins.every(origin => origin === 'https://new.tailnet.ts.net') && !JSON.stringify(localStorage).includes('do-not-save') && !JSON.stringify(localStorage).includes('invite')"));
+  await admin.eval(clickText('.settings-actions button', 'Stop local service'));
+  await admin.waitFor("document.querySelector('.settings-view').textContent.includes('Local service stopped.')");
+  await admin.eval(setValue('input[type=url]', 'https://draft.tailnet.ts.net'));
+  const pollsBeforeDraft = await admin.eval("window.__adminCalls.filter(c => c === 'remote_status').length");
+  check('background service polls do not clobber an edited URL draft', await admin.waitFor(`window.__adminCalls.filter(c => c === 'remote_status').length > ${pollsBeforeDraft}`) && await admin.eval("document.querySelector('input[type=url]').value === 'https://draft.tailnet.ts.net' && localStorage.getItem('deck.remote.origin.v1') === 'https://new.tailnet.ts.net'"));
+  await admin.eval("document.getElementById('remote-tab-tailscale').focus()");
+  await pressKey(admin, 'ArrowRight', 'ArrowRight', 39);
+  check('connection tabs support arrow-key activation, focus and linked panels', await admin.waitFor("document.activeElement.id === 'remote-tab-local_https' && document.activeElement.getAttribute('aria-selected') === 'true' && !document.getElementById(document.activeElement.getAttribute('aria-controls')).hidden") && await admin.eval("document.querySelector('input[type=url]').placeholder === 'https://192.168.1.20:8443'"));
+  await pressKey(admin, 'Home', 'Home', 36);
+  check('Home selects Tailscale and preserves its unsaved draft', await admin.waitFor("document.activeElement.id === 'remote-tab-tailscale' && document.querySelector('input[type=url]').value === 'https://draft.tailnet.ts.net'"));
+  await pressKey(admin, 'End', 'End', 35);
+  await admin.waitFor("document.activeElement.id === 'remote-tab-local_https'");
+  await admin.eval(setValue('input[type=url]', 'https://192.168.1.20:8443/#/pair?invite=local-secret'));
+  check('local pairing URLs cannot start or persist secrets', await admin.eval("[...document.querySelectorAll('.settings-actions button')].find(el => el.textContent.includes('Start local service')).disabled && !localStorage.getItem('deck.remote.local-origin.v1')"));
+  await admin.eval(setValue('input[type=url]', 'https://192.168.1.20:8443/'));
+  await admin.eval("window.__failRemoteStart = true");
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  check('failed local start does not overwrite per-mode origin', await admin.waitFor("!!document.querySelector('[aria-labelledby=remote-heading] .settings-error')") && await admin.eval("!localStorage.getItem('deck.remote.local-origin.v1')"));
+  await admin.eval("window.__failRemoteStart = false; window.__holdRemoteStart = true");
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  check('busy connection operations disable tab switching', await admin.waitFor("!!window.__finishRemoteStart && [...document.querySelectorAll('[role=tab]')].every(tab => tab.disabled)"));
+  await admin.eval("window.__holdRemoteStart = false; window.__finishRemoteStart()");
+  check('local start forwards canonical origin and mode, saves separately and disables running tabs', await admin.waitFor("localStorage.getItem('deck.remote.local-origin.v1') === 'https://192.168.1.20:8443'") && await admin.eval("window.__remoteStartArgs.at(-1).mode === 'local_https' && window.__remoteStartArgs.at(-1).origin === 'https://192.168.1.20:8443' && localStorage.getItem('deck.remote.origin.v1') === 'https://new.tailnet.ts.net' && [...document.querySelectorAll('[role=tab]')].every(tab => tab.disabled) && document.getElementById('remote-mode-note').textContent.includes('Stop the local service')"));
+  await admin.eval("document.getElementById('remote-tab-tailscale').click()");
+  check('running service cannot be switched to another mode', await admin.eval("document.getElementById('remote-tab-local_https').getAttribute('aria-selected') === 'true'"));
+  await admin.eval(click('.remote-help > summary'));
+  check('local help explains informed CA trust, proxy boundary and network policy', await admin.eval("document.querySelector('.remote-help').textContent.includes('rootCA-key.pem') && document.querySelector('.remote-help').textContent.includes('full trust') && document.querySelector('.remote-help').textContent.includes('reverse_proxy 127.0.0.1:45829') && document.querySelector('.remote-help').textContent.includes('administrator') && !document.querySelector('.remote-command')"));
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  check('local help and certificate/proxy examples fit a narrow viewport', await admin.eval("document.documentElement.scrollWidth <= innerWidth"));
+  await admin.eval("document.getElementById('remote-heading').scrollIntoView()");
+  await admin.screenshot('/tmp/zdeck-local-https-help.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 900, deviceScaleFactor: 1, mobile: false });
+  await admin.eval(clickText('.settings-actions button', 'Create pairing link'));
+  check('local pairing uses its exact HTTPS origin', await admin.waitFor("document.querySelector('.remote-invite input')?.value.startsWith('https://192.168.1.20:8443/#/pair?invite=')"));
+  await admin.eval(clickText('.settings-actions button', 'Stop local service'));
+  await admin.waitFor("!document.querySelector('input[type=url]').disabled");
+  await admin.eval(setValue('input[type=url]', 'https://unsaved.lan:8443'));
+  await admin.eval(click('#remote-tab-tailscale'));
+  check('switching modes preserves the tailnet draft without persisting it', await admin.waitFor("document.querySelector('input[type=url]').value === 'https://draft.tailnet.ts.net'"));
+  await admin.eval(click('#remote-tab-local_https'));
+  check('switching back restores the local draft but storage contains only successful origins and mode', await admin.waitFor("document.querySelector('input[type=url]').value === 'https://unsaved.lan:8443'") && await admin.eval("localStorage.getItem('deck.remote.mode.v1') === 'local_https' && localStorage.getItem('deck.remote.local-origin.v1') === 'https://192.168.1.20:8443' && !JSON.stringify(localStorage).includes('local-secret') && !JSON.stringify(localStorage).includes('invite')"));
+  await admin.eval("location.hash = '#/'"); await admin.waitFor("!!document.querySelector('.deck-grid')");
+  await admin.eval("location.hash = '#/settings'");
+  check('Settings remount restores selected Local HTTPS and its successful address, not the draft', await admin.waitFor("document.getElementById('remote-tab-local_https')?.getAttribute('aria-selected') === 'true' && document.querySelector('input[type=url]').value === 'https://192.168.1.20:8443'"));
+  await admin.send('Page.reload', { ignoreCache: true });
+  check('restart restores local mode and origin without starting any service', await admin.waitFor("document.getElementById('remote-tab-local_https')?.getAttribute('aria-selected') === 'true' && document.querySelector('input[type=url]')?.value === 'https://192.168.1.20:8443' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
+  await admin.eval(click('#remote-tab-tailscale'));
+  await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.workspace')");
+  await admin.eval("location.hash = '#/settings'");
+  check('Settings remount restores the last successful address, not its unsaved draft', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
+  await admin.reload();
+  check('program-session reload remembers the address without auto-starting service', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'plugin_snapshot' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  // ------------------------------------------------------------ plugin UI (owned IPC fake, never osascript)
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
+  check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshot','plugin_catalog'].includes(c))"));
+  check('plugin settings detects Node and explains empty installation without path inputs', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0') && document.querySelector('.plugin-settings').textContent.includes('Nothing installed yet')") && await admin.eval("!document.querySelector('.plugin-settings input[type=text]')"));
+  await admin.eval(clickText('.plugin-settings button', 'Open plugin folder'));
+  check('Open plugin folder invokes only the fixed native opener command', await admin.waitFor("window.__adminCalls.includes('plugin_open_directory')"));
+  await admin.eval("window.__pluginsInstalled = true");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  check('refresh discovers copied folders and explains invalid/incompatible entries', await admin.waitFor("document.querySelector('.plugin-settings select')?.options.length === 5 && document.querySelector('.plugin-settings').textContent.includes('broken — invalid') && document.querySelector('.plugin-settings').textContent.includes('future — incompatible')"));
+  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
+  check('Enable stays disabled until selected plugin trust is acknowledged', await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
+  await admin.eval("document.querySelector('.plugin-trust input').click()");
+  check('selected ready plugin and checked trust enable the button', await admin.eval("!document.querySelector('.plugin-settings .button.primary').disabled"));
+  await admin.eval(setSelect('.plugin-settings select', 'other'));
+  check('changing selected plugin resets trust', await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
+  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
+  await admin.eval("document.querySelector('.plugin-trust input').click()");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  check('refresh clears selection trust without enabling anything', await admin.waitFor("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings select').value === ''") && await admin.eval("!window.__adminCalls.includes('plugin_enable')"));
+  await admin.eval("window.__runtimeStatus = 'not_found'");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Node not found')");
+  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
+  await admin.eval("document.querySelector('.plugin-trust input').click()");
+  check('missing runtime disables Enable even with acknowledged trust', await admin.eval("document.querySelector('.plugin-settings .button.primary').disabled"));
+  await admin.eval("window.__runtimeStatus = 'detected'");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
+  await admin.eval(setSelect('.plugin-settings select', 'spotify'));
+  await admin.eval("document.querySelector('.plugin-trust input').click()");
+  await admin.eval(clickText('.plugin-settings button', 'Enable plugin'));
+  check('Enable describes only, with no state read, legacy connect or execution', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin connected.')") && await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshot','plugin_catalog','plugin_open_directory','plugin_enable'].includes(c)) && window.__adminCalls.filter(c => c === 'plugin_enable').length === 1"));
+  check('connected session requires disconnect before switching', await admin.eval("document.querySelector('.plugin-settings select').disabled && document.querySelector('.plugin-settings .button.primary').disabled"));
+  await admin.eval(clickText('.plugin-settings button', 'Read state'));
+  check('explicit Read state displays only bounded supported text', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('<script>Track</script>')") && await admin.eval("!document.querySelector('.plugin-settings script') && !document.querySelector('.plugin-settings').textContent.includes('NEVER DISPLAY THIS') && document.querySelector('.plugin-settings').textContent.includes('not live')"));
+  await admin.eval("document.querySelector('.plugin-settings').scrollIntoView({block:'start'})");
+  await admin.screenshot('/tmp/deck-plugin-settings.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
+  await admin.eval("document.querySelector('.plugin-locations').open = true");
+  check('plugin folder and read-only runtime details fit a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth && !document.querySelector('.plugin-settings input[type=text]')"));
+  await admin.screenshot('/tmp/deck-plugin-folder-narrow.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
+  await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.add-control')");
+  await admin.eval(click('.add-control'));
+  check('connected manifest action appears as escaped text in the library', await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Spotify <volume>')") && await admin.eval("!document.querySelector('.action-library volume')"));
+  await admin.eval(clickText('.action-row', 'Spotify <volume>'));
+  await admin.waitFor("!!document.querySelector('.inspector-form .native-control input[type=number]')");
+  check('plugin uses a configured button with sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelectorAll('.control-tile[data-action=plugin] input[type=range]').length === 0"));
+  await admin.eval(setValue('.inspector-form .native-control input', '101'));
+  check('invalid plugin bounds disable Run', await admin.eval("document.querySelector('.inspector-form .native-control .button.primary').disabled"));
+  await admin.eval(setValue('.inspector-form .native-control input', ''));
+  check('empty unsaved plugin draft disables Run', await admin.eval("document.querySelector('.inspector-form .native-control .button.primary').disabled"));
+  await admin.eval(setValue('.inspector-form .native-control input', '75'));
+  await admin.eval(clickText('.native-control button', 'Run plugin action'));
+  check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
+  const executions = await admin.eval("window.__adminCalls.filter(c => c === 'plugin_execute').length");
+  await admin.eval(click('[aria-label="Open phone preview"]'));
+  await admin.waitFor("!!document.querySelector('.phone-shell .control-tile[data-action=plugin]')");
+  await admin.eval(click('.phone-shell .control-tile[data-action=plugin] button'));
+  check('phone preview simulates the plugin without native execution', await admin.eval(`window.__adminCalls.filter(c => c === 'plugin_execute').length === ${executions} && document.querySelector('.phone-shell').textContent.includes('Preview only')`));
+  await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.inspector-form .native-control')");
+  await admin.eval("window.__failPlugin = true");
+  await admin.eval(clickText('.native-control button', 'Run plugin action'));
+  check('unknown outcome is sanitized, warns, disables Run and requires explicit reconnect', await admin.waitFor("document.querySelector('.inspector-form').textContent.includes('Outcome unknown')") && await admin.eval("document.querySelector('.native-control .button.primary').disabled && !document.querySelector('.inspector-form').textContent.includes('raw secret')"));
+  await admin.eval("location.hash = '#/settings'");
+  await admin.waitFor("!!document.querySelector('.plugin-settings')");
+  check('failure clears trust and settings never stores launch paths', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input').checked && !JSON.stringify(localStorage).includes('/detected/node')"));
+  await admin.eval("document.querySelector('.plugin-trust input').click()");
+  await admin.eval(clickText('.plugin-settings button', 'Enable plugin'));
+  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin connected.')");
+  await admin.eval(clickText('.plugin-settings button', 'Disconnect'));
+  check('disconnect clears trust and leaves enabling explicit', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Plugin disconnected.') && !document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-settings .button.primary').disabled"));
+  // ------------------------------------------------------------ explicit offline desktop Live mode (fake IPC only)
+  await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.desktop-mode')");
+  check('native editor defaults Preview and never needs the phone service', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
+  await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
+  check('Preview tile selection never invokes a desktop action', await admin.eval("window.__desktopCalls.length === 0"));
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  check('entering Live labels risk but does not execute anything', await admin.waitFor("document.querySelector('.desktop-mode-note').textContent.includes('Live — presses run on this computer')") && await admin.eval("window.__desktopCalls.length === 0"));
+  await admin.eval("window.__holdDesktop = true");
+  await admin.eval("document.querySelector('.control-tile[data-action=mic-mute] button').click(); document.querySelector('.control-tile[data-action=mic-mute] button').click()");
+  check('Live dispatches one saved control with flat revision envelope and disables doublepress', await admin.waitFor("window.__desktopCalls.length === 1 && document.querySelector('.control-tile button').disabled") && await admin.eval("Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision' && window.__desktopCalls[0].controlId === 'ctl_mic' && Number.isSafeInteger(window.__desktopCalls[0].revision)"));
+  await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
+  await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('Action confirmed')");
+  await admin.eval("window.__holdSave = true");
+  await admin.eval(setSelect('#page-switcher', 'page_media'));
+  check('page edits immediately return Preview and block Live while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview' && document.querySelectorAll('.desktop-mode button')[1].disabled"));
+  await admin.eval("window.__holdSave = false; window.__finishSave()");
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("document.querySelector('.control-tile[data-action=volume] input').focus()");
+  await admin.send('Page.bringToFront');
+  await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+  check('Live slider movement does not invoke until release', await admin.eval("window.__desktopCalls.length === 1"));
+  await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+  await admin.waitFor("window.__desktopCalls.length === 2");
+  await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+  check('Live slider commits exactly once with saved revision, ID and numeric value', await admin.eval("window.__desktopCalls.length === 2 && window.__desktopCalls[1].controlId === 'ctl_volume' && window.__desktopCalls[1].value === 51 && window.__desktopCalls[1].revision > window.__desktopCalls[0].revision"));
+  await admin.eval(click('[aria-label="Open phone preview"]'));
+  await admin.waitFor("!!document.querySelector('.phone-shell')");
+  await admin.eval(click('.phone-shell .control-tile[data-action="media-play-pause"] button'));
+  check('phone preview remains simulated after leaving Live', await admin.eval("window.__desktopCalls.length === 2 && document.querySelector('.phone-shell').textContent.includes('Preview only')"));
+  await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.desktop-mode')");
+  check('returning from phone preview requires explicit re-entry to Live', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'"));
+  await admin.eval("window.__desktopResult = 'unknown'");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
+  check('unknown desktop result warns prominently and returns Preview without retry', await admin.waitFor("document.querySelector('.workspace-footer [role=alert]')?.textContent.includes('Outcome unknown') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'") && await admin.eval("window.__desktopCalls.length === 3 && !document.querySelector('.workspace-footer button')"));
+  await admin.eval("window.__desktopResult = 'pending'");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
+  await admin.waitFor("document.querySelector('.workspace-footer button')?.textContent === 'Check result'");
+  check('acknowledged pending results block further presses', await admin.eval("window.__desktopCalls.length === 4 && document.querySelector('.control-tile button').disabled"));
+  await admin.eval("window.__desktopResult = 'confirmed'");
+  await admin.eval(clickText('.workspace-footer button', 'Check result'));
+  check('explicit pending check reuses exactly the same ID and request', await admin.waitFor("window.__desktopCalls.length === 5 && !document.querySelector('.workspace-footer button')") && await admin.eval("JSON.stringify(window.__desktopCalls[3]) === JSON.stringify(window.__desktopCalls[4])"));
+  await admin.eval("window.__desktopError = 'stale_revision'");
+  await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
+  check('stale revision errors return Preview and never expose raw diagnostics', await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('saved deck changed') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'") && await admin.eval("!document.querySelector('.workspace-footer').textContent.includes('raw secret')"));
+  await admin.eval("window.__failSave = true");
+  await admin.eval(setValue('.inspector-form input[type=text]', 'Edited after Live'));
+  check('a failed save keeps Live disabled', await admin.waitFor("document.querySelectorAll('.desktop-mode button')[1].disabled && document.querySelector('.storage-alert')?.textContent.includes('could not be saved')"));
+  await admin.eval("window.__failSave = false; window.__conflictSave = true");
+  await admin.eval(setValue('.inspector-form input[type=text]', 'Conflicting edit'));
+  check('a conflicting save blocks the editor and cannot leave Live enabled', await admin.waitFor("document.querySelector('.settings-header h1')?.textContent === 'The deck file needs attention' && !document.querySelector('.desktop-mode')") && await admin.eval("window.__desktopCalls.length === 6"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: adminCtx });
 
   // ------------------------------------------------------------ light theme and reduced motion during setup
@@ -779,9 +1056,9 @@ try {
   check("cancelling a rename keeps the page name", await manage.eval("[...document.querySelectorAll('.page-dialog .page-name')].map((n) => n.textContent).join('|') === 'Stream|Media'"));
 
   await manage.eval(click('.page-dialog .page-actions [title="Rename page"]'));
-  await manage.eval(setValue('.page-dialog .page-rename input', 'Renamed'));
+  await typeInput(manage, '.page-dialog .page-rename input', 'Renamed');
   await manage.eval(click('.page-dialog [aria-label^="Save name"]'));
-  check("rename commits inside the manager", await manage.eval("[...document.querySelectorAll('.page-dialog .page-name')].map((n) => n.textContent).join('|') === 'Renamed|Media'"));
+  check("rename commits inside the manager", await manage.waitFor("[...document.querySelectorAll('.page-dialog .page-name')].map((n) => n.textContent).join('|') === 'Renamed|Media'"));
 
   const pagesBeforeMove = await manage.eval("[...document.querySelectorAll('.page-dialog .page-name')].map((n) => n.textContent).join('|')");
   await manage.eval(click('.page-dialog .page-actions [title="Move page right"]'));
@@ -803,7 +1080,7 @@ try {
   await manage.waitFor("document.querySelector('.page-dialog').open");
   await manage.eval(click('.page-dialog .page-actions [title="Rename page"]'));
   await manage.waitFor("!!document.querySelector('.page-dialog .page-rename input')");
-  await manage.eval(setValue('.page-dialog .page-rename input', 'Smoke page'));
+  await typeInput(manage, '.page-dialog .page-rename input', 'Smoke page');
   await manage.waitFor("document.querySelector('.page-dialog .page-rename input')?.value === 'Smoke page'");
   await manage.eval(click('.page-dialog [aria-label^="Save name"]'));
   check("test page renamed for removal", await manage.waitFor("[...document.querySelectorAll('.page-dialog .page-name')].some((n) => n.textContent === 'Smoke page')"));

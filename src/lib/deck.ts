@@ -4,11 +4,13 @@ import type {
   ActionKind,
   Control,
   ControlPatch,
+  ControlOptions,
   Deck,
   Page,
   Theme,
 } from "./types";
 import { actionDefinition, clampVolume, createControl, newId } from "./actions";
+import { isPluginArgs, pluginIdentifier } from "./plugin";
 
 export const MAX_PAGES = 12;
 export const MAX_CONTROLS_PER_PAGE = 24;
@@ -94,7 +96,7 @@ export function addControl(
   deck: Deck,
   pageId: string,
   kind: ActionKind,
-  options?: { label?: string; scene?: string; volume?: number },
+  options?: ControlOptions,
 ): { deck: Deck; control: Control } | null {
   const page = findPage(deck, pageId);
   if (!page || page.controls.length >= MAX_CONTROLS_PER_PAGE) return null;
@@ -121,6 +123,14 @@ function patchControl(control: Control, patch: ControlPatch): Control {
   };
 
   switch (action) {
+    case "plugin": {
+      const previous = control.action === "plugin" ? control : null;
+      const pluginId = patch.pluginId ?? previous?.pluginId;
+      const pluginAction = patch.pluginAction ?? previous?.pluginAction;
+      const pluginArgs = patch.pluginArgs ?? previous?.pluginArgs;
+      if (!pluginIdentifier(pluginId) || !pluginIdentifier(pluginAction) || !isPluginArgs(pluginArgs)) return control;
+      return { ...base, action, pluginId, pluginAction, pluginArgs: { ...pluginArgs } };
+    }
     case "obs-scene": {
       const scene =
         action === control.action && control.action === "obs-scene"
@@ -271,15 +281,19 @@ function isControl(value: unknown): value is Control {
   if (typeof value.id !== "string" || !value.id) return false;
   if (typeof value.label !== "string" || !value.label.trim()) return false;
 
+  const fields = ["id", "label", "action"];
   switch (value.action) {
+    case "plugin":
+      return onlyFields(value, [...fields, "pluginId", "pluginAction", "pluginArgs"])
+        && pluginIdentifier(value.pluginId) && pluginIdentifier(value.pluginAction) && isPluginArgs(value.pluginArgs);
     case "obs-scene":
-      return typeof value.scene === "string" && value.scene.trim().length > 0;
+      return onlyFields(value, [...fields, "scene"]) && typeof value.scene === "string" && value.scene.trim().length > 0;
     case "mic-mute":
     case "media-play-pause":
-      return true;
+      return onlyFields(value, fields);
     case "volume":
       return (
-        typeof value.volume === "number" &&
+        onlyFields(value, [...fields, "volume"]) && typeof value.volume === "number" &&
         Number.isFinite(value.volume) &&
         value.volume >= 0 &&
         value.volume <= 100
@@ -289,8 +303,22 @@ function isControl(value: unknown): value is Control {
   }
 }
 
+function onlyFields(value: Record<string, unknown>, fields: string[]): boolean {
+  return Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field));
+}
+
+/** Only local import/load may upgrade a fully validated legacy deck; phone snapshots stay v2-only. */
+export function normalizeDeck(value: unknown): Deck | null {
+  if (isDeck(value)) return value;
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.pages)) return null;
+  if (value.pages.some((page) => !isRecord(page) || !Array.isArray(page.controls)
+    || page.controls.some((control) => !isRecord(control) || control.action === "plugin"))) return null;
+  const upgraded = { ...value, version: DECK_VERSION };
+  return isDeck(upgraded) ? upgraded : null;
+}
+
 export function isDeck(value: unknown): value is Deck {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || !onlyFields(value, ["version", "pages", "activePageId", "theme", "accent"])) return false;
   if (value.version !== DECK_VERSION) return false;
   if (!isTheme(value.theme) || !isAccent(value.accent)) return false;
   if (
@@ -305,7 +333,7 @@ export function isDeck(value: unknown): value is Deck {
   const controlIds = new Set<string>();
 
   for (const page of value.pages) {
-    if (!isRecord(page)) return false;
+    if (!isRecord(page) || !onlyFields(page, ["id", "name", "controls"])) return false;
     if (typeof page.id !== "string" || !page.id || pageIds.has(page.id)) return false;
     pageIds.add(page.id);
     if (typeof page.name !== "string" || !page.name.trim()) return false;

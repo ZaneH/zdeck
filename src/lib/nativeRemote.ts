@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { nativeAvailable } from "./native";
+import { isRemoteMode, normalizeRemoteOrigin } from "./remotePreferences";
+import type { RemoteMode } from "./remotePreferences";
+export type { RemoteMode } from "./remotePreferences";
 
 /** Typed, sanitized errors returned by the native phone-service admin commands. */
 export const REMOTE_ERROR_KINDS = [
@@ -29,6 +32,7 @@ export type RemoteDeviceStatus =
 
 export interface RemoteStatus {
   running: boolean;
+  mode: RemoteMode | null;
   origin: string | null;
   port: number | null;
   pendingDevices: number;
@@ -54,7 +58,7 @@ export interface RemoteDevice {
 const FALLBACK_MESSAGES: Record<RemoteErrorKind, string> = {
   not_running: "The phone connection service is not running.",
   already_running: "The phone connection service is already running.",
-  invalid_origin: "That origin is not a valid HTTPS tailnet address.",
+  invalid_origin: "Use a valid HTTPS address for the selected connection mode, without credentials, path, query or fragment.",
   bind: "The phone connection service could not bind to 127.0.0.1:45829.",
   conflict: "That request conflicts with the current state.",
   not_found: "That device request was not found.",
@@ -106,16 +110,39 @@ async function invokeRemote<T>(
   return invoke<T>(command, args);
 }
 
-export function remoteStart(origin: string): Promise<RemoteStatus> {
-  return invokeRemote<RemoteStatus>("remote_start", { origin });
+export function parseRemoteStatus(value: unknown): RemoteStatus | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const status = value as Record<string, unknown>;
+  if (typeof status.running !== "boolean" || !["pendingDevices", "approvedDevices", "connectedSockets"].every((key) =>
+    Number.isSafeInteger(status[key]) && (status[key] as number) >= 0)) return null;
+  if (status.running) {
+    if (!isRemoteMode(status.mode) || typeof status.origin !== "string" || normalizeRemoteOrigin(status.origin, status.mode) !== status.origin
+      || !Number.isInteger(status.port) || (status.port as number) < 1 || (status.port as number) > 65535) return null;
+  } else if (status.mode !== null || status.origin !== null || status.port !== null) return null;
+  return { running: status.running, mode: status.mode as RemoteMode | null, origin: status.origin as string | null,
+    port: status.port as number | null, pendingDevices: status.pendingDevices as number,
+    approvedDevices: status.approvedDevices as number, connectedSockets: status.connectedSockets as number };
+}
+async function invokeStatus(command: string, args: Record<string, unknown> = {}): Promise<RemoteStatus> {
+  const status = parseRemoteStatus(await invokeRemote<unknown>(command, args));
+  if (!status) throw { kind: "internal", message: "The desktop returned an invalid connection status. Reload Settings with a matching desktop build." } satisfies RemoteError;
+  return status;
+}
+export async function remoteStart(origin: string, mode: RemoteMode = "tailscale"): Promise<RemoteStatus> {
+  requireNative();
+  const normalized = normalizeRemoteOrigin(origin, mode);
+  if (!normalized) throw { kind: "invalid_origin", message: FALLBACK_MESSAGES.invalid_origin } satisfies RemoteError;
+  const status = await invokeStatus("remote_start", { origin: normalized, mode });
+  if (!status.running || status.mode !== mode || status.origin !== normalized) throw { kind: "internal", message: "The requested connection was not started. Check the service status before trying again." } satisfies RemoteError;
+  return status;
 }
 
 export function remoteStop(): Promise<RemoteStatus> {
-  return invokeRemote<RemoteStatus>("remote_stop");
+  return invokeStatus("remote_stop");
 }
 
 export function remoteStatus(): Promise<RemoteStatus> {
-  return invokeRemote<RemoteStatus>("remote_status");
+  return invokeStatus("remote_status");
 }
 
 export function remoteCreateInvitation(): Promise<RemoteInvitation> {

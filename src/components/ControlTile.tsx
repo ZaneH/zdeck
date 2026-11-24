@@ -18,7 +18,7 @@ interface ControlTileProps {
   /** In-flight remote action; announced without a separate routine toast. */
   busy?: boolean;
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
-  semantics?: "preview" | "remote";
+  semantics?: "preview" | "remote" | "live";
   onPrimary?: () => void;
   onVolumeChange?: (value: number) => void;
   /** Fired on deliberate slider release or value key-up, never on cancel/blur. */
@@ -30,8 +30,9 @@ export function ControlTile({
   busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit,
 }: ControlTileProps) {
   const remote = semantics === "remote";
+  const live = semantics === "live";
   const volumeGesture = useRef<string | null>(null);
-  useEffect(() => { volumeGesture.current = null; }, [disabled, control.id]);
+  useEffect(() => { volumeGesture.current = null; }, [disabled, control.id, semantics]);
   const content = (
     <>
       <span className="tile-icon"><ActionIcon kind={control.action} size={22} /></span>
@@ -40,7 +41,9 @@ export function ControlTile({
   );
 
   const primaryLabel =
-    variant === "editor"
+    live && control.action !== "volume"
+      ? `Run ${control.label} on this computer`
+      : variant === "editor"
       ? `Select ${control.label}`
       : remote
         ? `Press ${control.label}`
@@ -65,7 +68,7 @@ export function ControlTile({
       {control.action === "volume" ? (
         <div className="tile-volume">
           <label className="sr-only" htmlFor={`vol-${variant}-${control.id}`}>
-            {remote ? `Target volume for ${control.label}` : `Preview volume for ${control.label}`}
+            {remote || live ? `Target volume for ${control.label}` : `Preview volume for ${control.label}`}
           </label>
           <input
             id={`vol-${variant}-${control.id}`} type="range" min={0} max={100} step={1} value={volume}

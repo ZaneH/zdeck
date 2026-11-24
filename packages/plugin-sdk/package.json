@@ -1,0 +1,12 @@
+{
+  "name": "@zdeck/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Small protocol v1 JSONL process plugin SDK for ZDeck",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.18.0" },
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.js" } },
+  "types": "./index.d.ts",
+  "files": ["index.js", "index.d.ts", "examples/hello.ts", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test test/*.test.js" }
+}

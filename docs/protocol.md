@@ -5,16 +5,58 @@ Implementation contract for the first remote controller. This describes intended
 ## Scope and trust
 
 - Explicitly enable a Rust service on **127.0.0.1**, default port **45829**. No public/LAN listener or automatic Tailscale configuration.
-- User configures a stable, trusted **HTTPS origin on their tailnet**, without path/query/credentials, then deliberately proxies it with Tailscale Serve. Funnel is not needed or enabled.
+- User explicitly chooses **Tailscale** or **Local HTTPS**, configures a stable trusted HTTPS origin, and supplies an external HTTPS-to-loopback reverse proxy. Tailscale uses Serve; Local HTTPS needs no Tailscale. No public tunnel, Funnel, HTTP fallback, certificate bypass, or automatic network/certificate/firewall/proxy setup is provided.
 - The service serves the bundled PWA and `/api/v1/*` from that same origin. It does not expose Tauri IPC, OBS settings/passwords, arbitrary commands, filesystem paths, or deck editing over HTTP.
-- Tailscale membership is not application authorization. Every device requires desktop approval.
+- Network access (tailnet or LAN) is not application authorization. Every device requires desktop approval.
 - Initial device credentials are **session-only**: stopping the service or restarting the app requires pairing again. Durable device enrollment is deferred, explicitly visible to users.
 - All API responses, including errors, use `Cache-Control: no-store`. Static assets contain no secrets and keep the existing exact-allowlist PWA cache policy.
 - The service rewrites `data-zdeck-local` to `data-zdeck-remote` in its index before serving or caching it. Missing/invalid index markers fail closed; missing bundled assets cannot fall back to the editor index. All remote routes remain remote. This marker is UI routing only, never authentication.
 
+## Connection modes and origin validation
+
+Native `remote_start` accepts `{ origin, mode?: "tailscale" | "local_https" }`; omitted mode defaults to `tailscale`. Status includes `mode`, equal to the running mode or `null` when stopped. Both modes still bind plain HTTP only on **127.0.0.1:45829**, never a LAN listener. Mode changes require stopping the service first, which clears phone credentials.
+
+- **Tailscale:** HTTPS DNS host ending in `.ts.net`, default port 443 only.
+- **Local HTTPS:** HTTPS with canonical RFC1918 IPv4 (`10/8`, `172.16/12`, `192.168/16`), IPv6 ULA (`fc00::/7`) or link-local (`fe80::/10`), or ASCII DNS ending in `.local`, `.lan`, or `.home.arpa`. Explicit ports 1–65535 are accepted; 443 canonicalizes away. These are address syntax checks, not proof of ownership, resolution, certificate trust, or reachability. Link-local IPv6 without a zone may not be usable on a particular network; zone identifiers are rejected.
+- Both reject credentials, non-root paths (including normalized dot paths), query/fragment syntax (even empty), whitespace, Unicode/IDNA input, percent escapes, backslashes, wildcard/invalid DNS labels, trailing dots, empty/zero/leading-zero ports, IPv4 aliases (octal, hex, integer, shorthand), and IPv6 zone identifiers. A single trailing root slash is allowed. Input is bounded to 2048 ASCII bytes. DNS case, default HTTPS port and IPv6 representation are canonicalized. Local mode rejects public addresses/domains, loopback, IPv4 link-local and CGNAT; Tailscale mode does not accept local addresses.
+
+Settings has keyboard-accessible tabs. It restores the explicitly chosen mode and only the last **successfully started** origin for each mode, never automatically starting a service. The legacy `deck.remote.origin.v1` key remains the tailnet preference; `deck.remote.local-origin.v1` holds the local origin and `deck.remote.mode.v1` only the mode enum. Running status hydrates the active tab/address in memory, without persisting status or overwriting edited drafts. No pairing link, token, cookie or approval is stored in these preferences.
+
+## Local HTTPS setup
+
+This is a **manual example**, not a claim of tested LAN connectivity. Install tools yourself if you choose this method. The app does not run these commands. Both devices need a permitted, mutually reachable network. Wi-Fi client isolation, routing, name resolution and firewall policy can prevent access; use a permitted home network or hotspot if appropriate, not an administrator-policy bypass. A `.local` name is not guaranteed to resolve.
+
+1. Choose this computer's **actual stable private IP** (or a local name that your phone resolves). Every `192.168.1.20` below is an example to replace, including the certificate name, Caddy listener/bind address and Settings URL. Keep the scheme, name/IP and port stable; reserve the address on a network you control if appropriate.
+2. With user-installed **mkcert**, create and deliberately trust your own development CA:
+
+   ```sh
+   mkcert -install
+   mkcert -CAROOT
+   mkcert -cert-file zdeck-cert.pem -key-file zdeck-key.pem 192.168.1.20
+   ```
+
+   Review the trust implications before running `mkcert -install`: a trusted CA can authenticate arbitrary HTTPS sites, not just zDeck. Trust only a CA you personally control. Securely transfer **only `rootCA.pem`**, the CA certificate in the directory printed by `mkcert -CAROOT`, to your own phone. **Never transfer `rootCA-key.pem`, `zdeck-key.pem`, or any private key.** Keep those keys protected on the desktop. On iOS, explicitly install the certificate profile in Settings → General → VPN & Device Management (or Profile Downloaded), then separately enable full trust under Settings → General → About → Certificate Trust Settings. Review/remove that trust when no longer needed. Android trust/install behavior varies by OS/browser; verify the phone accepts the certificate without a warning rather than assuming desktop trust transfers.
+3. With user-installed **Caddy**, save this as `Caddyfile`. Replace the example IP and both `/absolute/path/...` placeholders with your actual private interface address and generated certificate/key paths. Review existing proxy configurations and port use first; do not overwrite them blindly.
+
+   ```caddyfile
+   {
+     auto_https disable_redirects
+   }
+   https://192.168.1.20:8443 {
+     bind 192.168.1.20
+     tls /absolute/path/zdeck-cert.pem /absolute/path/zdeck-key.pem
+     reverse_proxy 127.0.0.1:45829
+   }
+   ```
+
+   Run it explicitly with `caddy run --config ./Caddyfile`. The global option prevents unrelated automatic HTTP redirects on port 80; the explicit TLS certificate avoids automatic certificate issuance. The listener binds only the chosen private interface. Its port must be reachable under your network/firewall policy. The HTTP upstream preserves the incoming **Host** and **Origin** by default: do not rewrite them to the loopback address. zDeck ignores forwarded headers for its origin/identity boundary.
+4. In native **Settings → Phone connection → Local HTTPS**, enter `https://192.168.1.20:8443` with your actual address and start the local service. On the phone, open that HTTPS root **without a certificate warning**, install the PWA if wanted, and use a fresh pairing link within that browser/installed-app session. Approve the request on the desktop. Being on the LAN or trusting the CA is not approval.
+
+If the origin (scheme/name/IP/port) changes, re-pair and remove/reinstall the PWA at the new origin as needed; mint a new certificate if its IP/name changes. Stopping/restarting the service clears all phone credentials even when the address stays the same. Do not weaken HTTPS, browser secure-context checks, Host/Origin enforcement or cookie authentication to troubleshoot connectivity.
+
 ## Request boundary
 
-- Validate `Host` against the configured public host or exact loopback upstream authority. Do not trust arbitrary forwarded headers to select an origin or identity.
+- Validate `Host` against the configured HTTPS authority or exact loopback upstream authority. Do not trust arbitrary forwarded headers to select an origin or identity.
 - Require the exact configured `Origin` for pairing/command POSTs and WebSocket upgrades. No wildcard CORS or credentials accepted cross-origin. Reject unexpected/missing origins on these routes.
 - Authenticated read-only GETs need a valid active device cookie; no reliance on Origin being present on same-origin GETs.
 - Credential: CSPRNG 256-bit opaque token in a `__Host-deck-device` cookie, `Secure; HttpOnly; SameSite=Strict; Path=/`, no Domain. Store its hash in the in-memory registry, never expose the token to JavaScript, URLs, logs, deck data, or localStorage.
@@ -95,4 +137,4 @@ The phone allows one command request at a time and correlates the returned ID wi
 - Test saved-deck changes over a real local socket, restart/resync semantics, server stop/start cleanup, and resource caps.
 - Browser-test the phone against the actual Rust service with owned fake adapters and an isolated local HTTPS proxy, not a mocked fetch-only API. Test TLS bypasses, if needed for a disposable browser profile, must never become installation guidance.
 - `npm run smoke:remote` runs an opt-in actual-service browser fixture with built assets, fake actions, private stdio administration, loopback HTTPS, and disposable Chrome. Test-only certificate bypass and hostname mapping must never be offered as installation instructions. The default Rust suite ignores this fixture.
-- Real Tailscale Serve, phone Home Screen install, native GUI/bundled-resolver behavior, and LAN-only HTTPS are separate manual/device validation gates. Do not configure the user's services automatically.
+- Real Tailscale Serve, trusted-certificate LAN proxy/phone connectivity, phone Home Screen install, and native GUI/bundled-resolver behavior remain separate manual/device validation gates. Do not configure the user's services automatically.

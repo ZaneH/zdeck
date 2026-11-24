@@ -1,5 +1,10 @@
+import { useState } from "react";
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
+import { canRunPlugin, pluginControlAction, pluginDefaults } from "../lib/plugin";
+import type { PluginControl } from "../lib/types";
+import type { PluginConsole } from "../lib/usePluginConsole";
+import { PluginErrorNotice } from "./PluginSettingsCard";
 import type { ActionKind, Control, ControlPatch } from "../lib/types";
 import type { ObsConsole, SceneSwitchFeedback } from "../lib/useObsConsole";
 import { formatPercent } from "../lib/useSystemConsole";
@@ -13,6 +18,7 @@ interface InspectorProps {
   canMoveDown: boolean;
   obs: ObsConsole;
   system: SystemConsole;
+  plugin: PluginConsole;
   onPatch: (patch: ControlPatch) => void;
   onRemove: () => void;
   onMove: (delta: number) => void;
@@ -61,6 +67,38 @@ function switchFeedbackText(
   }
 }
 
+function PluginControlEditor({ control, plugin, onPatch }: { control: PluginControl; plugin: PluginConsole; onPatch: (patch: ControlPatch) => void }) {
+  const action = pluginControlAction(plugin.snapshot, control);
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(control.pluginArgs).map(([key, n]) => [key, String(n)])));
+  const validDraft = action && Object.entries(action.config).every(([key, field]) => drafts[key]?.trim()
+    && Number.isSafeInteger(Number(drafts[key])) && Number(drafts[key]) >= field.minimum && Number(drafts[key]) <= field.maximum);
+  return <div className="native-control">
+    <p>{control.pluginId} · {control.pluginAction}</p>
+    {action ? Object.entries(action.config).map(([key, field]) => <label className="field" key={key}>
+      <span>{key} ({field.minimum}–{field.maximum})</span>
+      <input type="number" step={1} min={field.minimum} max={field.maximum} value={drafts[key] ?? ""}
+        aria-invalid={!drafts[key]?.trim() || !Number.isSafeInteger(Number(drafts[key])) || Number(drafts[key]) < field.minimum || Number(drafts[key]) > field.maximum}
+        disabled={plugin.busy} onChange={(event) => {
+          const text = event.target.value;
+          setDrafts((current) => ({ ...current, [key]: text }));
+          if (text.trim() && Number.isSafeInteger(Number(text))) onPatch({ pluginArgs: { ...control.pluginArgs, [key]: Number(text) } });
+        }} />
+    </label>) : <p className="field-note">Connect the matching plugin in Settings to configure and run this saved action.</p>}
+    {action ? <button type="button" className="button secondary" disabled={plugin.busy} onClick={() => {
+      const args = pluginDefaults(action);
+      setDrafts(Object.fromEntries(Object.entries(args).map(([key, n]) => [key, String(n)])));
+      onPatch({ pluginArgs: args });
+    }}>Use declared defaults</button> : null}
+    <div className="native-actions"><button type="button" className="button primary"
+      disabled={!plugin.native || plugin.busy || !validDraft || !canRunPlugin(plugin.snapshot, control)}
+      onClick={() => void plugin.execute(control)}>{plugin.busy ? "Request pending…" : "Run plugin action"}</button></div>
+    <p className="field-note">Runs on this computer. Arguments are saved button configuration, not a phone slider. No automatic retry. Preview press never runs the plugin.</p>
+    {plugin.completedId === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
+    {action && (!validDraft || !canRunPlugin(plugin.snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required integer within its declared bounds.</p> : null}
+    <PluginErrorNotice error={plugin.snapshot.lastError} />
+  </div>;
+}
+
 export function Inspector({
   control,
   pageName,
@@ -69,6 +107,7 @@ export function Inspector({
   canMoveDown,
   obs,
   system,
+  plugin,
   onPatch,
   onRemove,
   onMove,
@@ -135,6 +174,7 @@ export function Inspector({
                   onPatch({ action: event.target.value as ActionKind })
                 }
               >
+                {control.action === "plugin" ? <option value="plugin">{control.pluginId} · {control.pluginAction}</option> : null}
                 {ACTION_CATALOG.map((action) => (
                   <option key={action.kind} value={action.kind}>
                     {action.name}
@@ -142,6 +182,10 @@ export function Inspector({
                 ))}
               </select>
             </label>
+
+            {control.action === "plugin" ? <PluginControlEditor
+              key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(plugin.snapshot, control)?.config)}`}
+              control={control} plugin={plugin} onPatch={onPatch} /> : null}
 
             {control.action === "obs-scene" ? (
               <label className="field">

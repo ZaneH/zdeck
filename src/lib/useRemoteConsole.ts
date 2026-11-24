@@ -14,6 +14,7 @@ import {
 } from "./nativeRemote";
 import type {
   RemoteDevice,
+  RemoteMode,
   RemoteInvitation,
   RemoteStatus,
 } from "./nativeRemote";
@@ -25,6 +26,7 @@ export interface RemoteConsole {
   /** Latest status, or null before the first check completes. */
   status: RemoteStatus | null;
   running: boolean;
+  mode: RemoteMode | null;
   origin: string | null;
   port: number | null;
   pending: RemoteDevice[];
@@ -33,7 +35,7 @@ export interface RemoteConsole {
   error: string | null;
   /** True while an explicit admin mutation is in flight. */
   busy: boolean;
-  start: (origin: string) => Promise<boolean>;
+  start: (origin: string, mode?: RemoteMode) => Promise<boolean>;
   stop: () => Promise<void>;
   createInvitation: () => Promise<void>;
   approve: (requestId: string) => Promise<void>;
@@ -119,7 +121,7 @@ export function useRemoteConsole(): RemoteConsole {
   }, [invitation]);
 
   const start = useCallback(
-    async (origin: string) => {
+    async (origin: string, mode: RemoteMode = "tailscale") => {
       if (!native || mutationInFlightRef.current) return false;
       mutationInFlightRef.current = true;
       const epoch = bumpEpoch();
@@ -127,7 +129,7 @@ export function useRemoteConsole(): RemoteConsole {
       setError(null);
       setInvitation(null);
       try {
-        const next = await remoteStart(origin);
+        const next = await remoteStart(origin, mode);
         if (!mountedRef.current || epoch !== epochRef.current) return false;
         setStatus(next);
         setDevices([]);
@@ -232,6 +234,7 @@ export function useRemoteConsole(): RemoteConsole {
     native,
     status,
     running: status?.running ?? false,
+    mode: status?.mode ?? null,
     origin: status?.origin ?? null,
     port: status?.port ?? null,
     pending: devices.filter((device) => device.status === "pending"),

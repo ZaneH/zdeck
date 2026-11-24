@@ -1,4 +1,4 @@
-import { Clapperboard, MicOff, Play, Volume2 } from "lucide-react";
+import { Clapperboard, MicOff, Play, Volume2, Plug } from "lucide-react";
 import type { ActionKind } from "../lib/types";
 
 export function ActionIcon({ kind, size = 20 }: { kind: ActionKind; size?: number }) {
@@ -9,6 +9,8 @@ export function ActionIcon({ kind, size = 20 }: { kind: ActionKind; size?: numbe
       return <MicOff size={size} aria-hidden="true" />;
     case "media-play-pause":
       return <Play size={size} aria-hidden="true" />;
+    case "plugin":
+      return <Plug size={size} aria-hidden="true" />;
     case "volume":
       return <Volume2 size={size} aria-hidden="true" />;
   }

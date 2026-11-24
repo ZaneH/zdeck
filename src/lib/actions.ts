@@ -1,9 +1,10 @@
-import type { ActionKind, Control } from "./types";
+import type { ActionKind, Control, ControlOptions } from "./types";
+import { isPluginArgs, pluginIdentifier } from "./plugin";
 
 export interface ActionDefinition {
   kind: ActionKind;
   name: string;
-  category: "OBS" | "System" | "Media";
+  category: "OBS" | "System" | "Media" | "Plugins";
   description: string;
   defaultLabel: string;
   note?: string;
@@ -21,7 +22,7 @@ export const ACTION_CATALOG: ActionDefinition[] = [
     kind: "mic-mute",
     name: "Microphone mute",
     category: "System",
-    description: "Toggle the default system microphone.",
+    description: "Linux only: toggle the default system microphone.",
     defaultLabel: "Mic mute",
     note: "System default input, not an OBS input.",
   },
@@ -29,20 +30,21 @@ export const ACTION_CATALOG: ActionDefinition[] = [
     kind: "media-play-pause",
     name: "Play / pause",
     category: "Media",
-    description: "Toggle playback on the default MPRIS player.",
+    description: "Linux only: toggle the default MPRIS player. For Spotify on macOS, use its plugin action.",
     defaultLabel: "Play / pause",
   },
   {
     kind: "volume",
     name: "Volume slider",
     category: "Media",
-    description: "Set the default system output volume.",
+    description: "Linux only: set the default system output volume.",
     defaultLabel: "Volume",
     note: "Local preview in a browser.",
   },
 ];
 
 export function actionDefinition(kind: ActionKind): ActionDefinition {
+  if (kind === "plugin") return { kind, name: "Plugin action", category: "Plugins", description: "Run a saved external plugin action.", defaultLabel: "Plugin action" };
   const definition = ACTION_CATALOG.find((item) => item.kind === kind);
   if (!definition) {
     throw new Error(`Unknown action kind: ${kind}`);
@@ -64,13 +66,18 @@ export function newId(prefix: string): string {
 
 export function createControl(
   kind: ActionKind,
-  options: { label?: string; scene?: string; volume?: number } = {},
+  options: ControlOptions = {},
 ): Control {
   const definition = actionDefinition(kind);
   const id = newId("ctl");
   const label = options.label?.trim() || definition.defaultLabel;
 
   switch (kind) {
+    case "plugin":
+      if (!pluginIdentifier(options.pluginId) || !pluginIdentifier(options.pluginAction) || !isPluginArgs(options.pluginArgs)) {
+        throw new Error("Invalid plugin control configuration.");
+      }
+      return { id, label, action: kind, pluginId: options.pluginId, pluginAction: options.pluginAction, pluginArgs: { ...options.pluginArgs } };
     case "obs-scene":
       return {
         id,
@@ -93,6 +100,8 @@ export function controlVolume(control: Control): number {
 
 export function controlSummary(control: Control): string {
   switch (control.action) {
+    case "plugin":
+      return `${control.pluginId} · ${control.pluginAction}${Object.entries(control.pluginArgs).map(([key, value]) => ` · ${key}: ${value}`).join("")}`;
     case "obs-scene":
       return control.scene;
     case "mic-mute":

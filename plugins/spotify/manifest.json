@@ -1,0 +1,13 @@
+{
+  "id": "spotify",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "actions": [
+    { "id": "play", "title": "Play", "config": {} },
+    { "id": "pause", "title": "Pause", "config": {} },
+    { "id": "play-pause", "title": "Play / pause", "config": {} },
+    { "id": "next", "title": "Next track", "config": {} },
+    { "id": "previous", "title": "Previous track", "config": {} },
+    { "id": "set-volume", "title": "Set volume", "config": { "volume": { "type": "integer", "minimum": 0, "maximum": 100 } } }
+  ]
+}

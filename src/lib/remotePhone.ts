@@ -847,6 +847,8 @@ export class RemotePhoneConnection {
 
   private async sendCommand(controlId: string, value?: number): Promise<void> {
     if (this.stopped || this.snap.phase !== "active" || this.snap.revision === null) return;
+    const saved = this.snap.deck?.pages.flatMap((page) => page.controls).find((control) => control.id === controlId);
+    if (!saved || (value !== undefined && saved.action !== "volume")) return;
     if (this.commandInFlight) return;
     const epoch = this.epoch;
     const revision = this.snap.revision;

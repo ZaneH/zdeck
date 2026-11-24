@@ -27,7 +27,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use sha1_smol::Sha1;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
@@ -35,9 +35,12 @@ use tokio::sync::{broadcast, Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio_websockets::{CloseCode, Limits as WsLimits, Message, ServerBuilder};
 use url::Url;
 
-use crate::deck::{Control, ControlAction, Deck, DeckSnapshot, DeckStore};
-use crate::obs::{ObsError, ObsState};
-use crate::system::{SystemError, SystemState};
+use crate::deck::{ControlAction, DeckSnapshot, DeckStore};
+use crate::obs::ObsState;
+use crate::system::SystemState;
+use crate::plugin::PluginState;
+use crate::actions::{command_value, find_control, interrupted_result, validate_action_value, validate_command_fields, ActionDispatcher};
+pub use crate::actions::{CommandResult, CommandState};
 
 /// Default loopback port. The listener is never exposed on a LAN interface.
 pub const DEFAULT_PORT: u16 = 45829;
@@ -125,14 +128,21 @@ pub trait AssetProvider: Send + Sync + 'static {
     fn get(&self, path: &str) -> Option<PublicAsset>;
 }
 
+/// External HTTPS reverse-proxy configuration, NOT a listener/TLS setting.
+/// Both modes always bind only IPv4 loopback; local_https requires a separately
+/// configured LAN proxy with a certificate trusted by the phone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionMode { #[default] Tailscale, LocalHttps }
+
 /// Configuration for one service instance. It is assembled by the native admin
 /// command from the same shared adapter instances the desktop UI uses.
 pub struct ServiceConfig {
     pub origin: String,
+    pub mode: ConnectionMode,
     pub port: u16,
     pub deck: Arc<DeckStore>,
-    pub obs: Arc<ObsState>,
-    pub system: Arc<SystemState>,
+    pub actions: Arc<ActionDispatcher>,
     pub assets: Arc<dyn AssetProvider>,
     pub clock: Arc<dyn Clock>,
     pub limits: Limits,
@@ -144,14 +154,15 @@ impl ServiceConfig {
         deck: Arc<DeckStore>,
         obs: Arc<ObsState>,
         system: Arc<SystemState>,
+        plugin: Arc<PluginState>,
         assets: Arc<dyn AssetProvider>,
     ) -> Self {
         Self {
             origin: origin.into(),
+            mode: ConnectionMode::default(),
             port: DEFAULT_PORT,
             deck,
-            obs,
-            system,
+            actions: Arc::new(ActionDispatcher::new(obs, system, plugin)),
             assets,
             clock: Arc::new(SystemClock),
             limits: Limits::default(),
@@ -186,9 +197,12 @@ impl RemoteError {
         }
     }
 
-    fn invalid_origin() -> Self {
+    fn invalid_origin(mode: ConnectionMode) -> Self {
         Self::InvalidOrigin {
-            message: "The origin must be an HTTPS URL whose host ends in .ts.net, with no path, query, credentials, or non-default port.".to_string(),
+            message: match mode {
+                ConnectionMode::Tailscale => "Use a valid HTTPS .ts.net origin on port 443, without credentials, path, query or fragment.",
+                ConnectionMode::LocalHttps => "Use an HTTPS origin for a private IPv4, local IPv6, or .local/.lan/.home.arpa hostname, with port 1–65535 and no credentials, path, query or fragment. Configure a trusted-certificate LAN reverse proxy separately.",
+            }.to_string(),
         }
     }
 
@@ -236,6 +250,7 @@ pub struct InvitationView {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteStatus {
     pub running: bool,
+    pub mode: Option<ConnectionMode>,
     pub origin: Option<String>,
     pub port: Option<u16>,
     pub pending_devices: usize,
@@ -247,6 +262,7 @@ impl RemoteStatus {
     fn stopped() -> Self {
         Self {
             running: false,
+            mode: None,
             origin: None,
             port: None,
             pending_devices: 0,
@@ -254,26 +270,6 @@ impl RemoteStatus {
             connected_sockets: 0,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandResult {
-    pub id: String,
-    pub state: CommandState,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub observed: Option<Value>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CommandState {
-    Pending,
-    Confirmed,
-    NotApplied,
-    Failed,
-    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -385,11 +381,11 @@ struct AuthDevice {
 
 struct Inner {
     origin: String,
+    mode: ConnectionMode,
     allowed_hosts: Vec<String>,
     port: u16,
     deck: Arc<DeckStore>,
-    obs: Arc<ObsState>,
-    system: Arc<SystemState>,
+    actions: Arc<ActionDispatcher>,
     assets: Arc<dyn AssetProvider>,
     clock: Arc<dyn Clock>,
     limits: Limits,
@@ -398,7 +394,6 @@ struct Inner {
     revoke: broadcast::Sender<String>,
     command_slots: Arc<Semaphore>,
     socket_slots: Arc<Semaphore>,
-    effect: Mutex<()>,
     connected_sockets: AtomicUsize,
     stopped: AtomicBool,
 }
@@ -486,6 +481,7 @@ impl RunningService {
         registry.prune(now, &self.inner.limits);
         RemoteStatus {
             running: true,
+            mode: Some(self.inner.mode),
             origin: Some(self.inner.origin.clone()),
             port: Some(self.inner.port),
             pending_devices: registry.count_status(DeviceStatus::Pending),
@@ -734,30 +730,25 @@ impl RemoteAdmin {
 
 /// Start the listener. The caller owns the returned service and must stop it.
 pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError> {
-    let origin_url = validate_origin(&config.origin)?;
-    let public_host = origin_url
-        .host_str()
-        .ok_or_else(RemoteError::invalid_origin)?
-        .to_string();
-    // Browsers omit an explicit default port, so normalize :443 away.
-    let origin = format!("https://{public_host}");
-    let listener = TcpListener::bind(("127.0.0.1", config.port))
-        .await
-        .map_err(|_| RemoteError::bind())?;
+    let origin_url = validate_origin(&config.origin, config.mode)?;
+    // URL's origin serializer preserves non-default ports and IPv6 brackets,
+    // lowercases DNS, and removes only the equivalent default HTTPS port.
+    let origin = origin_url.origin().ascii_serialization();
+    let listener = bind_loopback(config.port).await?;
     let port = listener
         .local_addr()
         .map_err(|_| RemoteError::bind())?
         .port();
-    let allowed_hosts = allowed_hosts(&public_host, port);
+    let allowed_hosts = allowed_hosts(&origin_url, port);
     let (shutdown, _) = broadcast::channel(8);
     let (revoke, _) = broadcast::channel(64);
     let inner = Arc::new(Inner {
         origin,
+        mode: config.mode,
         allowed_hosts,
         port,
         deck: config.deck,
-        obs: config.obs,
-        system: config.system,
+        actions: config.actions,
         assets: config.assets,
         clock: config.clock,
         limits: config.limits,
@@ -766,7 +757,6 @@ pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError>
         revoke,
         command_slots: Arc::new(Semaphore::new(config.limits.max_inflight_commands)),
         socket_slots: Arc::new(Semaphore::new(config.limits.max_sockets)),
-        effect: Mutex::new(()),
         connected_sockets: AtomicUsize::new(0),
         stopped: AtomicBool::new(false),
     });
@@ -788,31 +778,85 @@ pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError>
     })
 }
 
-fn validate_origin(value: &str) -> Result<Url, RemoteError> {
-    let url = Url::parse(value).map_err(|_| RemoteError::invalid_origin())?;
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || !matches!(url.port(), None | Some(443))
-        || url.path() != "/"
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(RemoteError::invalid_origin());
+async fn bind_loopback(port: u16) -> Result<TcpListener, RemoteError> {
+    TcpListener::bind(("127.0.0.1", port)).await.map_err(|_| RemoteError::bind())
+}
+
+#[cfg(test)]
+mod transport_tests {
+    #[tokio::test]
+    async fn listener_is_ipv4_loopback_not_a_lan_or_wildcard_bind() {
+        let listener = super::bind_loopback(0).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        assert_eq!(address.ip(), std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        assert_ne!(address.port(), 0);
     }
-    let host = url.host_str().ok_or_else(RemoteError::invalid_origin)?;
-    if !host.ends_with(".ts.net") || host.len() <= ".ts.net".len() {
-        return Err(RemoteError::invalid_origin());
+}
+
+fn validate_origin(value: &str, mode: ConnectionMode) -> Result<Url, RemoteError> {
+    let bad = || RemoteError::invalid_origin(mode);
+    // Reject URL parser repairs/aliases before parsing: whitespace, escapes,
+    // userinfo, backslashes, Unicode/IDNA input, normalized paths and empty ports.
+    if value.len() > 2048 || !value.is_ascii()
+        || !value.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) {
+        return Err(bad());
     }
+    let rest = &value[8..];
+    let authority = rest.strip_suffix('/').unwrap_or(rest);
+    if authority.is_empty() || !authority.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.[]:".contains(&b)) {
+        return Err(bad());
+    }
+    let (raw_host, raw_port) = if authority.starts_with('[') {
+        let end = authority.find(']').ok_or_else(bad)?;
+        let suffix = &authority[end + 1..];
+        (&authority[..=end], if suffix.is_empty() { None } else { Some(suffix.strip_prefix(':').ok_or_else(bad)?) })
+    } else {
+        let mut parts = authority.split(':');
+        let host = parts.next().ok_or_else(bad)?;
+        let port = parts.next();
+        if parts.next().is_some() { return Err(bad()); }
+        (host, port)
+    };
+    if let Some(port) = raw_port {
+        if port.is_empty() || (port.len() > 1 && port.starts_with('0'))
+            || !port.bytes().all(|b| b.is_ascii_digit())
+            || !port.parse::<u16>().is_ok_and(|p| p != 0) { return Err(bad()); }
+    }
+    let url = Url::parse(value).map_err(|_| bad())?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some()
+        || url.path() != "/" || url.query().is_some() || url.fragment().is_some()
+        || (mode == ConnectionMode::Tailscale && url.port().is_some()) {
+        return Err(bad());
+    }
+    let allowed = match url.host() {
+        Some(url::Host::Ipv4(ip)) => mode == ConnectionMode::LocalHttps && ip.is_private()
+            && raw_host == ip.to_string(), // No octal, shorthand, hex or integer IPv4 aliases.
+        Some(url::Host::Ipv6(ip)) => mode == ConnectionMode::LocalHttps
+            && ((ip.segments()[0] & 0xfe00) == 0xfc00 || (ip.segments()[0] & 0xffc0) == 0xfe80),
+        Some(url::Host::Domain(host)) => {
+            let valid_dns = host.len() <= 253 && raw_host.eq_ignore_ascii_case(host)
+                && host.split('.').all(|label| !label.is_empty() && label.len() <= 63
+                    && label.as_bytes()[0].is_ascii_alphanumeric()
+                    && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+                    && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    && label != "localhost");
+            valid_dns && match mode {
+                ConnectionMode::Tailscale => host.ends_with(".ts.net"),
+                ConnectionMode::LocalHttps => [".local", ".lan", ".home.arpa"].iter().any(|suffix| host.ends_with(suffix)),
+            }
+        }
+        None => false,
+    };
+    if !allowed { return Err(bad()); }
     Ok(url)
 }
 
-fn allowed_hosts(public_host: &str, port: u16) -> Vec<String> {
-    vec![
-        public_host.to_string(),
-        format!("{public_host}:443"),
-        format!("127.0.0.1:{port}"),
-    ]
+fn allowed_hosts(url: &Url, port: u16) -> Vec<String> {
+    let origin = url.origin().ascii_serialization();
+    let authority = origin.strip_prefix("https://").expect("validated HTTPS origin");
+    let mut hosts = vec![authority.to_string(), format!("127.0.0.1:{port}")];
+    if url.port().is_none() { hosts.push(format!("{authority}:443")); }
+    hosts
 }
 
 fn router(inner: Arc<Inner>) -> Router {
@@ -872,7 +916,7 @@ struct CommandRequest {
     id: String,
     revision: u64,
     control_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "command_value")]
     value: Option<f64>,
 }
 
@@ -1192,7 +1236,7 @@ async fn command(
     }
     let control = find_control(&snapshot.deck, &request.control_id)
         .ok_or_else(|| ApiError::bad_request("The control is not in the saved deck."))?;
-    validate_action_value(control, request.value)?;
+    validate_action_value(control, request.value).map_err(|error| ApiError::bad_request(error.message))?;
 
     {
         let now = inner.clock.now();
@@ -1237,6 +1281,7 @@ async fn command(
                 result: CommandResult {
                     id: request.id.clone(),
                     state: CommandState::Pending,
+                    code: None,
                     message: "Action accepted.".to_string(),
                     observed: None,
                 },
@@ -1245,9 +1290,9 @@ async fn command(
         );
     }
 
-    let mut guard = CommandGuard::new(Arc::clone(&inner), key.clone());
-    let _effect = inner.effect.lock().await;
-    let result = execute_action(&inner, &request, control).await;
+    let mut guard = CommandGuard::new(Arc::clone(&inner), key.clone(), matches!(&control.action, ControlAction::Plugin { .. }));
+    let result = inner.actions.execute(&request.id, control, request.value).await
+        .map_err(|error| ApiError::bad_request(error.message))?;
     {
         let now = inner.clock.now();
         let mut registry = inner.registry.lock().await;
@@ -1269,14 +1314,16 @@ struct CommandGuard {
     inner: Arc<Inner>,
     key: CommandKey,
     completed: bool,
+    plugin: bool,
 }
 
 impl CommandGuard {
-    fn new(inner: Arc<Inner>, key: CommandKey) -> Self {
+    fn new(inner: Arc<Inner>, key: CommandKey, plugin: bool) -> Self {
         Self {
             inner,
             key,
             completed: false,
+            plugin,
         }
     }
 
@@ -1292,19 +1339,14 @@ impl Drop for CommandGuard {
         }
         let inner = Arc::clone(&self.inner);
         let key = self.key.clone();
+        let plugin = self.plugin;
         tokio::spawn(async move {
             let now = inner.clock.now();
             let mut registry = inner.registry.lock().await;
             registry.prune(now, &inner.limits);
             if let Some(record) = registry.commands.get_mut(&key) {
                 if record.completed_at.is_none() {
-                    record.result = CommandResult {
-                        id: record.result.id.clone(),
-                        state: CommandState::Unknown,
-                        message: "The action was interrupted before its result was recorded."
-                            .to_string(),
-                        observed: None,
-                    };
+                    record.result = interrupted_result(&record.result.id, plugin);
                     record.completed_at = Some(now);
                 }
             }
@@ -1353,156 +1395,6 @@ async fn command_result(
     Ok(json_response(StatusCode::OK, &result))
 }
 
-async fn execute_action(
-    inner: &Inner,
-    request: &CommandRequest,
-    control: &Control,
-) -> CommandResult {
-    let result = match &control.action {
-        ControlAction::ObsScene { scene } => match inner.obs.switch_scene(scene).await {
-            Ok(outcome) => CommandResult {
-                id: request.id.clone(),
-                state: if outcome.confirmed {
-                    CommandState::Confirmed
-                } else {
-                    CommandState::NotApplied
-                },
-                message: if outcome.confirmed {
-                    "Action confirmed.".to_string()
-                } else {
-                    "OBS did not report the requested scene.".to_string()
-                },
-                observed: serde_json::to_value(&outcome).ok(),
-            },
-            Err(error) => obs_error_result(&request.id, error),
-        },
-        ControlAction::MicMute => match inner.system.microphone_snapshot().await {
-            Ok(before) => match inner.system.set_microphone_muted(!before.muted).await {
-                Ok(outcome) => CommandResult {
-                    id: request.id.clone(),
-                    state: if outcome.confirmed {
-                        CommandState::Confirmed
-                    } else {
-                        CommandState::NotApplied
-                    },
-                    message: if outcome.confirmed {
-                        "Action confirmed.".to_string()
-                    } else {
-                        "The microphone did not report the requested mute state.".to_string()
-                    },
-                    observed: serde_json::to_value(&outcome).ok(),
-                },
-                Err(error) => system_error_result(&request.id, error),
-            },
-            Err(error) => failed_result(&request.id, error.to_string()),
-        },
-        ControlAction::MediaPlayPause => match inner.system.media_play_pause().await {
-            Ok(outcome) => CommandResult {
-                id: request.id.clone(),
-                state: if outcome.confirmed {
-                    CommandState::Confirmed
-                } else {
-                    CommandState::NotApplied
-                },
-                message: if outcome.confirmed {
-                    "Action confirmed.".to_string()
-                } else {
-                    "The media player did not report the expected state.".to_string()
-                },
-                observed: serde_json::to_value(&outcome).ok(),
-            },
-            Err(error) => system_error_result(&request.id, error),
-        },
-        ControlAction::Volume { volume } => {
-            let target = request.value.unwrap_or(*volume);
-            match inner.system.set_output_volume(target).await {
-                Ok(outcome) => CommandResult {
-                    id: request.id.clone(),
-                    state: if outcome.confirmed {
-                        CommandState::Confirmed
-                    } else {
-                        CommandState::NotApplied
-                    },
-                    message: if outcome.confirmed {
-                        "Action confirmed.".to_string()
-                    } else {
-                        "The output volume did not report the requested level.".to_string()
-                    },
-                    observed: serde_json::to_value(&outcome).ok(),
-                },
-                Err(error) => system_error_result(&request.id, error),
-            }
-        }
-    };
-    result
-}
-
-fn failed_result(id: &str, message: String) -> CommandResult {
-    CommandResult {
-        id: id.to_string(),
-        state: CommandState::Failed,
-        message,
-        observed: None,
-    }
-}
-
-fn obs_error_result(id: &str, error: ObsError) -> CommandResult {
-    let state = match error {
-        ObsError::Timeout { .. }
-        | ObsError::Disconnected { .. }
-        | ObsError::RequestFailed { .. } => CommandState::Unknown,
-        _ => CommandState::Failed,
-    };
-    CommandResult {
-        id: id.to_string(),
-        state,
-        message: error.to_string(),
-        observed: None,
-    }
-}
-
-fn system_error_result(id: &str, error: SystemError) -> CommandResult {
-    let state = match error {
-        SystemError::Timeout { .. } | SystemError::OutcomeUnknown { .. } => CommandState::Unknown,
-        _ => CommandState::Failed,
-    };
-    CommandResult {
-        id: id.to_string(),
-        state,
-        message: error.to_string(),
-        observed: None,
-    }
-}
-
-fn find_control<'a>(deck: &'a Deck, control_id: &str) -> Option<&'a Control> {
-    deck.pages
-        .iter()
-        .flat_map(|page| page.controls.iter())
-        .find(|control| control.id == control_id)
-}
-
-fn validate_action_value(control: &Control, value: Option<f64>) -> Result<(), ApiError> {
-    match control.action {
-        ControlAction::Volume { .. } => {
-            if let Some(value) = value {
-                if !value.is_finite() || !(0.0..=100.0).contains(&value) {
-                    return Err(ApiError::bad_request(
-                        "Volume must be a finite number between 0 and 100.",
-                    ));
-                }
-            }
-        }
-        _ => {
-            if value.is_some() {
-                return Err(ApiError::bad_request(
-                    "Only a volume control accepts a value.",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
 fn validate_pair_request(request: &PairRequest) -> Result<(), ApiError> {
     if request.invitation.len() != 64
         || !request
@@ -1522,16 +1414,8 @@ fn validate_pair_request(request: &PairRequest) -> Result<(), ApiError> {
 }
 
 fn validate_command_request(request: &CommandRequest) -> Result<(), ApiError> {
-    validate_id(&request.id, "command")?;
-    validate_id(&request.control_id, "control")?;
-    if let Some(value) = request.value {
-        if !value.is_finite() || !(0.0..=100.0).contains(&value) {
-            return Err(ApiError::bad_request(
-                "Volume must be a finite number between 0 and 100.",
-            ));
-        }
-    }
-    Ok(())
+    validate_command_fields(&request.id, &request.control_id, request.value)
+        .map_err(|error| ApiError::bad_request(error.message))
 }
 
 fn validate_id(value: &str, label: &str) -> Result<(), ApiError> {

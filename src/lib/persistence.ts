@@ -1,4 +1,4 @@
-import { createDefaultDeck, isDeck } from "./deck";
+import { createDefaultDeck, isDeck, normalizeDeck } from "./deck";
 import type { Deck, StorageLike } from "./types";
 
 export const STORAGE_KEY = "deck.local.v1";
@@ -43,7 +43,8 @@ export function loadDeck(storage: StorageLike | null): LoadResult {
 
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (isDeck(parsed)) return { deck: parsed, status: "loaded" };
+    const deck = normalizeDeck(parsed);
+    if (deck) return { deck, status: "loaded" };
   } catch {
     // Fall through to the safe sample deck.
   }

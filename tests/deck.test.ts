@@ -176,7 +176,7 @@ describe("deck validation", () => {
     const badVersion = JSON.parse(JSON.stringify(createDefaultDeck())) as {
       version: number;
     };
-    badVersion.version = 2;
+    badVersion.version = 3;
     expect(isDeck(badVersion)).toBe(false);
 
     const badTheme = JSON.parse(JSON.stringify(createDefaultDeck())) as {

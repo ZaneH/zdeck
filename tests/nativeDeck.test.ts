@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { createDefaultDeck, isDeck } from "../src/lib/deck";
+import { createDefaultDeck, isDeck, normalizeDeck } from "../src/lib/deck";
 import { DeckSync } from "../src/lib/deckSync";
 import type { DeckBackend, DeckSyncStatus } from "../src/lib/deckSync";
 import { nativeAvailable } from "../src/lib/native";
 import {
   nativeDeckLoad,
   nativeDeckSave,
+  parseDeckSnapshot,
   toDeckError,
 } from "../src/lib/nativeDeck";
 import type { DeckSnapshot } from "../src/lib/nativeDeck";
@@ -49,6 +50,17 @@ describe("native deck errors", () => {
     await expect(nativeDeckSave(0, createDefaultDeck())).rejects.toMatchObject({
       kind: "unavailable",
     });
+  });
+});
+
+describe("native v2 snapshot boundary", () => {
+  it("accepts only validated v2 decks from Rust, which owns native v1 migration", () => {
+    const snapshot = { revision: 3, exists: true, deck: createDefaultDeck() };
+    expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
+    for (const bad of [null, { ...snapshot, revision: -1 }, { ...snapshot, exists: "true" },
+      { ...snapshot, deck: { ...snapshot.deck, version: 1 } }, { ...snapshot, deck: { ...snapshot.deck, extra: true } }]) {
+      expect(() => parseDeckSnapshot(bad)).toThrow();
+    }
   });
 });
 
@@ -155,9 +167,11 @@ describe("shared deck fixture", () => {
       new URL("./fixtures/deck.sample.json", import.meta.url),
       "utf8",
     );
-    const deck = JSON.parse(raw) as unknown;
+    const legacy = JSON.parse(raw) as unknown;
+    expect(isDeck(legacy)).toBe(false);
+    const deck = normalizeDeck(legacy);
     expect(isDeck(deck)).toBe(true);
-    // The browser sample deck and the Rust `default_deck` must stay identical.
+    // Keep the shared Rust v1 fixture intact; both readers normalize it to v2.
     expect(createDefaultDeck()).toEqual(deck);
 
     const kinds = new Set(

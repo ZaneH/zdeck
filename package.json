@@ -15,6 +15,7 @@
     "smoke:remote": "npm run build && nix develop --command cargo test --manifest-path src-tauri/Cargo.toml --test remote_service remote_browser_smoke -- --ignored --nocapture --test-threads=1",
     "smoke:native": "nix develop --command bash -c 'npm run tauri:build -- --debug --no-bundle --features native-smoke && node scripts/native-smoke.mjs'",
     "typecheck": "tsc --noEmit",
+    "plugin:package:spotify": "node scripts/package-spotify.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

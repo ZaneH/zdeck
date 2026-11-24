@@ -21,11 +21,13 @@ import {
   remoteStart,
   remoteStatus,
   remoteStop,
+  parseRemoteStatus,
   toRemoteError,
 } from "../src/lib/nativeRemote";
 
 const STOPPED = {
   running: false,
+  mode: null,
   origin: null,
   port: null,
   pendingDevices: 0,
@@ -73,11 +75,30 @@ describe("native remote admin bridge", () => {
 
   it("passes the origin to remote_start", async () => {
     mocks.isTauri.mockReturnValue(true);
-    mocks.invoke.mockResolvedValue({ ...STOPPED, running: true });
+    mocks.invoke.mockResolvedValue({ ...STOPPED, running: true, mode: "tailscale", origin: "https://computer.tailnet-name.ts.net", port: 45829 });
     await remoteStart("https://computer.tailnet-name.ts.net");
     expect(mocks.invoke).toHaveBeenCalledWith("remote_start", {
-      origin: "https://computer.tailnet-name.ts.net",
+      origin: "https://computer.tailnet-name.ts.net", mode: "tailscale",
     });
+  });
+
+  it("passes local mode and canonical origin explicitly and validates the returned mode", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    const local = { ...STOPPED, running: true, mode: "local_https", origin: "https://deck.lan:8443", port: 45829 };
+    mocks.invoke.mockResolvedValue(local);
+    await expect(remoteStart("HTTPS://Deck.LAN:8443/", "local_https")).resolves.toEqual(local);
+    expect(mocks.invoke).toHaveBeenCalledWith("remote_start", { origin: local.origin, mode: "local_https" });
+    mocks.invoke.mockResolvedValue(STOPPED);
+    await expect(remoteStart(local.origin, "local_https")).rejects.toMatchObject({ kind: "internal" });
+    await expect(remoteStart("https://example.com", "local_https")).rejects.toMatchObject({ kind: "invalid_origin" });
+  });
+
+  it("rejects missing/unknown/mismatched status modes without guessing a default", () => {
+    const local = { ...STOPPED, running: true, mode: "local_https", origin: "https://192.168.1.20:8443", port: 45829 };
+    expect(parseRemoteStatus(local)).toEqual(local);
+    for (const bad of [{ ...STOPPED, mode: undefined }, { ...local, mode: undefined }, { ...local, mode: "other" },
+      { ...local, mode: "tailscale" }, { ...local, origin: "https://8.8.8.8" }, { ...local, port: 0 },
+      { ...local, pendingDevices: -1 }, { ...STOPPED, mode: "local_https" }]) expect(parseRemoteStatus(bad)).toBeNull();
   });
 
   it("uses empty args for status, stop, invitation, and device list", async () => {
@@ -160,7 +181,7 @@ describe("remote error normalization", () => {
     });
     expect(toRemoteError({ kind: "invalid_origin", message: "   " })).toEqual({
       kind: "invalid_origin",
-      message: "That origin is not a valid HTTPS tailnet address.",
+      message: "Use a valid HTTPS address for the selected connection mode, without credentials, path, query or fragment.",
     });
   });
 });

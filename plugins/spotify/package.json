@@ -1,0 +1,10 @@
+{
+  "name": "@zdeck/plugin-spotify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.18.0" },
+  "dependencies": { "@zdeck/plugin-sdk": "file:../../packages/plugin-sdk" },
+  "scripts": { "start": "node main.js", "test": "node --test test/*.test.js" }
+}

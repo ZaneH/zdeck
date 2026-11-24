@@ -250,6 +250,7 @@ async fn missing_tool_is_reported_as_tool_missing() {
     assert!(matches!(error, SystemError::ToolMissing { .. }));
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_real_missing_executable_is_tool_missing() {
     use deck_lib::system::ProcessRunner;

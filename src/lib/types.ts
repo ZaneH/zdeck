@@ -1,4 +1,4 @@
-export const DECK_VERSION = 1 as const;
+export const DECK_VERSION = 2 as const;
 
 export const THEMES = ["dark", "light"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -18,6 +18,7 @@ export const ACTION_KINDS = [
   "mic-mute",
   "media-play-pause",
   "volume",
+  "plugin",
 ] as const;
 
 export type ActionKind = (typeof ACTION_KINDS)[number];
@@ -45,7 +46,24 @@ export interface VolumeControl extends ControlBase {
   volume: number;
 }
 
+export interface PluginControl extends ControlBase {
+  action: "plugin";
+  pluginId: string;
+  pluginAction: string;
+  pluginArgs: Record<string, number>;
+}
+
+export type ControlOptions = {
+  label?: string;
+  scene?: string;
+  volume?: number;
+  pluginId?: string;
+  pluginAction?: string;
+  pluginArgs?: Record<string, number>;
+};
+
 export type Control =
+  | PluginControl
   | ObsSceneControl
   | MicMuteControl
   | MediaPlayPauseControl
@@ -70,6 +88,9 @@ export type ControlPatch = {
   action?: ActionKind;
   scene?: string;
   volume?: number;
+  pluginId?: string;
+  pluginAction?: string;
+  pluginArgs?: Record<string, number>;
 };
 
 export type StorageLike = {

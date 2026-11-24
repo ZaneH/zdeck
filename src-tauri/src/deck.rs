@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 
 /// Deck schema version understood by both the frontend and this store.
-pub const DECK_VERSION: u32 = 1;
+pub const DECK_VERSION: u32 = 2;
 pub const MAX_PAGES: usize = 12;
 pub const MAX_CONTROLS_PER_PAGE: usize = 24;
 /// Upper bound on the on-disk document; checked before the bytes are read.
@@ -48,7 +48,7 @@ pub enum Theme {
 
 /// Mirrors the TypeScript `Control` union, tagged by `action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "action")]
+#[serde(tag = "action", deny_unknown_fields)]
 pub enum ControlAction {
     #[serde(rename = "obs-scene")]
     ObsScene { scene: String },
@@ -58,9 +58,18 @@ pub enum ControlAction {
     MediaPlayPause,
     #[serde(rename = "volume")]
     Volume { volume: f64 },
+    #[serde(rename = "plugin")]
+    Plugin {
+        #[serde(rename = "pluginId")]
+        plugin_id: String,
+        #[serde(rename = "pluginAction")]
+        plugin_action: String,
+        #[serde(rename = "pluginArgs")]
+        plugin_args: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Control {
     pub id: String,
     pub label: String,
@@ -68,8 +77,27 @@ pub struct Control {
     pub action: ControlAction,
 }
 
+impl<'de> Deserialize<'de> for Control {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let mut fields = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+        let id = fields.remove("id").and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| D::Error::custom("Control ID must be a string."))?;
+        let label = fields.remove("label").and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| D::Error::custom("Control label must be a string."))?;
+        // Serde ignores extra fields on internally tagged unit variants even
+        // with deny_unknown_fields. Do not silently drop data during migration.
+        if matches!(fields.get("action").and_then(serde_json::Value::as_str), Some("mic-mute" | "media-play-pause")) && fields.len() != 1 {
+            return Err(D::Error::custom("Unknown control fields."));
+        }
+        let action = serde_json::from_value(serde_json::Value::Object(fields))
+            .map_err(|_| D::Error::custom("Invalid control action fields."))?;
+        Ok(Self { id, label, action })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Page {
     pub id: String,
     pub name: String,
@@ -77,7 +105,7 @@ pub struct Page {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Deck {
     pub version: u32,
     pub pages: Vec<Page>,
@@ -88,6 +116,7 @@ pub struct Deck {
 
 /// The persisted document. No secrets or runtime action state belong here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeckDocument {
     pub revision: u64,
     pub deck: Deck,
@@ -233,6 +262,13 @@ impl Deck {
                             return Err(DeckError::invalid_input(
                                 "OBS scene names must be non-empty and bounded.",
                             ));
+                        }
+                    }
+                    ControlAction::Plugin { plugin_id, plugin_action, plugin_args } => {
+                        if !crate::plugin::identifier(plugin_id) || !crate::plugin::identifier(plugin_action)
+                            || plugin_args.len() > 8
+                            || !plugin_args.iter().all(|(k, v)| crate::plugin::identifier(k) && crate::plugin::integer(v).is_some()) {
+                            return Err(DeckError::invalid_input("Plugin controls require bounded IDs and at most eight safe integer arguments."));
                         }
                     }
                     ControlAction::MicMute | ControlAction::MediaPlayPause => {}
@@ -454,9 +490,23 @@ impl DeckStore {
             )));
         }
 
-        let document: DeckDocument = serde_json::from_slice(&bytes).map_err(|_| {
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| DeckError::invalid_file("The deck file is not valid JSON."))?;
+        if let Some(version) = value.pointer("/deck/version").and_then(serde_json::Value::as_u64) {
+            if version != 1 && version != u64::from(DECK_VERSION) {
+                return Err(DeckError::unsupported_version("The deck version is not supported."));
+            }
+        }
+        let mut document: DeckDocument = serde_json::from_value(value).map_err(|_| {
             DeckError::invalid_file("The deck file is not a valid versioned deck document.")
         })?;
+        if document.deck.version == 1 {
+            if document.deck.pages.iter().flat_map(|p| &p.controls).any(|c| matches!(c.action, ControlAction::Plugin { .. })) {
+                return Err(DeckError::invalid_file("Plugin controls require deck version 2."));
+            }
+            // Keep the legacy filename and bytes. Only a valid explicit save
+            // writes version 2, using the existing revision/conflict checks.
+            document.deck.version = DECK_VERSION;
+        }
         document.deck.validate().map_err(|error| match error {
             DeckError::UnsupportedVersion { message } => DeckError::UnsupportedVersion { message },
             _ => DeckError::invalid_file("The deck file failed schema validation."),
@@ -579,7 +629,9 @@ mod tests {
     }
 
     fn fixture_deck() -> Deck {
-        serde_json::from_str(FIXTURE).expect("fixture is a valid Deck")
+        let mut deck: Deck = serde_json::from_str(FIXTURE).expect("fixture is a valid legacy Deck");
+        deck.version = DECK_VERSION;
+        deck
     }
 
     #[tokio::test]
@@ -596,6 +648,7 @@ mod tests {
                     ControlAction::MicMute => "mic-mute",
                     ControlAction::MediaPlayPause => "media-play-pause",
                     ControlAction::Volume { .. } => "volume",
+                    ControlAction::Plugin { .. } => "plugin",
                 })
             })
             .collect();
@@ -608,6 +661,79 @@ mod tests {
         let encoded = serde_json::to_vec(&document).unwrap();
         let decoded: DeckDocument = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn generic_plugin_controls_are_strict_and_bounded() {
+        use serde_json::json;
+        let control = json!({"id":"plugin_button","label":"Volume","action":"plugin","pluginId":"spotify","pluginAction":"set-volume","pluginArgs":{"volume":50}});
+        let parsed: Control = serde_json::from_value(control.clone()).unwrap();
+        let mut deck = fixture_deck();
+        deck.pages[0].controls.push(parsed);
+        deck.validate().unwrap();
+        assert_eq!(serde_json::to_value(deck.pages[0].controls.last().unwrap()).unwrap(), control);
+        for (field, value) in [("pluginId", json!("../node")), ("pluginAction", json!("Bad")), ("pluginArgs", json!({"volume":1.5})), ("pluginArgs", json!({"secret":"token"})), ("pluginArgs", json!({"n":9007199254740992i64}))] {
+            let mut c = control.clone(); c[field] = value;
+            let mut deck = fixture_deck();
+            if let Ok(c) = serde_json::from_value(c) { deck.pages[0].controls.push(c); assert!(deck.validate().is_err()); }
+        }
+        let mut c = control.clone();
+        c["pluginArgs"] = json!((0..9).map(|i| (format!("n{i}"), json!(1))).collect::<serde_json::Map<_,_>>());
+        let mut deck = fixture_deck(); deck.pages[0].controls.push(serde_json::from_value(c).unwrap()); assert!(deck.validate().is_err());
+        for value in [json!(null), json!([]), json!(1)] {
+            let mut c = control.clone(); c["pluginArgs"] = value;
+            assert!(serde_json::from_value::<Control>(c).is_err());
+        }
+        for action in [control, json!({"id":"mic","label":"Mic","action":"mic-mute"})] {
+            let mut c = action; c["program"] = json!("/private/path");
+            assert!(serde_json::from_value::<Control>(c).is_err(), "unknown launch metadata must not be silently discarded");
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_file_migrates_only_in_memory_until_explicit_save() {
+        let dir = TempDir::new();
+        let legacy: Deck = serde_json::from_str(FIXTURE).unwrap();
+        assert_eq!(legacy.version, 1);
+        let bytes = serde_json::to_vec(&DeckDocument { revision: 7, deck: legacy }).unwrap();
+        std::fs::write(dir.file(), &bytes).unwrap();
+        let store = DeckStore::new(dir.file());
+        let snapshot = store.load().await.unwrap();
+        assert_eq!(snapshot.deck.version, DECK_VERSION);
+        assert_eq!(snapshot.revision, 7);
+        assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
+        let mut invalid = snapshot.deck.clone(); invalid.pages.clear();
+        assert!(store.save(7, invalid).await.is_err());
+        assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
+        assert!(store.save(6, snapshot.deck.clone()).await.is_err());
+        assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
+        store.save(7, snapshot.deck).await.unwrap();
+        let saved: DeckDocument = serde_json::from_slice(&std::fs::read(dir.file()).unwrap()).unwrap();
+        assert_eq!(saved.deck.version, 2); assert_eq!(saved.revision, 8);
+    }
+
+    #[tokio::test]
+    async fn unknown_legacy_fields_and_plugin_actions_are_not_clobbered() {
+        use serde_json::json;
+        let base = json!({"revision":3,"deck":serde_json::from_str::<serde_json::Value>(FIXTURE).unwrap()});
+        for pointer in ["/extra", "/deck/extra", "/deck/pages/0/extra", "/deck/pages/0/controls/0/extra"] {
+            let dir = TempDir::new();
+            let mut v = base.clone();
+            let (parent,key) = pointer.rsplit_once('/').unwrap();
+            v.pointer_mut(parent).unwrap().as_object_mut().unwrap().insert(key.into(), json!(true));
+            let bytes = serde_json::to_vec(&v).unwrap();
+            std::fs::write(dir.file(), &bytes).unwrap();
+            let store = DeckStore::new(dir.file());
+            assert!(matches!(store.load().await, Err(DeckError::InvalidFile { .. })));
+            assert!(store.save(0, fixture_deck()).await.is_err());
+            assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
+        }
+        let dir = TempDir::new();
+        let mut v = base;
+        v["deck"]["pages"][0]["controls"][0] = json!({"id":"p","label":"P","action":"plugin","pluginId":"fake","pluginAction":"go","pluginArgs":{}});
+        let bytes = serde_json::to_vec(&v).unwrap(); std::fs::write(dir.file(), &bytes).unwrap();
+        let store = DeckStore::new(dir.file()); assert!(store.load().await.is_err());
+        assert!(store.save(0, fixture_deck()).await.is_err()); assert_eq!(std::fs::read(dir.file()).unwrap(),bytes);
     }
 
     #[tokio::test]
@@ -650,7 +776,7 @@ mod tests {
         assert!(bad_volume.validate().is_err());
 
         let mut bad_version = fixture_deck();
-        bad_version.version = 2;
+        bad_version.version = DECK_VERSION + 1;
         assert!(matches!(
             bad_version.validate(),
             Err(DeckError::UnsupportedVersion { .. })
@@ -727,7 +853,7 @@ mod tests {
             revision: 4,
             deck: fixture_deck(),
         };
-        document.deck.version = 2;
+        document.deck.version = DECK_VERSION + 1;
         std::fs::write(&unknown, serde_json::to_vec(&document).unwrap()).unwrap();
         let store = DeckStore::new(unknown.clone());
         assert!(matches!(

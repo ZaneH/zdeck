@@ -15,7 +15,7 @@ import type {
   RemoteResponse,
   RemoteWebSocket,
 } from "../src/lib/remotePhone";
-import type { Deck } from "../src/lib/types";
+import type { Deck, PluginControl } from "../src/lib/types";
 
 const ORIGIN = "https://host.ts.net";
 const EVENTS_URL = "wss://host.ts.net/api/v1/events";
@@ -152,6 +152,35 @@ async function driveToActive(command?: Handler): Promise<{
   expect(connection.getSnapshot().phase).toBe("active");
   return { connection, ...harness };
 }
+
+describe("saved plugin phone buttons", () => {
+  it("accepts v2 plugin snapshots but never legacy phone snapshots", () => {
+    expect(parseSnapshot(snapshotBody(3, { ...sampleDeck, version: 1 } as unknown as Deck))).toBeNull();
+  });
+
+  it("sends only the saved control ID, rejects plugin slider values and arbitrary argument overrides", async () => {
+    const { connection, sockets, calls } = await driveToActive((_, init) => jsonResponse(200, {
+      id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Command completed.",
+    }));
+    const control: PluginControl = { id: "spotify-volume", label: "Spotify volume", action: "plugin",
+      pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
+    const deck = structuredClone(sampleDeck);
+    deck.pages[0].controls.push(control);
+    sockets[0].emit(snapshotBody(4, deck));
+    await flush();
+    connection.commitVolume(control, 90);
+    connection.commitVolume({ id: control.id, label: "Forged", action: "volume", volume: 90 }, 90);
+    await flush();
+    expect(calls.filter((call) => call.path === "/api/v1/commands")).toHaveLength(0);
+    connection.pressControl({ ...control, pluginArgs: { volume: 99 } });
+    await flush();
+    const commands = calls.filter((call) => call.path === "/api/v1/commands");
+    expect(commands).toHaveLength(1);
+    expect(JSON.parse(String(commands[0].init.body))).toEqual({ id: expect.any(String), revision: 4, controlId: control.id });
+    expect(() => buildCommandPayload("r1", 4, control.id, { volume: 99 } as unknown as number)).toThrow();
+    connection.stop();
+  });
+});
 
 describe("invitation parsing", () => {
   it("accepts the exact token and a same-origin HTTPS root pairing link", () => {

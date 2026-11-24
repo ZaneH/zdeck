@@ -6,6 +6,7 @@ import type {
   ActionKind,
   Control,
   ControlPatch,
+  ControlOptions,
   Deck,
   Theme,
 } from "./lib/types";
@@ -49,6 +50,9 @@ import type { DeckSyncStatus } from "./lib/deckSync";
 import { applyTheme } from "./lib/theme";
 import { useObsConsole } from "./lib/useObsConsole";
 import { useSystemConsole } from "./lib/useSystemConsole";
+import { useDesktopActions } from "./lib/useDesktopActions";
+import { usePluginConsole } from "./lib/usePluginConsole";
+import { PluginSettingsCard } from "./components/PluginSettingsCard";
 import { ActionLibrary } from "./components/ActionLibrary";
 import { BrandMark } from "./components/BrandMark";
 import { ControlTile } from "./components/ControlTile";
@@ -136,6 +140,11 @@ export default function App() {
   const pressTimer = useRef<number | null>(null);
   const obs = useObsConsole();
   const system = useSystemConsole();
+  const plugin = usePluginConsole();
+  const desktop = useDesktopActions({ native: nativeMode, deck,
+    editor: route === "editor" && !setupOpen && !nativeLoading && !nativeBlocked,
+    savedRevision: nativeSave.phase === "saved" ? nativeSave.revision : null,
+  });
 
   const handleNativeStatus = useCallback((status: DeckSyncStatus) => {
     setNativeSave(status);
@@ -144,6 +153,7 @@ export default function App() {
 
   const commitDeck = useCallback(
     (next: Deck) => {
+      desktop.invalidate();
       setDeck(next);
       if (nativeMode) {
         syncRef.current?.update(next);
@@ -153,7 +163,7 @@ export default function App() {
       setSaveError(!saved);
       if (saved) setLoadStatus("loaded");
     },
-    [nativeMode],
+    [nativeMode, desktop.invalidate],
   );
 
   // Native: load the authoritative deck before enabling edits. A missing file
@@ -179,6 +189,7 @@ export default function App() {
         syncRef.current = sync;
         setLoadStatus("loaded");
         if (snapshot.exists) {
+          setNativeSave({ phase: "saved", revision: snapshot.revision });
           setSetupOpen(false);
           setDeck(snapshot.deck);
         } else {
@@ -268,8 +279,8 @@ export default function App() {
     actionDialog.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
   };
 
-  const handleAddControl = (kind: ActionKind) => {
-    const result = addControl(deck, page.id, kind);
+  const handleAddControl = (kind: ActionKind, options?: ControlOptions) => {
+    const result = addControl(deck, page.id, kind, options);
     if (!result) {
       setPreviewNotice("Control limit reached on this page.");
       return;
@@ -286,11 +297,7 @@ export default function App() {
   };
 
   const finishSetup = (control: Control) => {
-    const result = addControl(deck, page.id, control.action, {
-      label: control.label,
-      scene: control.action === "obs-scene" ? control.scene : undefined,
-      volume: control.action === "volume" ? control.volume : undefined,
-    });
+    const result = addControl(deck, page.id, control.action, control);
     if (!result) return false;
     commitDeck(result.deck);
     setSelectedControlId(result.control.id);
@@ -443,6 +450,12 @@ export default function App() {
           />
         ) : <a className="back-link" href="#/"><ArrowLeft size={15} aria-hidden="true" /> Back to deck</a>}
         <div className="topbar-spacer" />
+        {nativeMode && route === "editor" ? <div className="segmented desktop-mode" role="group" aria-label="Desktop control mode">
+          <button type="button" className="button secondary" aria-pressed={!desktop.live} onClick={desktop.preview}>Preview</button>
+          <button type="button" className="button secondary" aria-pressed={desktop.live}
+            disabled={!desktop.ready || desktop.inflight || !!desktop.pending}
+            onClick={() => { setPreviewNotice(null); desktop.enter(); }}>Live</button>
+        </div> : null}
         {route === "editor" ? (
           <button type="button" className="button secondary add-control" disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
             <Plus size={15} aria-hidden="true" /> Add control
@@ -474,7 +487,7 @@ export default function App() {
         <main className="settings-view" id="main">
           <div className="settings-header">
             <h1>Settings</h1>
-            <p>Phone connection, OBS, appearance, and local storage.</p>
+            <p>Phone connection, OBS, external plugin, appearance, and local storage.</p>
           </div>
 
           <RemoteSettingsCard />
@@ -529,6 +542,7 @@ export default function App() {
           </section>
 
           <ObsSettingsCard obs={obs} />
+          <PluginSettingsCard plugin={plugin} />
 
           <section className="settings-card">
             <h2>Storage</h2>
@@ -547,7 +561,8 @@ export default function App() {
             ) : (
               <p className="muted">
                 Saved as versioned JSON under <code>{STORAGE_KEY}</code> in this browser
-                only. Invalid or older data is ignored and the sample deck is loaded.
+                only. Valid version 1 decks are upgraded in memory and saved as version 2 on your next edit.
+                Invalid, unknown-field or unsupported-version data is left unchanged until an explicit edit replaces it.
               </p>
             )}
             </details>
@@ -556,7 +571,8 @@ export default function App() {
           <details className="settings-card preview-scope">
             <summary className="disclosure">About this preview</summary>
             <p>
-              Toolbar tile presses and the phone preview are local only. In the
+              Desktop tiles default to Preview. Explicit Live mode runs saved controls on this computer without a phone or phone service.
+              Editing or leaving the editor returns to Preview. The phone preview is always simulated. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
               connected, and on Linux the microphone mute, output-volume, and
               media play/pause actions run against system session services. Every
@@ -595,6 +611,10 @@ export default function App() {
               </p>
             ) : null}
 
+            {nativeMode ? <p className={`desktop-mode-note${desktop.live ? " is-live" : ""}`} role="status">
+              {desktop.live ? "Live — presses run on this computer" : "Preview — tiles select controls; no desktop tile actions are sent."}
+              {!desktop.ready ? " Save a valid synchronized deck before entering Live." : ""}
+            </p> : null}
             <div className="deck-workbench">
               <div className="control-grid">
                 {page.controls.map((control) => (
@@ -602,11 +622,20 @@ export default function App() {
                     key={control.id}
                     control={control}
                     variant="editor"
+                    semantics={desktop.live ? "live" : "preview"}
+                    disabled={desktop.inflight || !!desktop.pending}
+                    busy={desktop.inflight}
                     volume={previewVolumes[control.id] ?? controlVolume(control)}
                     selected={selectedControlId === control.id}
                     pressed={pressedId === control.id}
-                    onPrimary={() => setSelectedControlId(control.id)}
-                    onVolumeChange={(value) => previewVolume(control, value)}
+                    onPrimary={() => {
+                      setSelectedControlId(control.id);
+                      if (desktop.live && control.action !== "volume") void desktop.press(control.id);
+                    }}
+                    onVolumeChange={(value) => desktop.live
+                      ? setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }))
+                      : previewVolume(control, value)}
+                    onVolumeCommit={(value) => { if (desktop.live && control.action === "volume") void desktop.press(control.id, value); }}
                   />
                 ))}
                 {page.controls.length === 0 ? (
@@ -622,7 +651,13 @@ export default function App() {
             </div>
 
             <div className="workspace-footer">
-              <p className="preview-feedback" title={obsPill.title} role="status" aria-live="polite">{previewNotice ?? obsPill.text}</p>
+              {desktop.inflight || desktop.result || desktop.error ? <p className={`native-feedback is-${desktop.result?.state ?? (desktop.error ? "failed" : "pending")}`}
+                role={desktop.result?.state === "unknown" ? "alert" : "status"} aria-live={desktop.result?.state === "unknown" ? "assertive" : "polite"}>
+                {desktop.inflight ? "Sending saved control to this computer…" : `Last desktop result: ${desktop.error ?? desktop.result?.message}`}
+              </p> : <p className="preview-feedback" title={desktop.live ? undefined : obsPill.title} role="status" aria-live="polite">
+                {desktop.live ? "Live is ready. Only saved control IDs are sent; nothing runs until you press." : previewNotice ?? obsPill.text}
+              </p>}
+              {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check()}>Check result</button> : null}
             </div>
           </section>
 
@@ -633,6 +668,7 @@ export default function App() {
               pageName={page.name}
               obs={obs}
               system={system}
+              plugin={plugin}
               previewVolume={selectedControl ? previewVolumes[selectedControl.id] ?? controlVolume(selectedControl) : 0}
               canMoveUp={selectedIndex > 0}
               canMoveDown={selectedIndex >= 0 && selectedIndex < page.controls.length - 1}
@@ -647,6 +683,7 @@ export default function App() {
           </section>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
+            manifest={plugin.snapshot.status === "connected" && !plugin.snapshot.lastError ? plugin.snapshot.manifest : null}
             disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onAdd={handleAddControl}
           />
         </main>

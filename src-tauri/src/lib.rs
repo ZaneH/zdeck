@@ -1,19 +1,24 @@
+pub mod actions;
 pub mod deck;
 #[cfg(target_os = "linux")]
 mod linux_display;
 #[cfg(feature = "native-smoke")]
 mod native_smoke;
 pub mod obs;
+pub mod plugin;
+pub mod plugin_install;
 pub mod remote;
 pub mod system;
 
 use std::sync::Arc;
+use actions::{ActionDispatcher, ActionError, ActionErrorCode, CommandResult, DesktopActions, DesktopCommand};
 
+use plugin::{PluginError, PluginSnapshot, PluginState};
 use deck::{Deck, DeckError, DeckStore, DECK_FILE_NAME};
 use obs::{ObsError, ObsSnapshot, ObsState, SceneSwitchResult};
 use remote::{
     AssetProvider, DeviceView, InvitationView, Limits, PublicAsset, RemoteAdmin, RemoteError,
-    RemoteStatus, ServiceConfig, SystemClock, DEFAULT_PORT,
+    ConnectionMode, RemoteStatus, ServiceConfig, SystemClock, DEFAULT_PORT,
 };
 use system::{
     MediaApplyResult, MicrophoneApplyResult, MicrophoneSnapshot, OutputSnapshot, SystemError,
@@ -66,6 +71,9 @@ pub struct AppState {
     store: Result<Arc<DeckStore>, DeckError>,
     obs: Arc<ObsState>,
     system: Arc<SystemState>,
+    plugin: Arc<PluginState>,
+    actions: Arc<ActionDispatcher>,
+    desktop: DesktopActions,
     assets: Arc<dyn AssetProvider>,
 }
 
@@ -164,11 +172,79 @@ async fn native_deck_save(
     state.store()?.save(expected_revision, deck).await
 }
 
+/// Explicit native user gesture only; no phone service or direct action payload.
+/// Read the full JSON body so omitted value and explicit null stay distinct.
+#[tauri::command]
+async fn desktop_run_control(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<CommandResult, ActionError> {
+    let command: DesktopCommand = match request.body() {
+        tauri::ipc::InvokeBody::Json(value) => serde_json::from_value(value.clone())
+            .map_err(|_| ActionError::new(ActionErrorCode::InvalidRequest))?,
+        _ => return Err(ActionError::new(ActionErrorCode::InvalidRequest)),
+    };
+    let store = state.store().map_err(|_| ActionError::new(ActionErrorCode::DeckUnavailable))?;
+    state.desktop.run(store, command).await
+}
+
+fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::PluginInstall, PluginError> {
+    use tauri::Manager;
+    let home = app.path().home_dir().map_err(|_| PluginError::new(plugin::ErrorKind::Unavailable, plugin::Outcome::NotStarted))?;
+    plugin_install::PluginInstall::for_home(home)
+}
+
+/// Discovery never runs plugin code; runtime detection executes only bounded --version probes.
+#[tauri::command]
+async fn plugin_catalog(app: tauri::AppHandle) -> Result<plugin_install::PluginCatalog, PluginError> {
+    local_plugin_install(&app)?.catalog().await
+}
+
+/// Native desktop trust boundary only. UI must acknowledge local code trust before enabling.
+#[tauri::command]
+async fn plugin_enable(app: tauri::AppHandle, state: tauri::State<'_, AppState>, plugin_id: String) -> Result<PluginSnapshot, PluginError> {
+    local_plugin_install(&app)?.enable(&state.plugin, &plugin_id).await
+}
+
+/// Creates/opens only the fixed app plugin directory, never a caller-supplied path.
+#[tauri::command]
+async fn plugin_open_directory(app: tauri::AppHandle) -> Result<(), PluginError> {
+    local_plugin_install(&app)?.open_directory().await
+}
+
+#[tauri::command]
+async fn plugin_disconnect(
+    state: tauri::State<'_, AppState>,
+) -> Result<PluginSnapshot, PluginError> {
+    Ok(state.plugin.disconnect().await)
+}
+
+#[tauri::command]
+async fn plugin_snapshot(state: tauri::State<'_, AppState>) -> Result<PluginSnapshot, PluginError> {
+    Ok(state.plugin.snapshot().await)
+}
+
+#[tauri::command]
+async fn plugin_state(state: tauri::State<'_, AppState>) -> Result<PluginSnapshot, PluginError> {
+    state.plugin.state().await
+}
+
+#[tauri::command]
+async fn plugin_execute(
+    state: tauri::State<'_, AppState>,
+    plugin_id: String,
+    action_id: String,
+    args: serde_json::Value,
+) -> Result<PluginSnapshot, PluginError> {
+    state.plugin.execute(plugin_id, action_id, args).await
+}
+
 #[tauri::command]
 async fn remote_start(
     state: tauri::State<'_, AppState>,
     admin: tauri::State<'_, RemoteAdmin>,
     origin: String,
+    mode: Option<ConnectionMode>,
 ) -> Result<RemoteStatus, RemoteError> {
     let deck = state
         .store()
@@ -178,10 +254,10 @@ async fn remote_start(
         .clone();
     let config = ServiceConfig {
         origin,
+        mode: mode.unwrap_or_default(),
         port: DEFAULT_PORT,
         deck,
-        obs: Arc::clone(&state.obs),
-        system: Arc::clone(&state.system),
+        actions: Arc::clone(&state.actions),
         assets: Arc::clone(&state.assets),
         clock: Arc::new(SystemClock),
         limits: Limits::default(),
@@ -263,12 +339,12 @@ pub fn run() {
             let assets: Arc<dyn AssetProvider> = Arc::new(TauriAssets {
                 resolver: app.asset_resolver(),
             });
-            app.manage(AppState {
-                store,
-                obs: Arc::new(ObsState::default()),
-                system: Arc::new(SystemState::default()),
-                assets,
-            });
+            let obs = Arc::new(ObsState::default());
+            let system = Arc::new(SystemState::default());
+            let plugin = Arc::new(PluginState::default());
+            let actions = Arc::new(ActionDispatcher::new(obs.clone(), system.clone(), plugin.clone()));
+            let desktop = DesktopActions::new(actions.clone());
+            app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -284,6 +360,14 @@ pub fn run() {
             system_media_play_pause,
             native_deck_load,
             native_deck_save,
+            desktop_run_control,
+            plugin_catalog,
+            plugin_enable,
+            plugin_open_directory,
+            plugin_disconnect,
+            plugin_snapshot,
+            plugin_state,
+            plugin_execute,
             remote_start,
             remote_stop,
             remote_status,

@@ -51,6 +51,7 @@ function Rehearsal({ control, active, volume }: { control: Control; active: bool
 
 export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss }: SetupGuideProps) {
   const [step, setStep] = useState<Step>("welcome");
+  // Setup rehearses built-ins only; external actions come from a trusted connected manifest later.
   const [draft, setDraft] = useState<Control>(() => createControl("obs-scene"));
   const [demo, setDemo] = useState<Control>(() => createControl("obs-scene"));
   const [demoPresses, setDemoPresses] = useState(0);
@@ -133,7 +134,7 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
                 <label className="field"><span>Button label</span><input name="label" value={draft.label} maxLength={40} required onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
                 {draft.action === "obs-scene" ? <label className="field"><span>OBS scene name</span><input name="scene" value={draft.scene} maxLength={40} required onChange={(event) => setDraft({ ...draft, scene: event.target.value })} /></label> : null}
               </div>
-              <p className="setup-action-note">{draft.action === "obs-scene" ? "Use an existing scene name. Connect OBS later in Settings." : draft.action === "mic-mute" ? "Controls your default system microphone, not an OBS input." : draft.action === "media-play-pause" ? "Controls your default media player, not a Spotify account." : "Controls your default audio output. Never goes above 100%."}</p>
+              <p className="setup-action-note">{draft.action === "obs-scene" ? "Use an existing scene name. Connect OBS later in Settings." : draft.action === "mic-mute" ? "Linux only. Controls your default system microphone, not an OBS input." : draft.action === "media-play-pause" ? "Linux only. On macOS, enable Spotify and add its plugin action instead." : "Linux only. Controls your default audio output. Never goes above 100%."}</p>
               <div className="setup-actions"><button type="button" className="button quiet" onClick={() => changeStep("welcome")}><ArrowLeft size={15} aria-hidden="true" /> Back</button><button type="submit" className="button primary" disabled={!valid}>Try this control <ArrowRight size={15} aria-hidden="true" /></button></div>
             </form>
           ) : (
