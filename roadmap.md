@@ -10,7 +10,7 @@
 - Prototype connectivity: **Tailscale first**; do not confuse this with completed LAN-only support.
 - First action targets: **OBS scene switching, microphone mute, media play/pause, and volume**. Clarify whether microphone mute means system default input, an OBS input, or both before wiring that action.
 - Controls: **buttons and a slider first**; a dial is a follow-up once shared state and interaction behavior are proven.
-- Phone platform remains unknown; do not claim real-device validation until a target phone is tested.
+- Phone test targets: **iPhone + Android**. The user normally browses with **Brave**, installs iPhone PWAs using **Safari**, and then uses the standalone app. Tailscale is installed on the phone. Test pairing within the installed PWA; do not assume browser and standalone cookie stores are shared. No physical-device validation yet.
 - User has authorized implementation and coordinated subworkers. Use bounded, sequential tasks and independently verify their results.
 - Coordinator/ChatGPT owns visual direction. The user likes the rehearsal-based onboarding, side Inspector, and phone preview; the latest refinement pass still awaits feedback. Earlier dashboard, colored-console, and inline-guide directions were rejected.
 - Product terminology: a **page** is the named layout; future **panels** are alternative groups within a page, switched by vertical swipe with an accessible non-gesture alternative. Panels are planned, not implemented.
@@ -203,7 +203,8 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 
 - [x] Choose MIT, KDE Wayland/Linux first, Tailscale-first prototype, and initial action targets (OBS scenes, microphone mute, media play/pause, volume).
 - [x] Choose project name: **zDeck**.
-- [ ] Choose phone/browser targets; confirm the provisional default-system-input microphone scope.
+- [x] Choose phone/browser test targets: Safari-installed iPhone PWA first, Brave browser use, and Android. Tailscale is installed on the phone.
+- [ ] Confirm the provisional default-system-input microphone scope.
 - [ ] Prove trusted HTTPS/WSS + Home Screen installation on a real target phone over Tailscale.
 - [ ] Select and prove a LAN-only trusted HTTPS path, including reconnect after desktop restart and certificate lifecycle notes.
 - [ ] If a Tailscale-only prototype is approved, label it explicitly; retain LAN proof as a release gate.
@@ -229,7 +230,8 @@ The user has approved starting implementation. Begin M1's reversible UI/scaffold
 ### M2 — Secure end-to-end controller
 
 - [x] Implement private loopback HTTP/WebSocket backend, session-only pairing/approval/revocation, request guards, and deduplicated saved-control commands. Coordinator verified 68 Rust tests including 24 real-loopback service tests; actual Tailscale proxy behavior remains unverified.
-- [ ] Wire desktop admin/QR/manual pairing and authenticated phone UI to the backend.
+- [x] Wire native desktop connection settings, session-only expiring pairing links, approval/denial/revocation; coordinator verified 64 frontend tests and the existing 202-check browser suite. QR presentation is deferred; links are the first pairing method. Native admin lifecycle browser coverage remains to be added.
+- [ ] Wire authenticated phone pairing/control UI, including link paste inside a Safari-installed PWA. Keep preview distinct and never assume browser/standalone cookies are shared.
 - [ ] Wire revisioned snapshots/live edits into the phone client; reconnect/resume with a full-state check.
 - [ ] Route desktop preview and phone commands through one action engine; implement the selected real action family.
 - [ ] Show honest pressed/pending/result/disconnect states; deduplicate commands and prevent offline replay.

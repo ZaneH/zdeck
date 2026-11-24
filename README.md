@@ -2,7 +2,7 @@
 
 > Project name: **zDeck**. Internal names `deck-editor` (npm), `deck` (Rust), and `com.deck.local` (Tauri app identifier) are retained so the display rename does not move existing app data. Storage/protocol identifiers are unchanged.
 
-zDeck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend, but no desktop admin or phone UI is wired to it yet, and it has not been exercised against a real tailnet or phone.
+zDeck is a local-first stream-deck-style editor and phone-preview foundation. The browser build is a local editor and same-origin phone preview. The Tauri desktop shell additionally connects to the local OBS Studio WebSocket server and can switch OBS program scenes, and on Linux it can mute the default system microphone, set the default output volume, and play/pause the default MPRIS player. It also contains a private phone-service backend and native Settings controls for explicit start/stop, expiring pairing links, approval/denial, and revocation. The authenticated phone client is still being connected; this has not been exercised against a real tailnet or phone.
 
 ## Design checkpoint
 
@@ -18,7 +18,7 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 - In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
 - Every toolbar tile press is local preview feedback only, except a native **Run scene** while OBS is connected. In the desktop Inspector, the explicit native **Toggle**/**Apply**/**Run** actions on the selected mic, media, or volume control are real. Phone preview stays local. No other connected, pending, confirmed, or success state is simulated.
-- Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” Phone pairing remains unavailable in the UI; onboarding and Settings state that explicitly.
+- Plain preview status text, with no decorative lights: “Local preview only. No desktop actions are sent.” Native Settings can manage pairing requests, but the authenticated phone client is not yet wired; onboarding still marks phone pairing as incomplete.
 - Versioned, validated `localStorage` persistence under `deck.local.v1` in the browser build, and validated atomic file persistence in the native desktop shell. The two are separate stores.
 - Phone preview route at `#/phone` using the same components and saved deck in the same origin. Desktop preview offers Landscape (default) and Portrait frames; real phone viewports follow their natural orientation. It is not a paired remote controller.
 - PWA manifest, locally generated 192/512 icons, and a production-only service worker generated from the build output with a content-versioned cache and a user-triggered update flow.
@@ -169,7 +169,7 @@ live hardware verification has been performed: the real volume, mute, and
 play/pause commands have not been run on a real PipeWire session, and a real
 MPRIS player has not been exercised.**
 
-### Private phone service backend (implemented, not wired to the UI)
+### Private phone service (desktop admin wired; phone client in progress)
 
 The Rust shell now contains the private phone-service backend described in
 `docs/protocol.md`. It is deliberately **not** started automatically and has no
@@ -380,7 +380,7 @@ action state.
 
 ## Honest limitations
 
-- The private phone-service backend exists and is tested over loopback, but no desktop admin or phone UI is wired to it yet. There is no shipped QR pairing, device-approval screen, Tailscale Serve setup, LAN HTTPS/WSS validation, or real-phone/network claim. The service is explicit-enable only and does not start automatically.
+- The private phone-service backend is tested over loopback, with native desktop start/stop, expiring links, and approval/revocation controls. The authenticated phone UI is still in progress. There is no shipped QR presentation, automatic Tailscale Serve setup, LAN HTTPS/WSS validation, or real-phone/network claim. The service is explicit-enable only and does not start automatically.
 - Native action execution is limited to OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS media play/pause from the desktop Inspector. Phone preview and toolbar tile presses remain local. Windows and macOS system actions are not implemented (typed `unsupported`).
 - The system adapter is tested with a fake process runner; it has not been run against a live PipeWire session or a real media player, so runtime behavior on this machine's actual audio setup is unverified. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.

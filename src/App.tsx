@@ -56,6 +56,7 @@ import { Inspector } from "./components/Inspector";
 import { ObsSettingsCard } from "./components/ObsSettingsCard";
 import { PageList } from "./components/PageList";
 import { PhoneDeck } from "./components/PhoneDeck";
+import { RemoteSettingsCard } from "./components/RemoteSettingsCard";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SetupGuide } from "./components/SetupGuide";
 
@@ -473,8 +474,10 @@ export default function App() {
         <main className="settings-view" id="main">
           <div className="settings-header">
             <h1>Settings</h1>
-            <p>Connections, appearance, and local storage.</p>
+            <p>Phone connection, OBS, appearance, and local storage.</p>
           </div>
+
+          <RemoteSettingsCard />
 
           <section className="settings-card">
             <h2>Appearance</h2>
@@ -561,8 +564,8 @@ export default function App() {
               not applied, failed, or unknown results.
             </p>
             <p>
-              The private connection service is implemented; pairing controls are not
-              wired to this interface yet.
+              Desktop Settings can manage the private connection and approve phones.
+              The authenticated phone interface is still being connected.
             </p>
           </details>
 

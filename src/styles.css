@@ -252,6 +252,12 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .settings-card h2 { font-size: 14px; font-weight: 550; }
 .settings-card .field { max-width: 420px; }
 .settings-card .muted { color: var(--text-faint); font-size: 11px; }
+.remote-invite { display: flex; flex-direction: column; gap: 8px; }
+.remote-devices { display: flex; flex-direction: column; gap: 8px; }
+.remote-devices h3 { color: var(--text-muted); font-size: 12px; font-weight: 550; }
+.remote-device-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.remote-device-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.remote-device-list li:last-child { border-bottom: 0; }
 .preview-scope { display: block; }
 .storage-details > summary, .preview-scope > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .storage-details > p, .preview-scope > p { margin-top: 12px; }
