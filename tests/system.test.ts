@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   systemFailureState,
   systemMediaPlayPause,
+  systemMediaPermissionStatus,
+  systemMediaPermissionRequest,
   systemMediaSnapshot,
   systemMicrophoneSnapshot,
   systemOutputSnapshot,
@@ -71,5 +73,7 @@ describe("native system bridge", () => {
     });
     await expect(systemMediaSnapshot()).rejects.toMatchObject({ kind: "unsupported" });
     await expect(systemMediaPlayPause()).rejects.toMatchObject({ kind: "unsupported" });
+    await expect(systemMediaPermissionStatus()).rejects.toMatchObject({ kind: "unsupported" });
+    await expect(systemMediaPermissionRequest()).rejects.toMatchObject({ kind: "unsupported" });
   });
 });

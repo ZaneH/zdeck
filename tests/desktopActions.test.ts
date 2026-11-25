@@ -74,11 +74,23 @@ describe("explicit desktop Live actions", () => {
     expect(h.actions.getSnapshot().pending).toBeNull();
     h.actions.enter(); expect(h.actions.isLive()).toBe(true);
   });
+  it("keeps Live ready after a sent media key without replay or a result check", async () => {
+    const h = harness(); h.actions.enter();
+    h.dispatch.mockImplementation(async (command) => ({ id: command.commandId, state: "unknown", code: "media_key_sent", message: "Media key sent." }));
+    await h.actions.press("ctl_play_pause");
+    expect(h.actions.isLive()).toBe(true);
+    expect(h.actions.getSnapshot().pending).toBeNull();
+    await h.actions.check();
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    await h.actions.press("ctl_play_pause");
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
+    expect(h.dispatch.mock.calls[1][0].commandId).not.toBe(h.dispatch.mock.calls[0][0].commandId);
+  });
   it("unknown replies and transport loss return Preview with a warning and no retry/check", async () => {
-    for (const rejected of [false, true]) {
+    for (const failure of ["unknown", "plugin_outcome_unknown", "transport"]) {
       const h = harness(); h.actions.enter();
-      if (rejected) h.dispatch.mockRejectedValueOnce(new Error("secret timeout"));
-      else h.dispatch.mockImplementationOnce(async (command) => ({ id: command.commandId, state: "unknown", message: "Inspect application before retrying." }));
+      if (failure === "transport") h.dispatch.mockRejectedValueOnce(new Error("secret timeout"));
+      else h.dispatch.mockImplementationOnce(async (command) => ({ id: command.commandId, state: "unknown", message: "Inspect application before retrying.", ...(failure === "plugin_outcome_unknown" ? { code: failure } : {}) }));
       await h.actions.press("ctl_mic");
       await h.actions.check(); await h.actions.press("ctl_mic");
       expect(h.dispatch).toHaveBeenCalledTimes(1);

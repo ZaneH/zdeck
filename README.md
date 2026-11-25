@@ -2,7 +2,7 @@
 
 > Project name: **zDeck**. Internal names `deck-editor` (npm), `deck` (Rust), and `com.deck.local` (Tauri app identifier) are retained so the display rename does not move existing app data. Storage/protocol identifiers are unchanged.
 
-zDeck is a free, MIT-licensed desktop control deck with a Tauri editor and an authenticated phone PWA. The standalone browser build remains a local editor and simulated phone preview. The native desktop app can switch OBS program scenes and, on Linux, mute the default system microphone, set default output volume, and play/pause the default MPRIS player. Approved phones run those saved controls through an explicitly enabled private HTTPS service. Pairing, live edits, actions, revocation, and offline safety are tested against the actual Rust service with fake adapters and isolated Chrome; the user also reports a successful phone connection after manually configuring Tailscale Serve. Full physical-device installation and action validation remain open.
+zDeck is a free, MIT-licensed desktop control deck with a Tauri editor and an authenticated phone PWA. The standalone browser build remains a local editor and simulated phone preview. The native desktop app can switch OBS program scenes and control the default system microphone, output volume, and system play/pause on macOS, Windows, and Linux. macOS/Windows media keys report unknown playback outcomes rather than claiming confirmation. Approved phones run those saved controls through an explicitly enabled private HTTPS service. Pairing, live edits, actions, revocation, and offline safety are tested against the actual Rust service with fake adapters and isolated Chrome; the user also reports a successful phone connection after manually configuring Tailscale Serve. Full physical-device installation and action validation remain open.
 
 ## Design checkpoint
 
@@ -15,7 +15,7 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 - Compact dark-first desktop editor with an optional light theme and five accent tokens.
 - Page switcher and page manager, editable control canvas, searchable on-demand action picker, and a selected-control inspector beside the deck (beneath it on narrow screens).
 - OBS scene, microphone mute, media play/pause, and volume controls. The microphone scope is the **default system input**, explicitly labelled as distinct from an OBS input. The dial is deferred.
-- In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On Linux, the Inspector also runs real microphone mute, output-volume, and media play/pause actions against session services.
+- In the native desktop shell, an OBS scene control can switch the real OBS program scene after you connect OBS in Settings. On macOS, Windows, and Linux, the Inspector also runs real microphone mute, output-volume, and system play/pause actions (see platform requirements below).
 - Add, select, edit, reorder, and remove controls; add, switch, rename, reorder, and remove pages.
 - The native editor defaults to **Preview** each session. Explicit **Live** mode runs saved tile controls on this computer without a phone or phone service; it requires a loaded, valid, synchronized saved deck. Edits (including page selection) or leaving the editor return to Preview. Live slider targets commit only on release; in-flight/pending actions block more presses, and unknown outcomes are never automatically retried. Native Inspector **Run scene**/**Toggle**/**Apply**/**Run** actions remain explicitly real. Browser and phone previews are always simulated.
 - Plain mode and outcome text distinguishes simulated preview from **Live — presses run on this computer**. The authenticated phone surface shows its own connection and action outcomes; native Settings manage explicit start/stop, expiring links, approval/denial, and revocation.
@@ -29,7 +29,7 @@ This replaces the rejected inline-guide pass and is ready for feedback, not an a
 
 - Node.js 22 or newer and npm 10 or newer. This machine currently has Node `v22.23.3` and npm `10.9.9`.
 - For the Tauri desktop shell: use the repository-local Nix shell (`flake.nix`), which provides Rust/Cargo, rustfmt, Node, pkg-config, and the WebKitGTK 4.1/GTK3/libsoup3/openssl/XZ native libraries. See [Native development shell](#native-development-shell).
-- For the native system actions (Linux only): the `wpctl` tool from WirePlumber and the `playerctl` tool. The Nix shell below already provides both. On a non-Nix system, install `wireplumber` and `playerctl` from your distribution. A session PipeWire/WirePlumber service and an MPRIS-compatible player are required at runtime.
+- For native system actions on macOS/Windows: native OS APIs, with no external audio/media tool or Spotify plugin required. macOS system media keys require granting **zDeck** Accessibility permission in System Settings → Privacy & Security. Windows media keys require an interactive desktop session; elevated apps can reject injected input. For Linux: the `wpctl` tool from WirePlumber and the `playerctl` tool. The Nix shell below already provides both. On a non-Nix system, install `wireplumber` and `playerctl` from your distribution. A session PipeWire/WirePlumber service and an MPRIS-compatible player are required at runtime.
 
 ## Web development
 
@@ -141,10 +141,58 @@ This is covered by Rust integration tests that run a small fake OBS5 peer on an
 owned ephemeral loopback port (`cargo test`). **No real OBS Studio instance or
 hardware has been tested yet.**
 
-### System microphone, output volume, and media (Linux only)
+### System microphone, output volume, and media
 
-The desktop shell can also run three real system actions on Linux. They use
-session services, not synthetic key input, so they work on KDE Wayland:
+The same built-in adapter serves the native desktop Inspector, Live tiles, and
+approved phones. Audio setters validate their targets and read back the same
+native device before reporting confirmation. Raw native errors/tool output are
+never forwarded, and no transport can supply shell commands or executables.
+
+| Platform | Microphone / output | System play/pause |
+| --- | --- | --- |
+| macOS | CoreAudio default input/output; native input mute when available, reversible level fallback below | Public AppKit/CoreGraphics media-key down/up; requires Accessibility permission |
+| Windows | Core Audio default **eConsole** capture/render endpoint mute and scalar output volume | `SendInput` system play/pause key down/up |
+| Linux | WirePlumber/PipeWire via fixed `wpctl` arguments | Default MPRIS player via fixed `playerctl` arguments |
+
+**Media-key limitations (macOS/Windows):** the OS/player chooses the recipient,
+just as for a keyboard media key. There is no public global playback readback
+from these APIs. The snapshot is `unknown`; a successfully posted key returns
+**unknown** with a `media_key_sent` code, not confirmed or not-applied. This
+expected limitation produces no warning; the control stays ready for your next press.
+With no active player, the OS may ignore the key or launch its default media app.
+No Spotify plugin, AppleEvents automation, or private MediaRemote APIs are used.
+Actual timeouts and uncertain failures still show a warning and require checking
+state before retrying. Nothing is automatically replayed.
+
+**macOS microphone fallback:** when every input channel has a writable native
+mute control, zDeck uses it without changing gain. Otherwise it requires a
+writable scalar level on the main input or every channel. It saves the exact
+channel levels by device UID in the `app.zdeck.system-controls` preferences
+suite, synchronizes them to disk **before** setting zero, and restores them on
+explicit unmute, including after an app restart. A lock prevents two zDeck
+instances from racing the record. A partial write retains the original record;
+restoration only clears it after matching readback. Nonzero external level
+changes take precedence. A changed channel layout, missing/corrupt record,
+read-only device, or storage error fails safely rather than guessing an unmute
+level. If necessary restore input levels in macOS Sound settings. Do not delete
+this preferences suite while a fallback-muted device needs its saved levels.
+Switching the default input does not unmute the previous device: switch back to
+that device and explicitly unmute it to restore its levels.
+This is **software input-level mute, not a hardware privacy switch**: device
+minimum gain and applications bypassing system input controls can limit its
+silencing effect. External changes to zero cannot be distinguished from zDeck's
+zero, so explicit unmute restores the saved levels. Output fallback sets all
+writable channels to the requested level when no main control is available.
+
+**Deadlines:** Linux child processes are killed/reaped on timeout. Native OS
+calls run on a blocking worker with a four-second response deadline. An OS call
+already in progress cannot be cancelled; its result is unknown on timeout, and
+it retains the native gate until it finishes. Concurrent requests wait within
+their own deadline; an expired wait sends no new request. Queued work checks
+expiry before accessing OS controls. No uncertain action is replayed. A native
+call that never returns blocks subsequent native system controls until app restart.
+
+Linux details (unchanged; session services also work on KDE Wayland):
 
 | Control | Read | Apply | Scope |
 | --- | --- | --- | --- |
@@ -154,7 +202,7 @@ session services, not synthetic key input, so they work on KDE Wayland:
 
 Behavior and safety:
 
-- Each action runs a fixed executable with a fixed argument array through Tokio's
+- Each Linux action runs a fixed executable with a fixed argument array through Tokio's
   process API. There is no shell, no user-supplied executable, and no arbitrary
   command text. Every command has a bounded timeout and a timed-out child is
   killed and reaped. Raw stderr and process paths are never shown.
@@ -166,23 +214,28 @@ Behavior and safety:
   overdrive. If the OS itself reports a boost above 100%, zDeck displays it
   honestly rather than clamping the number.
 - Microphone mute uses an explicit target derived from the observed state, not a
-  blind toggle. Media play/pause reads the current status first, so a missing
+  blind toggle. Linux media play/pause reads current status first, so a missing
   player fails without running `play-pause`.
 - The three families are independent: a missing media player or missing tool does
   not disable working audio controls.
-- **Linux only.** On other platforms the commands compile and return a typed
-  `unsupported` error instead of breaking the build. No Windows or macOS
-  implementation exists yet.
 
 MPRIS player selection policy: zDeck does not pick or persist a specific player.
 It uses playerctl's default selection (no `--player` flag), which chooses among
 the available MPRIS players. Selecting a specific player is future work.
 
-This is covered by 20 Rust adapter tests using an owned fake runner, so no real
-`wpctl` or `playerctl` process runs and no live machine state is touched. **No
-live hardware verification has been performed: the real volume, mute, and
-play/pause commands have not been run on a real PipeWire session, and a real
-MPRIS player has not been exercised.**
+Rust adapter/dispatcher tests use owned fake runners, so no real `wpctl` or
+`playerctl` action runs. Native tests cover ABI validation, sanitized errors,
+unknown media state, failed readback, and deadline gating without changing
+live audio or playback. `bash scripts/test-system-macos.sh` exercises the actual
+macOS helper against fake CoreAudio devices and isolated restore preferences.
+The cross-platform CI workflow compiles/tests on macOS, Windows, and Linux;
+adding that workflow is not evidence of a successful CI run.
+
+**Verification gap:** macOS compilation and automated fake-device tests can run
+locally; Windows/Linux compile jobs and physical-device microphone, volume,
+permissions, and playback checks still require their respective hosts. No
+agent-triggered live audio or playback mutation was performed. See
+`docs/system-controls-verification.md` for the manual check/restore procedure.
 
 ### External plugin sessions
 
@@ -455,7 +508,7 @@ action state.
 ## Honest limitations
 
 - The authenticated phone UI and private service work in isolated HTTPS/Chrome tests with fake adapters. The user reports a successful phone connection after manually setting up Tailscale Serve, but physical iPhone/Android installation, native desktop admin lifecycle, and packaged asset resolution remain unverified. Both Tailscale and Local HTTPS modes are explicit-enable only; neither configures a proxy or certificate. Real LAN/certificate/phone setup remains unverified.
-- Built-in execution covers OBS program-scene switching and, on Linux only, default system microphone mute, default output volume, and MPRIS play/pause, from explicit native Live tiles, the native Inspector, or an approved phone. Native tiles default to Preview; browser and phone previews remain simulated. Standalone desktop Live execution does not require starting the phone service. Windows/macOS system actions are not implemented (typed `unsupported`).
+- Built-in execution covers OBS program-scene switching plus default system microphone mute, default output volume, and system play/pause on macOS, Windows, and Linux, from explicit native Live tiles, the native Inspector, or an approved phone. Native tiles default to Preview; browser and phone previews remain simulated. Standalone desktop Live execution does not require starting the phone service. macOS/Windows media keys cannot confirm playback state; device capability, permission, and runtime verification limits are documented above.
 - The system adapter is tested with a fake process runner. The user reports that media play/pause did not control the intended player; read-only diagnosis found Gwenview listed first by `playerctl`, ahead of Brave and Strawberry. The default MPRIS target is not a Spotify-specific binding. No agent-triggered live playback/audio actions were performed; full runtime action validation remains open. OBS credentials are session-only; OS keychain persistence is not implemented.
 - No real OBS Studio instance has been exercised in this repository; the Rust adapter is only tested against a fake OBS5 peer.
 - Both browser suites run locally against isolated headless Chrome (`npm run smoke`, `npm run smoke:remote`); no physical-phone, pixel-regression, or real-network claim is made.

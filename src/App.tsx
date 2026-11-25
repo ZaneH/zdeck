@@ -575,10 +575,10 @@ export default function App() {
               Desktop tiles default to Preview. Explicit Live mode runs saved controls on this computer without a phone or phone service.
               Editing or leaving the editor returns to Preview. The phone preview is always simulated. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
-              connected, and on Linux the microphone mute, output-volume, and
-              media play/pause actions run against system session services. Every
-              native action reads its state back and reports pending, confirmed,
-              not applied, failed, or unknown results.
+              connected. Microphone mute, output volume, and system play/pause
+              work on macOS, Windows, and Linux. Audio actions read their state
+              back; macOS and Windows media keys report unknown outcomes because
+              sending a key cannot confirm playback. No uncertain action is retried automatically.
             </p>
             <p>
               Desktop Settings can manage the private connection and approve phones.
@@ -652,8 +652,8 @@ export default function App() {
             </div>
 
             <div className="workspace-footer">
-              {desktop.inflight || desktop.result || desktop.error ? <p className={`native-feedback is-${desktop.result?.state ?? (desktop.error ? "failed" : "pending")}`}
-                role={desktop.result?.state === "unknown" ? "alert" : "status"} aria-live={desktop.result?.state === "unknown" ? "assertive" : "polite"}>
+              {desktop.inflight || (desktop.result && desktop.result.code !== "media_key_sent") || desktop.error ? <p className={`native-feedback is-${desktop.inflight ? "pending" : desktop.result?.state ?? (desktop.error ? "failed" : "pending")}`}
+                role={!desktop.inflight && desktop.result?.state === "unknown" ? "alert" : "status"} aria-live={!desktop.inflight && desktop.result?.state === "unknown" ? "assertive" : "polite"}>
                 {desktop.inflight ? "Sending saved control to this computer…" : `Last desktop result: ${desktop.error ?? desktop.result?.message}`}
               </p> : <p className="preview-feedback" title={desktop.live ? undefined : obsPill.title} role="status" aria-live="polite">
                 {desktop.live ? "Live is ready. Only saved control IDs are sent; nothing runs until you press." : previewNotice ?? obsPill.text}

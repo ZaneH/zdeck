@@ -148,6 +148,7 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .move-group { display: flex; gap: 2px; }
 .inspector-actions > .button.danger { margin-left: auto; }
 .native-control { display: flex; flex-direction: column; gap: 10px; }
+.media-permission-setup { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px 0; text-align: center; }
 .native-actions, .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .native-state, .native-feedback, .obs-switch, .obs-status { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .native-feedback.is-confirmed, .obs-switch.is-confirmed { color: var(--accent); }

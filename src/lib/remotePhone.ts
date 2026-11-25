@@ -46,6 +46,7 @@ export type CommandState = (typeof COMMAND_STATES)[number];
 export interface CommandResultView {
   state: CommandState;
   message: string;
+  code?: "media_key_sent";
 }
 
 /** One completed outcome, plus the saved control label when one is known. */
@@ -245,6 +246,10 @@ export function parseCommandResult(payload: unknown, expectedId?: string): Comma
   if (typeof payload.state !== "string") return null;
   if (!(COMMAND_STATES as readonly string[]).includes(payload.state)) return null;
   const state = payload.state as CommandState;
+  if (payload.code === "media_key_sent") {
+    if (state !== "unknown") return null;
+    return { state, code: "media_key_sent", message: "Media key sent. Playback state is unavailable." };
+  }
   return { state, message: sanitizeMessage(payload.message) ?? defaultMessage(state) };
 }
 
@@ -937,6 +942,10 @@ export class RemotePhoneConnection {
         state: "unknown", message,
       } });
       this.flagUnknown(controlId, message);
+      return;
+    }
+    if (parsed.code === "media_key_sent") {
+      this.update({ busyControlId: null, result: null, resultKind: "none" });
       return;
     }
     this.update({ busyControlId: null, result: parsed, resultKind: parsed.state });

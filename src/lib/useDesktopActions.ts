@@ -66,7 +66,7 @@ export class DesktopActions {
     try {
       const result = await this.dispatch(command);
       this.update({ result, pending: result.state === "pending" ? command : null,
-        ...(result.state === "unknown" ? { live: false } : {}) });
+        ...(result.state === "unknown" && result.code !== "media_key_sent" ? { live: false } : {}) });
     } catch (cause) {
       const error = toDesktopActionError(cause);
       this.update({ live: false, pending: null, result: error.outcome === "unknown"

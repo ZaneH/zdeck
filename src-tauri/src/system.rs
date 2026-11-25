@@ -1,23 +1,10 @@
 //! Typed system audio and media adapter for the native desktop shell.
 //!
-//! Every action runs a fixed executable with a fixed argument array through
-//! Tokio's process API. There is no shell, no user-supplied program, and no
-//! arbitrary command text: the only inputs are a bounded set of actions plus a
-//! validated volume. Output is parsed into typed state; raw stderr, process
-//! paths, and tool text are never forwarded to the frontend.
-//!
-//! This uses session services rather than synthetic key input, so it works on
-//! KDE Wayland:
-//!
-//! * output volume: `wpctl get-volume` / `wpctl set-volume @DEFAULT_AUDIO_SINK@`
-//! * microphone mute: `wpctl get-volume` / `wpctl set-mute @DEFAULT_AUDIO_SOURCE@`
-//! * media play/pause: `playerctl status` / `playerctl play-pause`
-//!
-//! MPRIS player selection follows playerctl's default (no `--player` flag)
-//! rather than Deck pinning and persisting a specific player.
-//!
-//! The adapter is reusable by the future remote action engine: each method is a
-//! typed read or an explicit, confirmed action.
+//! Linux uses fixed wpctl/playerctl arguments (including on KDE Wayland).
+//! macOS and Windows use a fixed native ABI, never Linux commands or a shell.
+//! Both desktop and phone share validation, sanitized errors and readback.
+//! Native media keys have no playback acknowledgement: sending one returns an
+//! unknown outcome, never a fabricated confirmed state.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -27,6 +14,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod native;
+pub mod media_permission;
 
 /// PipeWire/WirePlumber identifiers for the default devices.
 pub const DEFAULT_SINK: &str = "@DEFAULT_AUDIO_SINK@";
@@ -45,6 +36,7 @@ pub enum SystemError {
     InvalidInput { message: String },
     Timeout { message: String },
     OutcomeUnknown { message: String },
+    MediaKeySent { message: String },
     ToolMissing { message: String },
     NoDevice { message: String },
     NoPlayer { message: String },
@@ -72,6 +64,7 @@ impl SystemError {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn tool_missing(message: impl Into<String>) -> Self {
         Self::ToolMissing {
             message: message.into(),
@@ -90,8 +83,6 @@ impl SystemError {
         }
     }
 
-    // Only constructed by the Linux process runner.
-    #[allow(dead_code)]
     fn command_failed(message: impl Into<String>) -> Self {
         Self::CommandFailed {
             message: message.into(),
@@ -104,7 +95,7 @@ impl SystemError {
         }
     }
 
-    // Only constructed by the non-Linux fallback runner.
+    // The Linux process runner is not the backend on other platforms.
     #[allow(dead_code)]
     fn unsupported(message: impl Into<String>) -> Self {
         Self::Unsupported {
@@ -117,6 +108,7 @@ impl SystemError {
             Self::InvalidInput { message }
             | Self::Timeout { message }
             | Self::OutcomeUnknown { message }
+            | Self::MediaKeySent { message }
             | Self::ToolMissing { message }
             | Self::NoDevice { message }
             | Self::NoPlayer { message }
@@ -199,7 +191,7 @@ impl CommandRunner for ProcessRunner {
             {
                 let _ = spec;
                 Err(SystemError::unsupported(
-                    "System media and volume controls are supported on Linux only.",
+                    "The process backend is only used on Linux; this platform requires native system controls.",
                 ))
             }
 
@@ -268,6 +260,8 @@ pub enum MediaStatus {
     Playing,
     Paused,
     Stopped,
+    /// Public media-key APIs do not expose a global playback snapshot.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -310,6 +304,8 @@ pub struct MediaApplyResult {
 pub struct SystemState {
     runner: Arc<dyn CommandRunner>,
     timeouts: Timeouts,
+    // Injected runners keep exercising the Linux process protocol on every OS.
+    native: bool,
 }
 
 impl Default for SystemState {
@@ -317,6 +313,7 @@ impl Default for SystemState {
         Self {
             runner: Arc::new(ProcessRunner),
             timeouts: Timeouts::default(),
+            native: cfg!(any(target_os = "macos", target_os = "windows")),
         }
     }
 }
@@ -330,11 +327,16 @@ impl SystemState {
         Self {
             runner,
             timeouts: Timeouts::default(),
+            native: false,
         }
     }
 
     pub fn with_runner_and_timeouts(runner: Arc<dyn CommandRunner>, timeouts: Timeouts) -> Self {
-        Self { runner, timeouts }
+        Self {
+            runner,
+            timeouts,
+            native: false,
+        }
     }
 
     /// Run one fixed command under the configured timeout. A timed-out child is
@@ -350,6 +352,16 @@ impl SystemState {
     }
 
     pub async fn output_snapshot(&self) -> Result<OutputSnapshot, SystemError> {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if self.native {
+            let (volume_percent, muted) =
+                native::run(native::Operation::ReadOutput, 0, self.timeouts.command).await?;
+            return Ok(OutputSnapshot {
+                volume_percent,
+                muted,
+                observed_at_ms: now_ms(),
+            });
+        }
         let output = self
             .exec(CommandSpec::new(WPCTL, &["get-volume", DEFAULT_SINK]))
             .await?;
@@ -380,6 +392,23 @@ impl SystemState {
             ));
         }
         let requested = volume.round() as u32;
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if self.native {
+            let (volume_percent, muted) = native::run(
+                native::Operation::SetOutput,
+                requested as i32,
+                self.timeouts.command,
+            ).await?;
+            return Ok(VolumeApplyResult {
+                requested,
+                confirmed: (volume_percent - f64::from(requested)).abs() < 0.5,
+                snapshot: OutputSnapshot {
+                    volume_percent,
+                    muted,
+                    observed_at_ms: now_ms(),
+                },
+            });
+        }
         let percent = format!("{requested}%");
         let output = self
             .exec(CommandSpec::new(
@@ -406,6 +435,15 @@ impl SystemState {
     }
 
     pub async fn microphone_snapshot(&self) -> Result<MicrophoneSnapshot, SystemError> {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if self.native {
+            let (_, muted) =
+                native::run(native::Operation::ReadMic, 0, self.timeouts.command).await?;
+            return Ok(MicrophoneSnapshot {
+                muted,
+                observed_at_ms: now_ms(),
+            });
+        }
         let output = self
             .exec(CommandSpec::new(WPCTL, &["get-volume", DEFAULT_SOURCE]))
             .await?;
@@ -427,6 +465,22 @@ impl SystemState {
         &self,
         muted: bool,
     ) -> Result<MicrophoneApplyResult, SystemError> {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if self.native {
+            let (_, observed) = native::run(
+                native::Operation::SetMic,
+                i32::from(muted),
+                self.timeouts.command,
+            ).await?;
+            return Ok(MicrophoneApplyResult {
+                requested: muted,
+                confirmed: observed == muted,
+                snapshot: MicrophoneSnapshot {
+                    muted: observed,
+                    observed_at_ms: now_ms(),
+                },
+            });
+        }
         let flag = if muted { "1" } else { "0" };
         let output = self
             .exec(CommandSpec::new(WPCTL, &["set-mute", DEFAULT_SOURCE, flag]))
@@ -450,6 +504,12 @@ impl SystemState {
     }
 
     pub async fn media_snapshot(&self) -> Result<MediaSnapshot, SystemError> {
+        if self.native {
+            return Ok(MediaSnapshot {
+                status: MediaStatus::Unknown,
+                observed_at_ms: now_ms(),
+            });
+        }
         let output = self.exec(CommandSpec::new(PLAYERCTL, &["status"])).await?;
         if !output.success {
             return Err(SystemError::no_player("No media player is available."));
@@ -461,15 +521,21 @@ impl SystemState {
         })
     }
 
-    /// Play or pause the default MPRIS player and confirm the new state.
-    ///
-    /// The current state is read first so a missing player fails without running
-    /// `play-pause`, and the expected result is checked against a fresh read.
+    /// Linux reads MPRIS state before/after. Native media keys cannot confirm
+    /// playback, so a fully sent key returns MediaKeySent and is never replayed.
     pub async fn media_play_pause(&self) -> Result<MediaApplyResult, SystemError> {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if self.native {
+            native::run(native::Operation::PlayPause, 0, self.timeouts.command).await?;
+            return Err(SystemError::outcome_unknown());
+        }
         let before = self.media_snapshot().await?;
         let requested = match before.status {
             MediaStatus::Playing => MediaStatus::Paused,
             MediaStatus::Paused | MediaStatus::Stopped => MediaStatus::Playing,
+            MediaStatus::Unknown => {
+                return Err(SystemError::unexpected_output("Media state is unavailable."));
+            }
         };
 
         let output = self
