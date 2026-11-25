@@ -3,6 +3,7 @@ import { cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, r
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const scriptUrl = new URL("../scripts/package-spotify.mjs", import.meta.url).href;
 const { packageSpotify } = await import(scriptUrl) as { packageSpotify: (directory: string) => Promise<string> };
@@ -55,7 +56,7 @@ describe("self-contained Spotify folder packaging", () => {
     const resolution = spawnSync(process.execPath, ["--input-type=module", "-e", "console.log(import.meta.resolve('@zdeck/plugin-sdk'))"],
       { cwd: installed, encoding: "utf8", timeout: 5000 });
     expect(resolution.status, resolution.stderr).toBe(0);
-    expect(new URL(resolution.stdout.trim()).pathname).toBe(join(installed, "node_modules/@zdeck/plugin-sdk/index.js"));
+    expect(fileURLToPath(resolution.stdout.trim())).toBe(join(installed, "node_modules/@zdeck/plugin-sdk/index.js"));
   });
 
   it("reproduces an installed source-only folder failure and fixes the isolated copy only with the complete artifact, without PATH or global SDKs", async () => {
@@ -105,7 +106,7 @@ describe("self-contained Spotify folder packaging", () => {
       await mkdir(dirname(join(sdk, name)), { recursive: true });
       await cp(new URL(`../packages/plugin-sdk/${name}`, import.meta.url), join(sdk, name));
     }
-    expect(await readFile(join(plugin, ".npmrc"), "utf8")).toBe("install-links=true\n");
+    expect((await readFile(join(plugin, ".npmrc"), "utf8")).replace(/\r\n/g, "\n")).toBe("install-links=true\n");
     const metadata = JSON.parse(await readFile(join(plugin, "package.json"), "utf8"));
     expect(metadata.dependencies).toEqual({ "@zdeck/plugin-sdk": "0.1.0" });
     const sourceLock = JSON.parse(await readFile(new URL("../plugins/spotify/package-lock.json", import.meta.url), "utf8"));
@@ -118,11 +119,15 @@ describe("self-contained Spotify folder packaging", () => {
     // Only this temporary fixture substitutes the SDK source to keep tests offline.
     metadata.dependencies["@zdeck/plugin-sdk"] = "file:../../packages/plugin-sdk";
     await writeFile(join(plugin, "package.json"), JSON.stringify(metadata));
-    const install = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", [
-      "install", "--prefix", plugin, "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
+    // Windows .cmd shims cannot be spawned without a shell; run npm's CLI with Node instead.
+    const npmCli = process.env.npm_execpath ?? (process.platform === "win32"
+      ? join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js") : undefined);
+    const install = spawnSync(npmCli ? process.execPath : "npm", [
+      ...(npmCli ? [npmCli] : []), "install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
       "--cache", join(temp, "empty-cache"), "--registry", "http://127.0.0.1:1",
       "--userconfig", join(temp, "empty-user.npmrc"), "--globalconfig", join(temp, "empty-global.npmrc"),
-    ], { cwd: temp, encoding: "utf8", timeout: 30000, maxBuffer: 65536 });
+    ], { cwd: plugin, encoding: "utf8", timeout: 30000, maxBuffer: 65536 });
+    expect(install.error, install.error?.stack).toBeUndefined();
     expect(install.status, install.stderr).toBe(0);
     const lock = JSON.parse(await readFile(join(plugin, "package-lock.json"), "utf8"));
     expect(Object.keys(lock.packages).sort()).toEqual(["", "node_modules/@zdeck/plugin-sdk"]);

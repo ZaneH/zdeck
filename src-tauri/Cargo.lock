@@ -628,13 +628,13 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cc",
+ "embed-resource",
  "futures-util",
  "getrandom 0.3.4",
  "gtk",
  "http",
  "hyper",
  "hyper-util",
- "obws",
  "serde",
  "serde_json",
  "sha1_smol",
@@ -644,6 +644,7 @@ dependencies = [
  "tokio",
  "tokio-websockets",
  "url",
+ "zdeck-obs",
 ]
 
 [[package]]
@@ -4739,6 +4740,20 @@ dependencies = [
  "quote",
  "syn 3.0.10",
  "synstructure",
+]
+
+[[package]]
+name = "zdeck-obs"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "futures-util",
+ "obws",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-websockets",
 ]
 
 [[package]]

@@ -166,7 +166,7 @@ describe("landing data and mini deck", () => {
       moduleResolution: ts.ModuleResolutionKind.Bundler };
     const host = ts.createCompilerHost(options);
     const getSourceFile = host.getSourceFile.bind(host);
-    host.getSourceFile = (file, language, onError, createNew) => file === filename
+    host.getSourceFile = (file, language, onError, createNew) => resolve(file) === filename
       ? ts.createSourceFile(file, source, options.target!, true)
       : getSourceFile(file, language, onError, createNew);
     const diagnostics = ts.getPreEmitDiagnostics(ts.createProgram([filename], options, host));
