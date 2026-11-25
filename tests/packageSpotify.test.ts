@@ -3,9 +3,9 @@ import { cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, r
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { packageSpotify } from "../scripts/package-spotify.mjs";
 
-const scriptUrl = new URL("../scripts/package-spotify.mjs", import.meta.url).href;
-const { packageSpotify } = await import(scriptUrl) as { packageSpotify: (directory: string) => Promise<string> };
 const fixtures: string[] = [];
 async function fixture() {
   const temp = await realpath(await mkdtemp(join(tmpdir(), "zdeck-spotify-package-")));
@@ -55,7 +55,7 @@ describe("self-contained Spotify folder packaging", () => {
     const resolution = spawnSync(process.execPath, ["--input-type=module", "-e", "console.log(import.meta.resolve('@zdeck/plugin-sdk'))"],
       { cwd: installed, encoding: "utf8", timeout: 5000 });
     expect(resolution.status, resolution.stderr).toBe(0);
-    expect(new URL(resolution.stdout.trim()).pathname).toBe(join(installed, "node_modules/@zdeck/plugin-sdk/index.js"));
+    expect(fileURLToPath(resolution.stdout.trim())).toBe(join(installed, "node_modules/@zdeck/plugin-sdk/index.js"));
   });
 
   it("reproduces an installed source-only folder failure and fixes the isolated copy only with the complete artifact, without PATH or global SDKs", async () => {
