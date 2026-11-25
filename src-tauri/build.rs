@@ -13,6 +13,12 @@ fn main() {
             }
         }
         "windows" => {
+            println!("cargo:rerun-if-changed=windows-app.rc");
+            println!("cargo:rerun-if-changed=windows-app.manifest");
+            // Tauri's bin-only manifest misses the library and integration test harnesses.
+            embed_resource::compile_for_everything("windows-app.rc", embed_resource::NONE)
+                .manifest_required()
+                .expect("failed to embed the Windows Common Controls v6 manifest");
             println!("cargo:rerun-if-changed=native/system_windows.cpp");
             println!("cargo:rerun-if-changed=native/system.h");
             cc::Build::new()
@@ -25,5 +31,11 @@ fn main() {
         }
         _ => (),
     }
-    tauri_build::build()
+    if target == "windows" {
+        let attributes = tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+        tauri_build::try_build(attributes).expect("failed to run tauri-build");
+    } else {
+        tauri_build::build();
+    }
 }

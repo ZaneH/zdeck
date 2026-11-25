@@ -628,6 +628,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cc",
+ "embed-resource",
  "futures-util",
  "getrandom 0.3.4",
  "gtk",
