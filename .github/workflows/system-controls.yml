@@ -19,6 +19,8 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - name: Standalone schema tests (no desktop dependencies)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p zdeck-schema
       - name: Standalone OBS fake-peer tests (no desktop dependencies)
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p zdeck-obs
       - name: Linux native build prerequisites
