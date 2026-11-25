@@ -86,7 +86,7 @@ impl std::error::Error for PluginError {}
 pub struct Manifest {
     pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icons: Option<Vec<crate::icons::PluginIcon>>,
+    pub icons: Option<Vec<zdeck_schema::icons::PluginIcon>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

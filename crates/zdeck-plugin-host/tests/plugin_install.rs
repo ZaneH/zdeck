@@ -3,7 +3,7 @@
 //! source/artifact snapshot; never state, execute or Automation.
 #![cfg(unix)]
 use std::{fs, os::unix::fs::{symlink, PermissionsExt}, path::PathBuf, sync::atomic::{AtomicU64, Ordering}, time::{Duration, Instant}};
-use deck_lib::{plugin::{ConnectionStatus, ErrorKind, Outcome, PluginRegistry}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
+use zdeck_plugin_host::{plugin::{ConnectionStatus, ErrorKind, Outcome, PluginRegistry}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
 use serde_json::{json, Value};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -37,10 +37,10 @@ impl Fixture {
     fn spotify_source_snapshot(&self) -> PathBuf {
         let folder = self.root.join("spotify"); fs::create_dir_all(&folder).unwrap();
         let files: [(&str, &[u8]); 4] = [
-            ("manifest.json", include_bytes!("../../plugins/spotify/manifest.json")),
-            ("main.js", include_bytes!("../../plugins/spotify/main.js")),
-            ("spotify.js", include_bytes!("../../plugins/spotify/spotify.js")),
-            ("package.json", include_bytes!("../../plugins/spotify/package.json")),
+            ("manifest.json", include_bytes!("../../../plugins/spotify/manifest.json")),
+            ("main.js", include_bytes!("../../../plugins/spotify/main.js")),
+            ("spotify.js", include_bytes!("../../../plugins/spotify/spotify.js")),
+            ("package.json", include_bytes!("../../../plugins/spotify/package.json")),
         ];
         for (name, bytes) in files { fs::write(folder.join(name), bytes).unwrap(); }
         folder
@@ -48,10 +48,10 @@ impl Fixture {
     fn bundle_sdk(&self, folder: &std::path::Path) {
         let sdk = folder.join("node_modules/@zdeck/plugin-sdk"); fs::create_dir_all(&sdk).unwrap();
         let files: [(&str, &[u8]); 4] = [
-            ("index.js", include_bytes!("../../packages/plugin-sdk/index.js")),
-            ("index.d.ts", include_bytes!("../../packages/plugin-sdk/index.d.ts")),
-            ("package.json", include_bytes!("../../packages/plugin-sdk/package.json")),
-            ("LICENSE", include_bytes!("../../packages/plugin-sdk/LICENSE")),
+            ("index.js", include_bytes!("../../../packages/plugin-sdk/index.js")),
+            ("index.d.ts", include_bytes!("../../../packages/plugin-sdk/index.d.ts")),
+            ("package.json", include_bytes!("../../../packages/plugin-sdk/package.json")),
+            ("LICENSE", include_bytes!("../../../packages/plugin-sdk/LICENSE")),
         ];
         for (name, bytes) in files { fs::write(sdk.join(name), bytes).unwrap(); }
     }
@@ -283,7 +283,7 @@ async fn describe_must_match_entire_disk_contract_and_mismatch_stops_session() {
 #[tokio::test]
 async fn copied_source_snapshot_is_invalid_before_execution_until_bundled_sdk_exists() {
     let f=Fixture::new();let folder=f.spotify_source_snapshot();
-    let actual: Value=serde_json::from_slice(include_bytes!("../../plugins/spotify/manifest.json")).unwrap();
+    let actual: Value=serde_json::from_slice(include_bytes!("../../../plugins/spotify/manifest.json")).unwrap();
     let install=f.install(vec![f.protocol_runtime(&actual)]);
     let catalog=install.catalog().await.unwrap();
     assert_eq!(catalog.plugins[0].status,InstallStatus::Invalid);
