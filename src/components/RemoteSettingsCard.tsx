@@ -123,7 +123,7 @@ export function RemoteSettingsCard({ onServiceAction }: { onServiceAction?: () =
           : "Local service stopped. Enter or confirm the address below to start."}
       </p>
       <p className="field-note">zDeck remembers your on/off choice when storage is available. Stop here to keep it off next time.</p>
-      {remote.error ? <p className="settings-error" role="alert">{remote.error}</p> : null}
+      {remote.status?.error || remote.error ? <p className="settings-error" role="alert">{remote.error || remote.status?.error}</p> : null}
       <div className="segmented remote-tabs" role="tablist" aria-label="Phone connection method" aria-describedby="remote-mode-note">
         {MODES.map((item, index) => <button key={item} id={`remote-tab-${item}`} type="button" role="tab"
           className="button secondary" aria-selected={mode === item} aria-controls={`remote-panel-${item}`}
@@ -185,7 +185,7 @@ https://192.168.1.20:8443 {
             </>}
             <p>On iPhone, open the root address in Safari and install the app first, then paste a fresh pairing link inside the installed app.
               A camera QR usually opens the browser, not the installed app’s session. Opening a link never approves a phone; approve it separately here.</p>
-            <p>The last successfully used address and your service on/off choice are remembered on this device when storage is available. An on service restarts when zDeck opens, not when the operating system starts. Pairing links and approvals are not restored.</p>
+            <p>Start remembers this service for the next zDeck launch, not operating system startup. Stop pauses access and disables auto-start, but keeps approved phones. Revoke forgets a phone. Pairing links are never saved.</p>
           </details>
           {mode === "tailscale" ? <div className="remote-command">
             <p>On this desktop, review <code>tailscale serve status</code> first. Do not enable Funnel or overwrite an existing Serve configuration without reviewing it.</p>
@@ -210,14 +210,15 @@ https://192.168.1.20:8443 {
               : "Use HTTPS with a private IPv4, local IPv6, or .local/.lan/.home.arpa name; include your proxy’s port if not 443. "}
             Use only the root address, without credentials, path, query or fragment.
           </p>
-          <p className="field-note">Changing the address requires re-pairing and may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
+          <p className="field-note">Changing the address or connection method forgets approved phones and requires re-pairing; a new address may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
         </> : null}
       </div>)}
       {running ? (
         <>
           <p className="muted">
-            Stopping the service or restarting zDeck disconnects all phones.
-            Pair again next time.
+            After pairing once, bookmark or revisit the same HTTPS address in the same browser or installed app.
+            Approved phones reconnect after Stop/Start or a zDeck restart, for up to 180 days from pairing.
+            Start enables auto-start; Stop pauses access without forgetting phones. Revoke forgets a phone.
           </p>
 
           <div className="settings-actions">

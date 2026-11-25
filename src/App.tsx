@@ -496,7 +496,7 @@ export default function App() {
           </div>
 
           {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error}</p> : null}
-          {serviceRestore.pending ? <p role="status">Restoring local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
+          {serviceRestore.pending ? <p role="status">Checking local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
 
           <section className="settings-card">
             <h2>Appearance</h2>

@@ -175,7 +175,7 @@ This is a manual validation plan, not a claim of success:
 3. Open the HTTPS root on the phone and confirm **Connect your phone**. Install to the home screen if testing PWA installation. iPhone Safari and Android/browser variants require separate checks.
 4. Launch the intended browser/PWA, paste a fresh two-minute invitation inside it, request approval and approve the named device on the desktop. Do not assume QR-opened browser and installed app cookies are shared.
 5. Confirm saved pages and live edits. Choose a reversible action, deliberately run it and verify the actual desktop result; check the desktop before retrying Unknown. Verify disconnection disables controls and no offline press is replayed.
-6. Revoke and confirm access/socket loss. Stop/restart and confirm every device must pair again. Check origin/certificate stability and reinstall/re-pair after origin changes as needed.
+6. Revoke and confirm access/socket loss. Stop/Start and relaunch zDeck at the same origin/mode; confirm approved phones resume without pairing, Start opts into auto-start and Stop opts out. Revoke, restart and confirm the old phone stays rejected. Change origin/mode and confirm switching back does not restore approvals. Check storage/bind failures appear in Settings without blocking launch. Check origin/certificate stability and reinstall/re-pair after origin changes as needed.
 
 Repeat in the browsers/devices you intend to support. Record OS, browser, installation context, adapter dependencies, observed effect and readback—not just that the page loaded.
 

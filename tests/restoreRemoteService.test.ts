@@ -1,10 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ raw: null as string | null, blocked: false, status: vi.fn(), start: vi.fn() }));
-vi.mock("../src/lib/persistence", () => ({ getStorage: () => ({ getItem: () => {
-  if (fixture.blocked) throw new Error("Storage unavailable");
-  return fixture.raw;
-} }) }));
+const fixture = vi.hoisted(() => ({ raw: null as string | null, blocked: false, storage: vi.fn(), status: vi.fn(), start: vi.fn() }));
+vi.mock("../src/lib/persistence", () => ({ getStorage: fixture.storage }));
 vi.mock("../src/lib/nativeRemote", () => ({
   remoteStatus: fixture.status,
   remoteStart: fixture.start,
@@ -15,48 +12,61 @@ beforeEach(() => {
   vi.resetModules();
   fixture.raw = null;
   fixture.blocked = false;
-  fixture.status.mockReset().mockResolvedValue({ running: false });
-  fixture.start.mockReset().mockResolvedValue({ running: true });
+  fixture.storage.mockReset().mockImplementation(() => ({ getItem: () => {
+    if (fixture.blocked) throw new Error("Storage unavailable");
+    return fixture.raw;
+  } }));
+  fixture.status.mockReset().mockResolvedValue({ running: false, error: null });
+  fixture.start.mockReset();
 });
 
-it("restores on exactly once per launch, without writing a shutdown preference", async () => {
-  fixture.raw = JSON.stringify({ origin: "https://computer.tailnet.ts.net", mode: "tailscale" });
+it("reads native startup status exactly once per launch, including remounts", async () => {
   const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
   const first = restoreRemoteService();
   expect(restoreRemoteService()).toBe(first);
   expect(await first).toBeNull();
-  expect(fixture.start).toHaveBeenCalledExactlyOnceWith("https://computer.tailnet.ts.net", "tailscale");
-  expect(fixture.raw).toContain("computer.tailnet.ts.net");
+  expect(fixture.status).toHaveBeenCalledTimes(1);
+  expect(fixture.start).not.toHaveBeenCalled();
 });
 
-it("does not start a service when desired off, missing, or already running", async () => {
-  for (const raw of [null, "false", JSON.stringify({ origin: "https://192.168.1.20:8443", mode: "local_https" })]) {
+it("never overrides native Stop or running state with legacy browser preferences", async () => {
+  for (const running of [false, true]) {
+    for (const raw of [null, "false", JSON.stringify({ origin: "https://computer.tailnet.ts.net", mode: "tailscale" }), JSON.stringify({ origin: "https://192.168.1.20:8443", mode: "local_https" }), "{bad settings"]) {
+      vi.resetModules();
+      fixture.raw = raw;
+      fixture.status.mockResolvedValue({ running, error: null });
+      const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
+      expect(await restoreRemoteService()).toBeNull();
+    }
+  }
+  expect(fixture.storage).not.toHaveBeenCalled();
+  expect(fixture.start).not.toHaveBeenCalled();
+});
+
+it("surfaces native bind or persistence failures without starting or retrying", async () => {
+  for (const error of ["Port is busy", "Saved service settings are invalid"]) {
     vi.resetModules();
-    fixture.raw = raw;
-    fixture.status.mockResolvedValue({ running: true });
+    fixture.status.mockClear().mockResolvedValue({ running: false, error });
     const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
-    expect(await restoreRemoteService()).toBeNull();
+    expect(await restoreRemoteService()).toContain(error);
+    expect(await restoreRemoteService()).toContain("Open Settings");
+    expect(fixture.status).toHaveBeenCalledTimes(1);
   }
   expect(fixture.start).not.toHaveBeenCalled();
 });
 
-it("restores Local HTTPS using its saved mode and reports start failure without retry", async () => {
-  fixture.raw = JSON.stringify({ origin: "https://192.168.1.20:8443", mode: "local_https" });
-  fixture.start.mockRejectedValue(new Error("Port is busy"));
+it("status errors resolve to a focused notice rather than preventing launch", async () => {
+  fixture.status.mockRejectedValue(new Error("Native service unavailable"));
   const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
-  expect(await restoreRemoteService()).toContain("Port is busy");
+  expect(await restoreRemoteService()).toContain("Could not check the local service. Native service unavailable");
   expect(await restoreRemoteService()).toContain("Open Settings");
-  expect(fixture.start).toHaveBeenCalledExactlyOnceWith("https://192.168.1.20:8443", "local_https");
+  expect(fixture.status).toHaveBeenCalledTimes(1);
+  expect(fixture.start).not.toHaveBeenCalled();
 });
 
-it("settings errors resolve to a focused notice rather than preventing launch", async () => {
-  for (const blocked of [false, true]) {
-    vi.resetModules();
-    fixture.raw = "{bad settings";
-    fixture.blocked = blocked;
-    const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
-    expect(await restoreRemoteService()).toContain("Local service was not restored");
-  }
-  expect(fixture.status).not.toHaveBeenCalled();
-  expect(fixture.start).not.toHaveBeenCalled();
+it("does not depend on browser storage availability", async () => {
+  fixture.blocked = true;
+  const { restoreRemoteService } = await import("../src/lib/useRestoreRemoteService");
+  expect(await restoreRemoteService()).toBeNull();
+  expect(fixture.storage).not.toHaveBeenCalled();
 });

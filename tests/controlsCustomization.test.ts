@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { ControlTile } from "../src/components/ControlTile";
 import { createDefaultDeck, isDeck, moveControl, updateControl } from "../src/lib/deck";
 import { loadDeck, saveDeck } from "../src/lib/persistence";
-import { loadDesiredService, rememberDesiredService, REMOTE_DESIRED_KEY } from "../src/lib/remotePreferences";
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -55,29 +54,5 @@ describe("control layout and ordering", () => {
     expect(moveControl(moved, "page_stream", ids[0], -3)).toEqual(deck);
     for (const delta of [0, 0.5, NaN, Infinity, -1, 4]) expect(moveControl(deck, "page_stream", ids[0], delta)).toBe(deck);
     expect(moveControl(deck, "page_stream", "external-drag", 1)).toBe(deck);
-  });
-});
-
-describe("desired service preference", () => {
-  it("defaults off, remembers on configuration atomically, and preserves deliberate off", () => {
-    const storage = memoryStorage();
-    expect(loadDesiredService(storage)).toBe(false);
-    const desired = { mode: "local_https", origin: "https://192.168.1.20:8443" } as const;
-    expect(rememberDesiredService(storage, desired)).toBe(true);
-    expect(loadDesiredService(storage)).toEqual(desired);
-    expect(rememberDesiredService(storage, false)).toBe(true);
-    expect(loadDesiredService(storage)).toBe(false);
-  });
-
-  it("rejects malformed settings and reports unavailable storage instead of claiming persistence", () => {
-    const storage = memoryStorage();
-    for (const raw of ['{', 'true', 'null', '{"mode":"public","origin":"https://example.com"}', '{"mode":"tailscale","origin":"https://x.ts.net/#/pair?invite=secret"}']) {
-      storage.setItem(REMOTE_DESIRED_KEY, raw);
-      expect(() => loadDesiredService(storage)).toThrow();
-    }
-    expect(rememberDesiredService(null, false)).toBe(false);
-    const blocked = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
-    expect(rememberDesiredService(blocked, false)).toBe(false);
-    expect(() => loadDesiredService(blocked)).toThrow();
   });
 });

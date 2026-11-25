@@ -2075,70 +2075,185 @@ async fn oversized_body_is_rejected_before_side_effects() {
     env.service.stop().await;
 }
 
+async fn pair_admin(admin: &RemoteAdmin, port: u16) -> (String, String) {
+    let invitation = admin.create_invitation().await.unwrap();
+    let body = json!({"invitation": invitation.invitation, "name": "Remembered phone"}).to_string();
+    let response = http_request(port, "POST", "/api/v1/pair", PUBLIC_HOST, Some(ORIGIN), None, Some(&body)).await;
+    assert_eq!(response.status, 200);
+    let cookie = response.headers.iter().find(|(name, _)| name == "set-cookie").unwrap();
+    assert!(cookie.1.contains("Max-Age=15552000"));
+    let token = response.cookie_token().unwrap();
+    let id = response.json()["requestId"].as_str().unwrap().to_string();
+    admin.approve_device(&id).await.unwrap();
+    (token, id)
+}
+
 #[tokio::test]
-async fn stop_clears_credentials_and_allows_port_reuse() {
+async fn remembered_approval_restores_in_new_admin_and_revocation_survives_restart() {
+    let dir = TempDir::new("remembered");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    save_default_deck(&deck).await;
+    let config = || transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone());
+    let first = RemoteAdmin::persistent(Some(dir.path.clone()));
+    first.restore(config()).await;
+    assert!(!first.status().await.running, "no auto-start without explicit Start");
+    let port = first.start(config()).await.unwrap().port.unwrap();
+    let (token, id) = pair_admin(&first, port).await;
+    let disk = std::fs::read_to_string(dir.path.join("remote.v1.json")).unwrap();
+    assert!(!disk.contains(&token), "never persist the raw bearer");
+    // A new native instance restores from disk, not the first registry.
+    let second = RemoteAdmin::persistent(Some(dir.path.clone()));
+    second.restore(config()).await;
+    let status = second.status().await;
+    assert!(status.running); assert_eq!(status.approved_devices, 1);
+    let port = status.port.unwrap();
+    assert_eq!(http_request(port, "GET", "/api/v1/pair/status", PUBLIC_HOST, None, Some(&token), None).await.json()["status"], "approved");
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 200);
+    first.stop().await;
+    second.revoke_device(&id).await.unwrap();
+    second.stop().await;
+    let third = RemoteAdmin::persistent(Some(dir.path.clone()));
+    third.restore(config()).await;
+    assert!(!third.status().await.running, "Stop opts out of auto-start");
+    let port = third.start(config()).await.unwrap().port.unwrap();
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 401);
+    third.stop().await;
+}
+
+#[tokio::test]
+async fn startup_bind_failure_is_visible_and_does_not_retry_after_stop() {
+    let dir = TempDir::new("startup-bind");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    let first = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let config = || transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone());
+    let port = first.start(config()).await.unwrap().port.unwrap();
+    let fresh = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let mut occupied = config(); occupied.port = port;
+    fresh.restore(occupied).await;
+    let status = fresh.status().await;
+    assert!(!status.running); assert!(status.error.unwrap().contains("bind"));
+    assert!(fresh.stop().await.error.is_none());
+    first.stop().await;
+    fresh.restore(config()).await;
+    assert!(!fresh.status().await.running);
+    assert!(fresh.status().await.error.is_none());
+}
+
+#[tokio::test]
+async fn changed_scope_does_not_resurrect_remembered_approvals() {
+    let dir = TempDir::new("scope");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    save_default_deck(&deck).await;
+    let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let port = admin.start(transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone())).await.unwrap().port.unwrap();
+    let (token, _) = pair_admin(&admin, port).await;
+    admin.stop().await;
+    admin.start(transport_config("https://deck.local:8443", ConnectionMode::LocalHttps, deck.clone())).await.unwrap();
+    assert_eq!(admin.status().await.approved_devices, 0);
+    admin.stop().await;
+    let fresh = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let port = fresh.start(transport_config(ORIGIN, ConnectionMode::Tailscale, deck)).await.unwrap().port.unwrap();
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 401);
+    fresh.stop().await;
+}
+
+#[tokio::test]
+async fn remembered_cookie_and_record_expire_at_180_days_without_renewal() {
+    let dir = TempDir::new("expiry");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    save_default_deck(&deck).await;
+    let clock = default_clock();
+    let config = || { let mut c = transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone()); c.clock = clock.clone(); c };
+    let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let port = admin.start(config()).await.unwrap().port.unwrap();
+    let (token, _) = pair_admin(&admin, port).await;
+    clock.advance(180 * 24 * 60 * 60 * 1000 - 1);
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 200);
+    clock.advance(1);
+    assert_eq!(http_request(port, "GET", "/api/v1/pair/status", PUBLIC_HOST, None, Some(&token), None).await.status, 401);
+    admin.stop().await;
+    let fresh = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let port = fresh.start(config()).await.unwrap().port.unwrap();
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 401);
+    fresh.stop().await;
+}
+
+#[tokio::test]
+async fn invalid_trust_is_preserved_and_never_opens_a_listener() {
+    let dir = TempDir::new("invalid-trust");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    let path = dir.path.join("remote.v1.json");
+    for bytes in [b"{invalid".to_vec(), json!({"version": 2, "enabled": true, "origin": ORIGIN, "mode": "tailscale", "approved": []}).to_string().into_bytes(), vec![b' '; 65537]] {
+        std::fs::write(&path, &bytes).unwrap();
+        let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
+        admin.restore(transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone())).await;
+        let status = admin.status().await;
+        assert!(!status.running); assert!(status.error.is_some());
+        assert!(admin.start(transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone())).await.is_err());
+        assert!(admin.stop().await.error.is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[tokio::test]
+async fn trust_write_failure_never_claims_approval_revocation_or_stop_success() {
+    let dir = TempDir::new("failed-trust");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    save_default_deck(&deck).await;
+    let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let config = || transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone());
+    let port = admin.start(config()).await.unwrap().port.unwrap();
+    let (token, id) = pair_admin(&admin, port).await;
+    let invitation = admin.create_invitation().await.unwrap();
+    let body = json!({"invitation": invitation.invitation, "name": "Pending phone"}).to_string();
+    let pending = http_request(port, "POST", "/api/v1/pair", PUBLIC_HOST, Some(ORIGIN), None, Some(&body)).await;
+    let pending_id = pending.json()["requestId"].as_str().unwrap().to_string();
+    let path = dir.path.join("remote.v1.json");
+    let backup = dir.path.join("backup.json");
+    std::fs::rename(&path, &backup).unwrap();
+    std::fs::create_dir(&path).unwrap(); // Portable deterministic atomic-replacement failure.
+    assert!(admin.approve_device(&pending_id).await.is_err());
+    assert_eq!(admin.status().await.approved_devices, 1);
+    let mut ws = ws_connect(port, PUBLIC_HOST, ORIGIN, Some(&token)).await.unwrap();
+    let _ = read_json(&mut ws).await;
+    assert!(admin.revoke_device(&id).await.is_err());
+    assert!(read_until_close(&mut ws).await);
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 503);
+    assert!(admin.status().await.error.is_some());
+    assert!(admin.stop().await.error.is_some());
+    assert!(admin.status().await.error.is_some(), "warning survives status polling");
+    assert!(admin.start(config()).await.is_err());
+    assert!(!admin.status().await.running);
+    // Repair the disposable test location, then durably retry the revoke.
+    std::fs::rename(&path, dir.path.join("blocked-directory")).unwrap();
+    std::fs::rename(&backup, &path).unwrap();
+    let restored = RemoteAdmin::persistent(Some(dir.path.clone()));
+    let port = restored.start(config()).await.unwrap().port.unwrap();
+    restored.revoke_device(&id).await.unwrap();
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 401);
+    restored.stop().await;
+}
+
+#[tokio::test]
+async fn stop_preserves_credentials_and_allows_port_reuse() {
     let dir = TempDir::new("restart");
+    let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
     let store = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
     save_default_deck(&store).await;
-    let config = ServiceConfig {
-        origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store.clone(),
-        actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
-    };
-    let service = start(config).await.expect("start");
-    let port = service.port();
-    let token = {
-        let invitation = service.create_invitation().await.expect("invitation");
-        let body = json!({
-            "invitation": invitation.invitation,
-            "name": "Restart",
-        })
-        .to_string();
-        let response = http_request(
-            port,
-            "POST",
-            "/api/v1/pair",
-            PUBLIC_HOST,
-            Some(ORIGIN),
-            None,
-            Some(&body),
-        )
-        .await;
-        assert_eq!(response.status, 200);
-        let request_id = response.json()["requestId"].as_str().unwrap().to_string();
-        service.approve_device(&request_id).await.expect("approve");
-        response.cookie_token().expect("cookie")
-    };
-    let host = format!("127.0.0.1:{port}");
-    let mut websocket = ws_connect(port, &host, ORIGIN, Some(&token))
-        .await
-        .expect("websocket");
+    let status = admin.start(transport_config(ORIGIN, ConnectionMode::Tailscale, store.clone())).await.unwrap();
+    let port = status.port.unwrap();
+    let (token, _) = pair_admin(&admin, port).await;
+    let mut websocket = ws_connect(port, PUBLIC_HOST, ORIGIN, Some(&token)).await.unwrap();
     let _initial = read_json(&mut websocket).await;
-    service.stop().await;
+    assert!(admin.stop().await.error.is_none());
     assert!(read_until_close(&mut websocket).await);
-
-    // The listener is gone, so the old credential cannot be used at all.
     assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
-
-    let config = ServiceConfig {
-        origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port, deck: store,
-        actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
-    };
-    let restarted = start(config).await.expect("restart on the same port");
-    assert_eq!(restarted.port(), port);
-    let stale = http_request(
-        port,
-        "GET",
-        "/api/v1/state",
-        PUBLIC_HOST,
-        None,
-        Some(&token),
-        None,
-    )
-    .await;
-    assert_eq!(stale.status, 401);
-    restarted.stop().await;
+    let mut config = transport_config("HTTPS://DECK.TAILNET.TS.NET:443/", ConnectionMode::Tailscale, store);
+    config.port = port;
+    let restarted = admin.start(config).await.unwrap();
+    assert_eq!(restarted.port, Some(port));
+    assert_eq!(http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await.status, 200);
+    admin.stop().await;
 }
 
 #[tokio::test]

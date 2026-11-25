@@ -4,27 +4,6 @@ export type RemoteMode = "tailscale" | "local_https";
 export const REMOTE_ORIGIN_KEY = "deck.remote.origin.v1"; // Retain the legacy tailnet preference.
 export const LOCAL_REMOTE_ORIGIN_KEY = "deck.remote.local-origin.v1";
 export const REMOTE_MODE_KEY = "deck.remote.mode.v1";
-export const REMOTE_DESIRED_KEY = "deck.remote.desired.v1";
-export type DesiredService = { origin: string; mode: RemoteMode } | false;
-
-export function loadDesiredService(storage: StorageLike | null): DesiredService {
-  const raw = storage?.getItem(REMOTE_DESIRED_KEY);
-  if (!raw) return false;
-  const value: unknown = JSON.parse(raw);
-  if (value === false) return false;
-  if (typeof value === "object" && value !== null && "mode" in value && "origin" in value
-    && isRemoteMode(value.mode)) {
-    const origin = normalizeRemoteOrigin(value.origin, value.mode);
-    if (origin) return { origin, mode: value.mode };
-  }
-  throw new Error("Saved service settings are invalid. Start the local service again in Settings.");
-}
-
-/** Desired state changes only on explicit start/stop, never shutdown or polling. */
-export function rememberDesiredService(storage: StorageLike | null, desired: DesiredService): boolean {
-  if (!storage || (desired !== false && (!isRemoteMode(desired.mode) || !normalizeRemoteOrigin(desired.origin, desired.mode)))) return false;
-  try { storage.setItem(REMOTE_DESIRED_KEY, JSON.stringify(desired)); return true; } catch { return false; }
-}
 export const isRemoteMode = (value: unknown): value is RemoteMode => value === "tailscale" || value === "local_https";
 
 /** Mirrors remote.rs validate_origin, including rejecting URL parser repairs before parsing. */

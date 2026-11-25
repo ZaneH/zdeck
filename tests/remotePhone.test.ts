@@ -307,6 +307,26 @@ describe("connection lifecycle", () => {
     expect(pairCall?.init.body).toBe(JSON.stringify({ invitation: TOKEN, name: "My phone" }));
   });
 
+  it("resumes a remembered approved cookie without an invitation or pairing POST", async () => {
+    const harness = createHarness((path) => {
+      if (path === "/api/v1/pair/status") return jsonResponse(200, { requestId: "remembered", status: "approved" });
+      if (path === "/api/v1/state") return jsonResponse(200, { protocolVersion: 1, revision: 3, deck: sampleDeck });
+      return jsonResponse(404, { error: "unexpected request" });
+    });
+    const connection = new RemotePhoneConnection(harness.deps);
+    connection.start();
+    await flush();
+    expect(connection.getSnapshot().phase).toBe("connecting");
+    await flush(); // Resume status is followed by a separate authenticated state read.
+    expect(harness.sockets).toHaveLength(1);
+    harness.sockets[0].emit(snapshotBody(3, sampleDeck));
+    await flush();
+    expect(connection.getSnapshot().phase).toBe("active");
+    expect(harness.calls.some((call) => call.path === "/api/v1/pair")).toBe(false);
+    expect(harness.calls.every((call) => call.init.credentials === "same-origin")).toBe(true);
+    connection.stop();
+  });
+
   it("captures an invite without sending any request until submission", async () => {
     const { deps, calls } = makeStandardHarness();
     const connection = new RemotePhoneConnection(deps);

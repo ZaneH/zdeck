@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nativeAvailable } from "./native";
-import { getStorage } from "./persistence";
-import { rememberDesiredService } from "./remotePreferences";
 import {
   invitationExpired,
   remoteApproveDevice,
@@ -132,11 +130,9 @@ export function useRemoteConsole(): RemoteConsole {
       setInvitation(null);
       try {
         const next = await remoteStart(origin, mode);
-        const remembered = rememberDesiredService(getStorage(), { origin, mode });
         if (!mountedRef.current || epoch !== epochRef.current) return false;
         setStatus(next);
         setDevices([]);
-        if (!remembered) setError("Service started, but its on state could not be saved. It may not restart with zDeck.");
         return true;
       } catch (cause) {
         if (!mountedRef.current || epoch !== epochRef.current) return false;
@@ -160,15 +156,13 @@ export function useRemoteConsole(): RemoteConsole {
     setInvitation(null);
     setDevices([]);
     setStatus(null);
-    const remembered = rememberDesiredService(getStorage(), false);
     try {
       const next = await remoteStop();
       if (!mountedRef.current || epoch !== epochRef.current) return;
       setStatus(next);
-      if (!remembered) setError("Service stopped, but its off state could not be saved. It may restart on next launch; check device storage.");
     } catch (cause) {
       if (!mountedRef.current || epoch !== epochRef.current) return;
-      setError(`${toRemoteError(cause).message}${remembered ? "" : " The off state could not be saved; the service may restart on next launch."}`);
+      setError(toRemoteError(cause).message);
     } finally {
       mutationInFlightRef.current = false;
       if (mountedRef.current && epoch === epochRef.current) setBusy(false);

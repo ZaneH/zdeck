@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
 import { nativeAvailable } from "./native";
-import { getStorage } from "./persistence";
-import { loadDesiredService } from "./remotePreferences";
-import { remoteStart, remoteStatus, toRemoteError } from "./nativeRemote";
+import { remoteStatus, toRemoteError } from "./nativeRemote";
 
-// One attempt per application launch, including React StrictMode remounts. Never retry uncertain starts.
+// Native setup owns restoration. Read its result once, including React StrictMode remounts.
 let restoration: Promise<string | null> | undefined;
 export function restoreRemoteService(): Promise<string | null> {
   return restoration ??= (async () => {
     try {
-      const desired = loadDesiredService(getStorage());
-      if (desired && !(await remoteStatus()).running) await remoteStart(desired.origin, desired.mode);
-      return null;
+      const status = await remoteStatus();
+      return status.error ? `${status.error} Open Settings to review the local service.` : null;
     } catch (cause) {
-      return `Local service was not restored. ${toRemoteError(cause).message} Open Settings to review and start it.`;
+      return `Could not check the local service. ${toRemoteError(cause).message} Open Settings to review it.`;
     }
   })();
 }

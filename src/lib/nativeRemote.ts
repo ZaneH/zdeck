@@ -38,6 +38,8 @@ export interface RemoteStatus {
   pendingDevices: number;
   approvedDevices: number;
   connectedSockets: number;
+  /** Native startup/persistence failure; service state is still available. */
+  error?: string | null;
 }
 
 export interface RemoteInvitation {
@@ -121,7 +123,8 @@ export function parseRemoteStatus(value: unknown): RemoteStatus | null {
   } else if (status.mode !== null || status.origin !== null || status.port !== null) return null;
   return { running: status.running, mode: status.mode as RemoteMode | null, origin: status.origin as string | null,
     port: status.port as number | null, pendingDevices: status.pendingDevices as number,
-    approvedDevices: status.approvedDevices as number, connectedSockets: status.connectedSockets as number };
+    approvedDevices: status.approvedDevices as number, connectedSockets: status.connectedSockets as number,
+    ...(typeof status.error === "string" && status.error.trim() ? { error: status.error } : {}) };
 }
 async function invokeStatus(command: string, args: Record<string, unknown> = {}): Promise<RemoteStatus> {
   const status = parseRemoteStatus(await invokeRemote<unknown>(command, args));

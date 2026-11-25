@@ -6,8 +6,8 @@
 //! HTTP admin routes: invitations and device approval happen through Tauri
 //! commands only.
 //!
-//! Session credentials are in-memory only. Stopping the service clears the
-//! registry, so every device must pair again after a restart.
+//! Approved credential verifiers survive stop/restart in a separate native
+//! trust file. Invitations, pending requests and command state remain ephemeral.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
@@ -46,6 +46,10 @@ pub use crate::actions::{CommandResult, CommandState};
 pub const DEFAULT_PORT: u16 = 45829;
 /// HttpOnly device cookie. The `__Host-` prefix requires Secure, Path=/, and no Domain.
 pub const COOKIE_NAME: &str = "__Host-deck-device";
+mod persistence;
+use persistence::{SavedDevice, TrustStore};
+const SESSION_SECONDS: u64 = 180 * 24 * 60 * 60;
+const SESSION_MS: u64 = SESSION_SECONDS * 1000;
 const PROTOCOL_VERSION: u8 = 1;
 const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const PUBLIC_CSP: &str = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
@@ -256,6 +260,7 @@ pub struct RemoteStatus {
     pub pending_devices: usize,
     pub approved_devices: usize,
     pub connected_sockets: usize,
+    pub error: Option<String>,
 }
 
 impl RemoteStatus {
@@ -268,6 +273,7 @@ impl RemoteStatus {
             pending_devices: 0,
             approved_devices: 0,
             connected_sockets: 0,
+            error: None,
         }
     }
 }
@@ -311,7 +317,8 @@ struct Registry {
 }
 
 impl Registry {
-    fn prune(&mut self, now: Instant, limits: &Limits) {
+    fn prune(&mut self, now: Instant, now_ms: u64, limits: &Limits) {
+        self.devices.retain(|_, d| now_ms >= d.created_at_ms && now_ms - d.created_at_ms < SESSION_MS);
         self.pair_attempts
             .retain(|attempt| now.duration_since(*attempt) <= limits.pair_window);
 
@@ -390,6 +397,7 @@ struct Inner {
     clock: Arc<dyn Clock>,
     limits: Limits,
     registry: Mutex<Registry>,
+    trust: Arc<Mutex<TrustStore>>,
     shutdown: broadcast::Sender<()>,
     revoke: broadcast::Sender<String>,
     command_slots: Arc<Semaphore>,
@@ -400,12 +408,13 @@ struct Inner {
 
 impl Inner {
     async fn authenticate(&self, headers: &HeaderMap) -> Result<AuthDevice, ApiError> {
+        if self.stopped.load(Ordering::SeqCst) { return Err(ApiError::unauthorized("The phone service is paused. Check desktop Settings.")); }
         let token = cookie_token(headers)
             .ok_or_else(|| ApiError::unauthorized("A valid device cookie is required."))?;
         let hash = hash_token(&token);
         let now = self.clock.now();
         let mut registry = self.registry.lock().await;
-        registry.prune(now, &self.limits);
+        registry.prune(now, self.clock.now_ms(), &self.limits);
         match registry.devices.get(&hash) {
             Some(device) if device.status == DeviceStatus::Approved => Ok(AuthDevice {
                 hash,
@@ -429,9 +438,10 @@ impl Inner {
     }
 
     async fn is_approved(&self, hash: &[u8; 32]) -> bool {
+        if self.stopped.load(Ordering::SeqCst) { return false; }
         let now = self.clock.now();
         let mut registry = self.registry.lock().await;
-        registry.prune(now, &self.limits);
+        registry.prune(now, self.clock.now_ms(), &self.limits);
         registry
             .devices
             .get(hash)
@@ -478,7 +488,7 @@ impl RunningService {
     pub async fn status(&self) -> RemoteStatus {
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         RemoteStatus {
             running: true,
             mode: Some(self.inner.mode),
@@ -487,13 +497,17 @@ impl RunningService {
             pending_devices: registry.count_status(DeviceStatus::Pending),
             approved_devices: registry.count_status(DeviceStatus::Approved),
             connected_sockets: self.inner.connected_sockets.load(Ordering::Relaxed),
+            error: self.inner.stopped.load(Ordering::SeqCst).then(|| "Revoke was not saved. Phone access is paused only until zDeck restarts; restarting may restore this phone's access. Repair app-data permissions and retry Revoke before restarting.".into()),
         }
     }
 
     pub async fn create_invitation(&self) -> Result<InvitationView, RemoteError> {
+        if self.inner.stopped.load(Ordering::SeqCst) {
+            return Err(RemoteError::Unavailable { message: "Phone access is paused. Resolve the storage warning, then Stop and Start before pairing.".into() });
+        }
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         if let Some(invitation) = &registry.invitation {
             if now < invitation.expires_at {
                 return Err(RemoteError::Conflict {
@@ -519,7 +533,7 @@ impl RunningService {
     pub async fn list_devices(&self) -> Result<Vec<DeviceView>, RemoteError> {
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         let mut devices: Vec<_> = registry
             .devices
             .values()
@@ -538,7 +552,7 @@ impl RunningService {
     pub async fn approve_device(&self, request_id: &str) -> Result<DeviceView, RemoteError> {
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         let hash =
             registry
                 .find_by_request_id(request_id)
@@ -561,6 +575,11 @@ impl RunningService {
                 message: "The device request is not pending.".to_string(),
             });
         }
+        let mut trust = self.inner.trust.lock().await;
+        let mut saved = trust.state.clone()?;
+        saved.approved.retain(|d| self.inner.clock.now_ms().saturating_sub(d.created_at_ms) < SESSION_MS);
+        saved.approved.push(SavedDevice { hash, request_id: device.request_id.clone(), name: device.name.clone(), created_at_ms: device.created_at_ms });
+        trust.save(saved)?;
         device.status = DeviceStatus::Approved;
         device.terminal_at = None;
         Ok(Registry::view(device))
@@ -569,7 +588,7 @@ impl RunningService {
     pub async fn deny_device(&self, request_id: &str) -> Result<DeviceView, RemoteError> {
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         let hash =
             registry
                 .find_by_request_id(request_id)
@@ -595,7 +614,7 @@ impl RunningService {
     pub async fn revoke_device(&self, request_id: &str) -> Result<DeviceView, RemoteError> {
         let now = self.inner.clock.now();
         let mut registry = self.inner.registry.lock().await;
-        registry.prune(now, &self.inner.limits);
+        registry.prune(now, self.inner.clock.now_ms(), &self.inner.limits);
         let hash =
             registry
                 .find_by_request_id(request_id)
@@ -612,6 +631,17 @@ impl RunningService {
             return Err(RemoteError::Conflict {
                 message: "The device is not approved.".to_string(),
             });
+        }
+        let mut trust = self.inner.trust.lock().await;
+        let mut saved = trust.state.clone()?;
+        saved.approved.retain(|d| d.hash != hash);
+        if let Err(error) = trust.save(saved) {
+            // Pause all access on uncertain durable revocation; never claim success.
+            self.inner.stopped.store(true, Ordering::SeqCst);
+            for record in registry.devices.values() {
+                let _ = self.inner.revoke.send(record.request_id.clone());
+            }
+            return Err(error);
         }
         device.status = DeviceStatus::Revoked;
         device.terminal_at = Some(now);
@@ -652,15 +682,55 @@ impl RunningService {
 #[derive(Default)]
 pub struct RemoteAdmin {
     running: Mutex<Option<RunningService>>,
+    trust: Arc<Mutex<TrustStore>>,
+    startup_error: Mutex<Option<String>>,
 }
 
 impl RemoteAdmin {
+    /// A failed path/load remains fail-closed until the user repairs storage and relaunches.
+    pub fn persistent(directory: Option<std::path::PathBuf>) -> Self {
+        let trust = match directory {
+            Some(directory) => TrustStore::open(directory.join(persistence::FILE_NAME)),
+            None => { let mut store = TrustStore::default(); store.state = Err(persistence::storage_error()); store },
+        };
+        let error = trust.state.as_ref().err().map(|_| "Phone settings could not be restored. Check app-data permissions and remote.v1.json; back up an invalid file before repairing or moving it, then restart zDeck.".into());
+        Self { running: Mutex::new(None), trust: Arc::new(Mutex::new(trust)), startup_error: Mutex::new(error) }
+    }
+
+    /// Called once by native setup, never by polling or a retry loop.
+    pub async fn restore(&self, mut config: ServiceConfig) {
+        let saved = self.trust.lock().await.state.clone();
+        if let Ok(saved) = saved {
+            if saved.enabled {
+                if let Some(origin) = saved.origin {
+                    config.origin = origin;
+                    config.mode = saved.mode;
+                    if let Err(error) = self.start(config).await {
+                        let message = match error {
+                            RemoteError::Bind { message } | RemoteError::Unavailable { message } => message,
+                            _ => "Phone service could not be restored. Check the saved address and app-data permissions, then use Start in Settings.".into(),
+                        };
+                        *self.startup_error.lock().await = Some(message);
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn start(&self, config: ServiceConfig) -> Result<RemoteStatus, RemoteError> {
         let mut running = self.running.lock().await;
         if running.is_some() {
             return Err(RemoteError::already_running());
         }
-        let service = start(config).await?;
+        let service = start_with_trust(config, self.trust.clone()).await?;
+        let mut trust = self.trust.lock().await;
+        let mut saved = trust.state.clone()?;
+        saved.enabled = true;
+        if let Err(error) = trust.save(saved) {
+            service.stop().await;
+            return Err(error);
+        }
+        *self.startup_error.lock().await = None;
         let status = service.status().await;
         *running = Some(service);
         Ok(status)
@@ -671,14 +741,30 @@ impl RemoteAdmin {
         if let Some(service) = running.take() {
             service.stop().await;
         }
-        RemoteStatus::stopped()
+        let result = {
+            let mut trust = self.trust.lock().await;
+            match trust.state.clone() {
+                Ok(mut state) => { state.enabled = false; trust.save(state) },
+                Err(error) => Err(error),
+            }
+        };
+        let mut status = RemoteStatus::stopped();
+        if result.is_err() {
+            status.error = Some("Service paused, but auto-start could not be disabled. Check app-data permissions and remote.v1.json before relaunching.".into());
+            *self.startup_error.lock().await = status.error.clone();
+        } else { *self.startup_error.lock().await = None; }
+        status
     }
 
     pub async fn status(&self) -> RemoteStatus {
         let running = self.running.lock().await;
         match running.as_ref() {
             Some(service) => service.status().await,
-            None => RemoteStatus::stopped(),
+            None => {
+                let mut status = RemoteStatus::stopped();
+                status.error = self.startup_error.lock().await.clone();
+                status
+            },
         }
     }
 
@@ -730,6 +816,10 @@ impl RemoteAdmin {
 
 /// Start the listener. The caller owns the returned service and must stop it.
 pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError> {
+    start_with_trust(config, Arc::new(Mutex::new(TrustStore::default()))).await
+}
+
+async fn start_with_trust(config: ServiceConfig, trust: Arc<Mutex<TrustStore>>) -> Result<RunningService, RemoteError> {
     let origin_url = validate_origin(&config.origin, config.mode)?;
     // URL's origin serializer preserves non-default ports and IPv6 brackets,
     // lowercases DNS, and removes only the equivalent default HTTPS port.
@@ -739,6 +829,27 @@ pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError>
         .local_addr()
         .map_err(|_| RemoteError::bind())?
         .port();
+    let mut registry = Registry::default();
+    {
+        let mut store = trust.lock().await;
+        let mut saved = store.state.clone()?;
+        if saved.origin.as_deref() != Some(&origin) || saved.mode != config.mode {
+            saved.approved.clear();
+            saved.origin = Some(origin.clone());
+            saved.mode = config.mode;
+            saved.enabled = false;
+            store.save(saved.clone())?;
+        }
+        for device in saved.approved {
+            let now_ms = config.clock.now_ms();
+            if now_ms < device.created_at_ms || now_ms - device.created_at_ms >= SESSION_MS { continue; }
+            registry.devices.insert(device.hash, DeviceRecord {
+                request_id: device.request_id, name: device.name, status: DeviceStatus::Approved,
+                created_at: config.clock.now(), created_at_ms: device.created_at_ms,
+                terminal_at: None, command_times: VecDeque::new(),
+            });
+        }
+    }
     let allowed_hosts = allowed_hosts(&origin_url, port);
     let (shutdown, _) = broadcast::channel(8);
     let (revoke, _) = broadcast::channel(64);
@@ -752,7 +863,8 @@ pub async fn start(config: ServiceConfig) -> Result<RunningService, RemoteError>
         assets: config.assets,
         clock: config.clock,
         limits: config.limits,
-        registry: Mutex::new(Registry::default()),
+        registry: Mutex::new(registry),
+        trust,
         shutdown,
         revoke,
         command_slots: Arc::new(Semaphore::new(config.limits.max_inflight_commands)),
@@ -938,7 +1050,7 @@ async fn pair(
     validate_pair_request(&request)?;
     let now = inner.clock.now();
     let mut registry = inner.registry.lock().await;
-    registry.prune(now, &inner.limits);
+    registry.prune(now, inner.clock.now_ms(), &inner.limits);
     if registry.pair_attempts.len() >= inner.limits.max_pair_attempts {
         return Err(ApiError::too_many_requests(
             "Too many pairing attempts. Try again later.",
@@ -979,7 +1091,7 @@ async fn pair(
         StatusCode::OK,
         &json!({ "requestId": request_id, "status": "pending" }),
     );
-    let cookie = format!("{COOKIE_NAME}={token}; Secure; HttpOnly; SameSite=Strict; Path=/");
+    let cookie = format!("{COOKIE_NAME}={token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}");
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).map_err(|_| ApiError::internal())?,
@@ -996,7 +1108,7 @@ async fn pair_status(
     let hash = hash_token(&token);
     let now = inner.clock.now();
     let mut registry = inner.registry.lock().await;
-    registry.prune(now, &inner.limits);
+    registry.prune(now, inner.clock.now_ms(), &inner.limits);
     let device = registry
         .devices
         .get(&hash)
@@ -1122,8 +1234,15 @@ async fn run_socket(
         return Ok(());
     }
 
+    let mut expiry_check = tokio::time::interval(Duration::from_secs(30));
     loop {
         tokio::select! {
+            _ = expiry_check.tick() => {
+                if !inner.is_approved(&hash).await {
+                    let _ = sink.send(Message::close(Some(CloseCode::POLICY_VIOLATION), "Device approval expired or invalidated")).await;
+                    break;
+                }
+            }
             _ = shutdown.recv() => {
                 let _ = sink.send(Message::close(Some(CloseCode::GOING_AWAY), "Service stopped")).await;
                 break;
@@ -1241,7 +1360,7 @@ async fn command(
     {
         let now = inner.clock.now();
         let mut registry = inner.registry.lock().await;
-        registry.prune(now, &inner.limits);
+        registry.prune(now, inner.clock.now_ms(), &inner.limits);
         if let Some(existing) = registry.commands.get(&key) {
             if existing.fingerprint != fingerprint {
                 return Err(ApiError::conflict(
@@ -1260,7 +1379,7 @@ async fn command(
                 "This device credential is no longer valid.",
             ));
         };
-        if device.status != DeviceStatus::Approved {
+        if inner.stopped.load(Ordering::SeqCst) || device.status != DeviceStatus::Approved {
             return Err(ApiError::unauthorized(
                 "This device credential is no longer valid.",
             ));
@@ -1296,7 +1415,7 @@ async fn command(
     {
         let now = inner.clock.now();
         let mut registry = inner.registry.lock().await;
-        registry.prune(now, &inner.limits);
+        registry.prune(now, inner.clock.now_ms(), &inner.limits);
         if let Some(record) = registry.commands.get_mut(&key) {
             record.result = result.clone();
             record.completed_at = Some(now);
@@ -1343,7 +1462,7 @@ impl Drop for CommandGuard {
         tokio::spawn(async move {
             let now = inner.clock.now();
             let mut registry = inner.registry.lock().await;
-            registry.prune(now, &inner.limits);
+            registry.prune(now, inner.clock.now_ms(), &inner.limits);
             if let Some(record) = registry.commands.get_mut(&key) {
                 if record.completed_at.is_none() {
                     record.result = interrupted_result(&record.result.id, plugin);
@@ -1361,7 +1480,7 @@ async fn existing_command(
 ) -> Result<Option<CommandResult>, ApiError> {
     let now = inner.clock.now();
     let mut registry = inner.registry.lock().await;
-    registry.prune(now, &inner.limits);
+    registry.prune(now, inner.clock.now_ms(), &inner.limits);
     if let Some(existing) = registry.commands.get(key) {
         if existing.fingerprint != fingerprint {
             return Err(ApiError::conflict(
@@ -1386,7 +1505,7 @@ async fn command_result(
     };
     let now = inner.clock.now();
     let mut registry = inner.registry.lock().await;
-    registry.prune(now, &inner.limits);
+    registry.prune(now, inner.clock.now_ms(), &inner.limits);
     let result = registry
         .commands
         .get(&key)

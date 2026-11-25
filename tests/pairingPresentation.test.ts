@@ -177,7 +177,8 @@ describe("createQrMatrix", () => {
 describe("local service clarity", () => {
   it("names the local service and disclaims phone reachability while running", () => {
     const html = render();
-    expect(html).toContain("Stop local service");
+    expect(html.match(/>Stop local service</g)).toHaveLength(1);
+    expect(html.indexOf(">Stop local service<")).toBeLessThan(html.indexOf('role="tablist"'));
     expect(html).toContain("Local service running on 127.0.0.1:45829");
     expect(html).toContain("Phone access is not checked.");
   });
@@ -186,8 +187,18 @@ describe("local service clarity", () => {
     state.remote = makeRemote({ running: false });
     const html = render();
     expect(html).toContain("Local service stopped.");
-    expect(html).toContain("Start local service");
+    expect(html.match(/>Start local service</g)).toHaveLength(1);
     expect(html).not.toContain("Phone access is not checked.");
+  });
+
+  it("shows native startup warnings and remembered-phone guidance without duplicate controls", () => {
+    const remote = makeRemote({ running: false });
+    state.remote = { ...remote, status: { ...remote.status, error: "Port is busy" } };
+    const html = render();
+    expect(html).toContain('role="alert">Port is busy</p>');
+    expect(html.match(/>Start local service</g)).toHaveLength(1);
+    expect(html).toContain("keeps approved phones");
+    expect(html).not.toContain("approvals are not restored");
   });
 
   it("keeps four short ordered steps with the exact command in Connection help", () => {
