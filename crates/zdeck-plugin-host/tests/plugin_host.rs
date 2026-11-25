@@ -1,6 +1,6 @@
 //! Real process transport tests; only fake Node programs, no media/Automation.
 use std::{path::PathBuf, process::Command, sync::atomic::{AtomicU64, Ordering}, time::Duration};
-use deck_lib::plugin::{ErrorKind, Outcome, PluginHost, TrustedLaunch};
+use zdeck_plugin_host::plugin::{ErrorKind, Outcome, PluginHost, TrustedLaunch};
 use serde_json::json;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -97,7 +97,7 @@ impl Drop for RegistryFixture {fn drop(&mut self){let _=std::fs::remove_dir_all(
 
 #[tokio::test]
 async fn registry_routes_two_plugins_and_isolates_failure_and_disabling() {
-    use deck_lib::plugin::{PluginRegistry,ConnectionStatus};
+    use zdeck_plugin_host::plugin::{PluginRegistry,ConnectionStatus};
     let f=RegistryFixture::new();let registry=PluginRegistry::default();
     registry.connect("alpha",f.node.clone(),f.entry("alpha","ok")).await.unwrap();
     registry.connect("beta",f.node.clone(),f.entry("beta","exit")).await.unwrap();
@@ -117,7 +117,7 @@ async fn registry_routes_two_plugins_and_isolates_failure_and_disabling() {
 
 #[tokio::test]
 async fn registry_independent_io_duplicate_enable_and_cancellation_do_not_leak_hosts() {
-    use deck_lib::plugin::{PluginRegistry,ConnectionStatus};
+    use zdeck_plugin_host::plugin::{PluginRegistry,ConnectionStatus};
     let f=RegistryFixture::new();let registry=std::sync::Arc::new(PluginRegistry::default());
     let alpha=f.entry("alpha","delay");let beta=f.entry("beta","ok");
     registry.connect("alpha",f.node.clone(),alpha.clone()).await.unwrap();registry.connect("beta",f.node.clone(),beta).await.unwrap();
@@ -135,7 +135,7 @@ async fn registry_independent_io_duplicate_enable_and_cancellation_do_not_leak_h
 
 #[tokio::test]
 async fn registry_capacity_is_bounded_and_disabled_slots_are_reclaimed() {
-    use deck_lib::plugin::PluginRegistry;
+    use zdeck_plugin_host::plugin::PluginRegistry;
     let registry=PluginRegistry::default();let missing=std::env::temp_dir().join("zdeck-no-such-runtime").to_str().unwrap().to_owned();
     let entry=std::env::temp_dir().join("zdeck-no-such-entry.js").to_str().unwrap().to_owned();
     for i in 0..16 {assert_eq!(registry.connect(&format!("p{i}"),missing.clone(),entry.clone()).await.unwrap_err().code,Some("runtime_missing"));}
@@ -239,7 +239,7 @@ async fn accepts_exact_response_limit_and_crlf() {
 
 struct ManagedFixture {
     fixture: Fixture,
-    manager: deck_lib::plugin::PluginState,
+    manager: zdeck_plugin_host::plugin::PluginState,
     program: String,
     entrypoint: PathBuf,
 }
@@ -252,7 +252,7 @@ impl ManagedFixture {
         let program = Command::new("node").args(["-p","process.execPath"]).output().unwrap();
         Self { fixture, manager: Default::default(), program: String::from_utf8(program.stdout).unwrap().trim().into(), entrypoint }
     }
-    async fn connect(&self) -> Result<deck_lib::plugin::PluginSnapshot, deck_lib::plugin::PluginError> {
+    async fn connect(&self) -> Result<zdeck_plugin_host::plugin::PluginSnapshot, zdeck_plugin_host::plugin::PluginError> {
         self.manager.connect(self.program.clone(),self.entrypoint.to_str().unwrap().into()).await
     }
 }
@@ -260,7 +260,7 @@ impl Drop for ManagedFixture { fn drop(&mut self) { let _ = std::fs::remove_file
 
 #[tokio::test]
 async fn session_connect_describes_only_and_snapshots_do_not_call_plugin() {
-    use deck_lib::plugin::ConnectionStatus;
+    use zdeck_plugin_host::plugin::ConnectionStatus;
     let f = ManagedFixture::new("ok");
     assert_eq!(f.manager.snapshot().await.status, ConnectionStatus::Disconnected);
     assert!(f.fixture.calls().is_empty());
@@ -285,7 +285,7 @@ async fn session_connect_describes_only_and_snapshots_do_not_call_plugin() {
 
 #[tokio::test]
 async fn invalid_reconnect_closes_previous_session_without_launching() {
-    use deck_lib::plugin::ConnectionStatus;
+    use zdeck_plugin_host::plugin::ConnectionStatus;
     let f = ManagedFixture::new("ok");
     f.connect().await.unwrap();
     let error = f.manager.connect("node".into(),f.entrypoint.to_str().unwrap().into()).await.unwrap_err();
@@ -301,7 +301,7 @@ async fn invalid_reconnect_closes_previous_session_without_launching() {
 
 #[tokio::test]
 async fn session_errors_stop_and_require_explicit_connect_without_replay() {
-    use deck_lib::plugin::ConnectionStatus;
+    use zdeck_plugin_host::plugin::ConnectionStatus;
     for mode in ["error","exit","ok"] {
         let f = ManagedFixture::new(mode);
         f.connect().await.unwrap();

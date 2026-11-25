@@ -6,8 +6,7 @@ mod linux_display;
 #[cfg(feature = "native-smoke")]
 mod native_smoke;
 pub use zdeck_obs as obs;
-pub mod plugin;
-pub mod plugin_install;
+pub use zdeck_plugin_host::{plugin, plugin_install};
 pub mod remote;
 pub use zdeck_system as system;
 mod tray;
@@ -256,7 +255,13 @@ async fn desktop_run_control(
 
 fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::PluginInstall, PluginError> {
     use tauri::Manager;
-    let home = app.path().home_dir().map_err(|_| PluginError::new(plugin::ErrorKind::Unavailable, plugin::Outcome::NotStarted))?;
+    let home = app.path().home_dir().map_err(|_| PluginError {
+        kind: plugin::ErrorKind::Unavailable,
+        code: None,
+        outcome: plugin::Outcome::NotStarted,
+        message: "Plugin process unavailable.",
+        hint: "Check trusted local configuration and the plugin contract before trying again.",
+    })?;
     plugin_install::PluginInstall::for_home(home)
 }
 
