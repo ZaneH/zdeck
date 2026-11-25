@@ -15,6 +15,11 @@ import { isPluginArgs, pluginIdentifier } from "./plugin";
 
 export const MAX_PAGES = 12;
 export const MAX_CONTROLS_PER_PAGE = 24;
+export const MAX_ROW_SPAN = 24;
+export const MAX_COLUMN_SPAN = 4;
+export function isSpan(value: unknown, maximum: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
+}
 
 export function findPage(deck: Deck, pageId: string): Page | undefined {
   return deck.pages.find((page) => page.id === pageId);
@@ -115,7 +120,11 @@ function patchControl(control: Control, patch: ControlPatch): Control {
   const actionChanged = action !== control.action;
   if (patch.icon !== undefined && patch.icon !== null && !isControlIcon(patch.icon)) return control;
   const icon = patch.icon === undefined ? control.icon : patch.icon;
+  if (patch.rowSpan !== undefined && !isSpan(patch.rowSpan, MAX_ROW_SPAN)) return control;
+  if (patch.columnSpan !== undefined && !isSpan(patch.columnSpan, MAX_COLUMN_SPAN)) return control;
   const base = {
+    ...(patch.rowSpan !== undefined || control.rowSpan !== undefined ? { rowSpan: patch.rowSpan ?? control.rowSpan } : {}),
+    ...(patch.columnSpan !== undefined || control.columnSpan !== undefined ? { columnSpan: patch.columnSpan ?? control.columnSpan } : {}),
     ...(icon ? { icon } : {}),
     id: control.id,
     label:
@@ -195,11 +204,12 @@ export function moveControl(
   if (!page) return deck;
   const index = page.controls.findIndex((control) => control.id === controlId);
   const target = index + delta;
-  if (index < 0 || target < 0 || target >= page.controls.length) return deck;
+  if (index < 0 || !Number.isSafeInteger(target) || target < 0 || target >= page.controls.length || target === index) return deck;
 
   return mapPage(deck, pageId, (current) => {
     const controls = [...current.controls];
-    [controls[index], controls[target]] = [controls[target], controls[index]];
+    const [control] = controls.splice(index, 1);
+    controls.splice(target, 0, control);
     return { ...current, controls };
   });
 }
@@ -286,7 +296,9 @@ function isControl(value: unknown): value is Control {
   if (typeof value.label !== "string" || !value.label.trim()) return false;
 
   if (Object.hasOwn(value, "icon") && !isControlIcon(value.icon)) return false;
-  const fields = ["id", "label", "action", ...(Object.hasOwn(value, "icon") ? ["icon"] : [])];
+  if (Object.hasOwn(value, "rowSpan") && !isSpan(value.rowSpan, MAX_ROW_SPAN)) return false;
+  if (Object.hasOwn(value, "columnSpan") && !isSpan(value.columnSpan, MAX_COLUMN_SPAN)) return false;
+  const fields = ["id", "label", "action", ...["icon", "rowSpan", "columnSpan"].filter((key) => Object.hasOwn(value, key))];
   switch (value.action) {
     case "plugin":
       return onlyFields(value, [...fields, "pluginId", "pluginAction", "pluginArgs"])

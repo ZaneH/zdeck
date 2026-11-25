@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { ChevronDown, Trash2 } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
+import { isSpan, MAX_COLUMN_SPAN, MAX_ROW_SPAN } from "../lib/deck";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
 import { IconPicker } from "./IconPicker";
 import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry } from "../lib/plugin";
@@ -17,14 +19,11 @@ interface InspectorProps {
   control: Control | null;
   pageName: string;
   previewVolume: number;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
   obs: ObsConsole;
   system: SystemConsole;
   plugin: PluginConsole;
   onPatch: (patch: ControlPatch) => void;
   onRemove: () => void;
-  onMove: (delta: number) => void;
   onPreviewPress: () => void;
   onPreviewVolume: (value: number) => void;
 }
@@ -124,14 +123,11 @@ export function Inspector({
   control,
   pageName,
   previewVolume,
-  canMoveUp,
-  canMoveDown,
   obs,
   system,
   plugin,
   onPatch,
   onRemove,
-  onMove,
   onPreviewPress,
   onPreviewVolume,
 }: InspectorProps) {
@@ -158,6 +154,9 @@ export function Inspector({
           </div>
         ) : (
           <form className="inspector-form" onSubmit={(event) => event.preventDefault()}>
+            <details className="inspector-section" open>
+              <summary className="disclosure">Appearance</summary>
+              <div className="inspector-section-body">
             <label className="field">
               <span>Label</span>
               <input
@@ -187,25 +186,43 @@ export function Inspector({
               />
             </label>
 
-            <label className="field">
-              <span>Action</span>
-              <select
-                value={control.action}
-                onChange={(event) =>
-                  onPatch({ action: event.target.value as ActionKind })
-                }
-              >
-                {control.action === "plugin" ? <option value="plugin">{control.pluginId} · {control.pluginAction}</option> : null}
-                {ACTION_CATALOG.map((action) => (
-                  <option key={action.kind} value={action.kind}>
-                    {action.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <details className="icon-picker action-picker">
+              <summary><ActionIcon kind={control.action} size={20} /><span>Action</span>
+                <span className="icon-picker-status">{control.action === "plugin" ? control.pluginId : ACTION_CATALOG.find((action) => action.kind === control.action)?.name}</span>
+                <ChevronDown className="icon-picker-toggle" size={16} aria-hidden="true" />
+              </summary>
+              <div className="icon-picker-body" role="group" aria-label="Choose action">
+                {ACTION_CATALOG.map((action) => <button type="button" key={action.kind} aria-pressed={control.action === action.kind}
+                  onClick={(event) => {
+                    onPatch({ action: action.kind });
+                    const details = event.currentTarget.closest("details")!;
+                    details.open = false;
+                    details.querySelector("summary")?.focus();
+                  }}><ActionIcon kind={action.kind} size={18} />{action.name}</button>)}
+              </div>
+            </details>
 
             <IconPicker key={control.id} control={control} manifests={enabledPluginManifests(plugin.snapshots)} onPatch={onPatch} />
 
+              </div>
+            </details>
+            <details className="inspector-section" open>
+              <summary className="disclosure">Layout</summary>
+              <div className="inspector-section-body span-fields">
+                {([['rowSpan', 'Rows', MAX_ROW_SPAN], ['columnSpan', 'Columns', MAX_COLUMN_SPAN]] as const).map(([key, label, maximum]) =>
+                  <label className="field" key={key}><span>{label}</span><input type="number" min={1} max={maximum} step={1}
+                    key={`${control.id}-${key}-${control[key] ?? 1}`} defaultValue={control[key] ?? 1}
+                    onBlur={(event) => {
+                      const value = Number(event.currentTarget.value);
+                      if (isSpan(value, maximum)) onPatch({ [key]: value });
+                      else event.currentTarget.value = String(control[key] ?? 1);
+                    }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} /></label>)}
+                <p className="field-note">Columns fit the available grid (up to 4). Rows: 1–24.</p>
+              </div>
+            </details>
+            <details className="inspector-section" open>
+              <summary className="disclosure">Action settings</summary>
+              <div className="inspector-section-body">
             {control.action === "plugin" ? <PluginControlEditor
               key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)?.config)}`}
               control={control} plugin={plugin} onPatch={onPatch} /> : null}
@@ -480,28 +497,6 @@ export function Inspector({
                   </button>
                 )
               ) : null}
-              <div className="move-group" aria-label="Reorder selected control">
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => onMove(-1)}
-                  disabled={!canMoveUp}
-                  aria-label={`Move ${control.label} up`}
-                  title="Move up"
-                >
-                  <ChevronUp size={17} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => onMove(1)}
-                  disabled={!canMoveDown}
-                  aria-label={`Move ${control.label} down`}
-                  title="Move down"
-                >
-                  <ChevronDown size={17} aria-hidden="true" />
-                </button>
-              </div>
               <button
                 type="button"
                 className="button danger"
@@ -516,6 +511,8 @@ export function Inspector({
             {(control.action === "obs-scene" && obsActive) || (systemNative && isSystemAction(control.action)) ? (
               <p className="preview-note">Runs on this computer.</p>
             ) : null}
+              </div>
+            </details>
           </form>
         )}
       </div>

@@ -62,6 +62,7 @@ import { ObsSettingsCard } from "./components/ObsSettingsCard";
 import { PageList } from "./components/PageList";
 import { PhoneDeck } from "./components/PhoneDeck";
 import { RemoteSettingsCard } from "./components/RemoteSettingsCard";
+import { useRestoreRemoteService } from "./lib/useRestoreRemoteService";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SetupGuide } from "./components/SetupGuide";
 
@@ -120,6 +121,7 @@ function NativeGate({
 
 export default function App() {
   const nativeMode = nativeAvailable();
+  const serviceRestore = useRestoreRemoteService();
   const [initial] = useState(() => loadDeck(getStorage()));
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [deck, setDeck] = useState<Deck>(initial.deck);
@@ -252,9 +254,6 @@ export default function App() {
   const selectedControl = selectedControlId
     ? findControl(deck, page.id, selectedControlId) ?? null
     : null;
-  const selectedIndex = selectedControl
-    ? page.controls.findIndex((control) => control.id === selectedControl.id)
-    : -1;
 
   useEffect(() => {
     if (selectedControlId && !findControl(deck, page.id, selectedControlId)) {
@@ -319,8 +318,13 @@ export default function App() {
     setPreviewNotice("Control removed. Local preview only.");
   };
 
-  const handleMoveControl = (control: Control, delta: number) => {
-    commitDeck(moveControl(deck, page.id, control.id, delta));
+  const handleMoveControl = (controlId: string, targetIndex: number) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    const index = page.controls.findIndex((control) => control.id === controlId);
+    const next = moveControl(deck, page.id, controlId, targetIndex - index);
+    if (next === deck) return;
+    commitDeck(next);
+    setPreviewNotice(`Moved ${page.controls[index].label} to position ${targetIndex + 1} of ${page.controls.length}.`);
   };
 
   const handleSelectPage = (pageId: string) => {
@@ -441,7 +445,7 @@ export default function App() {
       className="app-shell"
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
     >
-      <header className="topbar">
+      <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
         <a className="brand" href="#/" aria-label="zDeck editor"><BrandMark /></a>
         {route === "editor" ? (
           <PageList
@@ -491,7 +495,8 @@ export default function App() {
             <p>Phone connection, OBS, external plugin, appearance, and local storage.</p>
           </div>
 
-          <RemoteSettingsCard />
+          {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error}</p> : null}
+          {serviceRestore.pending ? <p role="status">Restoring local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
 
           <section className="settings-card">
             <h2>Appearance</h2>
@@ -606,6 +611,7 @@ export default function App() {
         <main className="workspace" id="main">
           <section className="canvas-panel" aria-labelledby="page-title">
             <h1 id="page-title" className="sr-only" tabIndex={-1}>{page.name}</h1>
+            {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error} <a className="button secondary small" href="#/settings">Review service settings</a></p> : null}
             {storageAlert ? (
               <p className="storage-alert" role="status">
                 {storageAlert}
@@ -616,13 +622,15 @@ export default function App() {
               {desktop.live ? "Live — presses run on this computer" : "Preview — tiles select controls; no desktop tile actions are sent."}
               {!desktop.ready ? " Save a valid synchronized deck before entering Live." : ""}
             </p> : null}
+            {!desktop.live ? <p className="reorder-note">Drag a key’s grip to reorder, or open it to choose a position.</p> : null}
             <div className="deck-workbench">
               <div className="control-grid">
-                {page.controls.map((control) => (
+                {page.controls.map((control, index) => (
                   <ControlTile
                     key={control.id}
                     control={control}
                     variant="editor"
+                    order={!desktop.live ? { index, total: page.controls.length, move: handleMoveControl } : undefined}
                     semantics={desktop.live ? "live" : "preview"}
                     disabled={desktop.inflight || !!desktop.pending}
                     volume={previewVolumes[control.id] ?? controlVolume(control)}
@@ -670,11 +678,8 @@ export default function App() {
               system={system}
               plugin={plugin}
               previewVolume={selectedControl ? previewVolumes[selectedControl.id] ?? controlVolume(selectedControl) : 0}
-              canMoveUp={selectedIndex > 0}
-              canMoveDown={selectedIndex >= 0 && selectedIndex < page.controls.length - 1}
               onPatch={handlePatchControl}
               onRemove={handleRemoveControl}
-              onMove={(delta) => selectedControl && handleMoveControl(selectedControl, delta)}
               onPreviewPress={() => selectedControl && previewControl(selectedControl)}
               onPreviewVolume={(value) =>
                 selectedControl && previewVolume(selectedControl, value)

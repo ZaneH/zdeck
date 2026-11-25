@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { PairingQrCode } from "./PairingQrCode";
 import { useRemoteConsole } from "../lib/useRemoteConsole";
 import { getStorage } from "../lib/persistence";
@@ -13,7 +14,7 @@ const SERVE_COMMAND = "tailscale serve --bg --https=443 http://127.0.0.1:45829";
  * The admin console lives here so leaving Settings unmounts it: polling stops
  * and the transient pairing link is dropped.
  */
-export function RemoteSettingsCard() {
+export function RemoteSettingsCard({ onServiceAction }: { onServiceAction?: () => void } = {}) {
   const remote = useRemoteConsole();
   const [chosenMode, setChosenMode] = useState<RemoteMode>(() => remote.native ? loadRemoteMode(getStorage()) : "tailscale");
   const [remembered, setRemembered] = useState(() => ({
@@ -22,6 +23,13 @@ export function RemoteSettingsCard() {
   }));
   const [drafts, setDrafts] = useState<Record<RemoteMode, string | null>>({ tailscale: null, local_https: null });
   const [commandCopyMessage, setCommandCopyMessage] = useState<string | null>(null);
+  const [commandCopied, setCommandCopied] = useState(false);
+  const [copyingCommand, setCopyingCommand] = useState(false);
+  useEffect(() => {
+    if (!commandCopied) return;
+    const timer = window.setTimeout(() => { setCommandCopied(false); setCommandCopyMessage(null); }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [commandCopied]);
   const mode = remote.running && remote.mode ? remote.mode : chosenMode;
   const observedOrigin = remote.running ? normalizeRemoteOrigin(remote.origin, mode) : null;
   const origin = drafts[mode] ?? observedOrigin ?? remembered[mode];
@@ -61,6 +69,7 @@ export function RemoteSettingsCard() {
   };
   const handleStart = async () => {
     if (!editing || !normalizedOrigin) return;
+    onServiceAction?.();
     if (await remote.start(normalizedOrigin, mode)) {
       rememberRemoteOrigin(getStorage(), normalizedOrigin, true, mode);
       rememberRemoteMode(getStorage(), mode);
@@ -70,11 +79,18 @@ export function RemoteSettingsCard() {
   };
 
   const handleCommandCopy = async () => {
+    if (copyingCommand) return;
+    setCopyingCommand(true);
+    setCommandCopied(false);
+    setCommandCopyMessage(null);
     try {
       await navigator.clipboard.writeText(SERVE_COMMAND);
+      setCommandCopied(true);
       setCommandCopyMessage("Command copied.");
     } catch {
       setCommandCopyMessage("Could not copy automatically. Select the command above and copy it manually.");
+    } finally {
+      setCopyingCommand(false);
     }
   };
 
@@ -95,6 +111,19 @@ export function RemoteSettingsCard() {
   return (
     <section className="settings-card" aria-labelledby="remote-heading">
       <h2 id="remote-heading">Phone connection</h2>
+      <div className="settings-actions">
+        {running ? <button type="button" className="button secondary" disabled={remote.busy} onClick={() => { onServiceAction?.(); void remote.stop(); }}>Stop local service</button>
+          : <button type="button" className="button primary" disabled={!editing || !normalizedOrigin} onClick={() => void handleStart()}>
+            {remote.busy ? "Working…" : "Start local service"}
+          </button>}
+      </div>
+      <p className="obs-status" role="status" aria-live="polite">
+        {remote.status === null ? "Checking local service…" : running
+          ? `Local service running on 127.0.0.1:${remote.port ?? 45829}${remote.origin ? ` · ${remote.origin}` : ""}. Phone access is not checked.`
+          : "Local service stopped. Enter or confirm the address below to start."}
+      </p>
+      <p className="field-note">zDeck remembers your on/off choice when storage is available. Stop here to keep it off next time.</p>
+      {remote.error ? <p className="settings-error" role="alert">{remote.error}</p> : null}
       <div className="segmented remote-tabs" role="tablist" aria-label="Phone connection method" aria-describedby="remote-mode-note">
         {MODES.map((item, index) => <button key={item} id={`remote-tab-${item}`} type="button" role="tab"
           className="button secondary" aria-selected={mode === item} aria-controls={`remote-panel-${item}`}
@@ -117,7 +146,7 @@ export function RemoteSettingsCard() {
             : "No Tailscale needed. Use a reachable local network and a separately configured HTTPS reverse proxy with a certificate your phone trusts."}</p>
           <ol className="remote-steps" role="list">
             {mode === "tailscale" ? <>
-              <li>Start the desktop service below.</li><li>Publish its address with Tailscale Serve.</li>
+              <li>Enter this computer’s address, then start the local service.</li><li>Publish its address with Tailscale Serve.</li>
               <li>Open that address on your phone, then scan the QR.</li><li>Request access, then approve this phone here.</li>
             </> : <>
               <li>Prepare a trusted-certificate HTTPS reverse proxy on this computer.</li>
@@ -156,13 +185,17 @@ https://192.168.1.20:8443 {
             </>}
             <p>On iPhone, open the root address in Safari and install the app first, then paste a fresh pairing link inside the installed app.
               A camera QR usually opens the browser, not the installed app’s session. Opening a link never approves a phone; approve it separately here.</p>
-            <p>Only the last successfully used address for each method is remembered on this device when storage is available, not pairing links or approvals. Start the service explicitly each session.</p>
+            <p>The last successfully used address and your service on/off choice are remembered on this device when storage is available. An on service restarts when zDeck opens, not when the operating system starts. Pairing links and approvals are not restored.</p>
           </details>
           {mode === "tailscale" ? <div className="remote-command">
             <p>On this desktop, review <code>tailscale serve status</code> first. Do not enable Funnel or overwrite an existing Serve configuration without reviewing it.</p>
             <div className="remote-command-row">
               <pre tabIndex={0} aria-label="Tailscale background HTTPS command"><code>{SERVE_COMMAND}</code></pre>
-              <button type="button" className="button secondary" onClick={() => void handleCommandCopy()}>Copy command</button>
+              <button type="button" className={`icon-button copy-command${commandCopied ? " is-copied" : ""}`}
+                aria-label={commandCopied ? "Command copied" : "Copy command"} title={commandCopied ? "Command copied" : "Copy command"}
+                disabled={copyingCommand} onClick={() => void handleCommandCopy()}>
+                {commandCopied ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+              </button>
             </div>
             {commandCopyMessage ? <span className="muted" role="status" aria-live="polite">{commandCopyMessage}</span> : null}
           </div> : null}
@@ -180,27 +213,6 @@ https://192.168.1.20:8443 {
           <p className="field-note">Changing the address requires re-pairing and may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
         </> : null}
       </div>)}
-      <div className="settings-actions">
-        {running ? <button type="button" className="button secondary" disabled={remote.busy} onClick={() => void remote.stop()}>Stop local service</button>
-          : <button type="button" className="button primary" disabled={!editing || !normalizedOrigin} onClick={() => void handleStart()}>
-            {remote.busy ? "Working…" : "Start local service"}
-          </button>}
-      </div>
-
-      <p className="obs-status" role="status" aria-live="polite">
-        {remote.status === null
-          ? "Checking local service…"
-          : running
-            ? `Local service running on 127.0.0.1:${remote.port ?? 45829}${remote.origin ? ` · ${remote.origin}` : ""}. Phone access is not checked.`
-            : "Local service stopped."}
-      </p>
-
-      {remote.error ? (
-        <p className="settings-error" role="alert">
-          {remote.error}
-        </p>
-      ) : null}
-
       {running ? (
         <>
           <p className="muted">

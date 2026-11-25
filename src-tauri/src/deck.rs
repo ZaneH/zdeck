@@ -73,6 +73,10 @@ pub enum ControlAction {
 pub struct Control {
     pub id: String,
     pub label: String,
+    #[serde(rename = "rowSpan", skip_serializing_if = "Option::is_none")]
+    pub row_span: Option<u32>,
+    #[serde(rename = "columnSpan", skip_serializing_if = "Option::is_none")]
+    pub column_span: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<crate::icons::ControlIcon>,
     #[serde(flatten)]
@@ -87,6 +91,13 @@ impl<'de> Deserialize<'de> for Control {
             .ok_or_else(|| D::Error::custom("Control ID must be a string."))?;
         let label = fields.remove("label").and_then(|v| v.as_str().map(str::to_owned))
             .ok_or_else(|| D::Error::custom("Control label must be a string."))?;
+        let row_span = fields.remove("rowSpan").map(serde_json::from_value::<u32>).transpose()
+            .map_err(|_| D::Error::custom("Invalid row span."))?;
+        let column_span = fields.remove("columnSpan").map(serde_json::from_value::<u32>).transpose()
+            .map_err(|_| D::Error::custom("Invalid column span."))?;
+        if row_span.is_some_and(|n| !(1..=24).contains(&n)) || column_span.is_some_and(|n| !(1..=4).contains(&n)) {
+            return Err(D::Error::custom("Control spans are out of range."));
+        }
         let icon = fields.remove("icon").map(serde_json::from_value::<crate::icons::ControlIcon>).transpose()
             .map_err(|_| D::Error::custom("Invalid control icon."))?;
         if icon.as_ref().is_some_and(|icon| !icon.valid()) { return Err(D::Error::custom("Invalid control icon.")); }
@@ -97,7 +108,7 @@ impl<'de> Deserialize<'de> for Control {
         }
         let action = serde_json::from_value(serde_json::Value::Object(fields))
             .map_err(|_| D::Error::custom("Invalid control action fields."))?;
-        Ok(Self { id, label, icon, action })
+        Ok(Self { id, label, row_span, column_span, icon, action })
     }
 }
 
@@ -261,6 +272,9 @@ impl Deck {
                         "Control labels must be non-empty and bounded.",
                     ));
                 }
+                if control.row_span.is_some_and(|n| !(1..=24).contains(&n)) || control.column_span.is_some_and(|n| !(1..=4).contains(&n)) {
+                    return Err(DeckError::invalid_input("Control spans are out of range."));
+                }
                 if control.icon.as_ref().is_some_and(|icon| !icon.valid()) {
                     return Err(DeckError::invalid_input("Control icons require a known built-in icon or a bounded image data URL."));
                 }
@@ -304,7 +318,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
-            icon: None,
+            row_span: None, column_span: None, icon: None,
             action: ControlAction::ObsScene {
                 scene: scene.to_string(),
             },
@@ -314,7 +328,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
-            icon: None,
+            row_span: None, column_span: None, icon: None,
             action,
         }
     }
@@ -671,6 +685,32 @@ mod tests {
         let encoded = serde_json::to_vec(&document).unwrap();
         let decoded: DeckDocument = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, document);
+    }
+
+    #[tokio::test]
+    async fn control_spans_are_optional_bounded_and_persisted() {
+        use serde_json::json;
+        let mut deck = fixture_deck();
+        assert_eq!(deck.pages[0].controls[0].row_span.unwrap_or(1), 1);
+        assert_eq!(deck.pages[0].controls[0].column_span.unwrap_or(1), 1);
+        for (field, invalid) in [("rowSpan", vec![json!(0), json!(-1), json!(1.5), json!(25), json!("2"), json!(null)]),
+                                 ("columnSpan", vec![json!(0), json!(-1), json!(1.5), json!(5), json!("2"), json!(null)])] {
+            for value in invalid {
+                let mut control = json!({"id":"mic","label":"Mic","action":"mic-mute"});
+                control[field] = value;
+                assert!(serde_json::from_value::<Control>(control).is_err());
+            }
+        }
+        deck.pages[0].controls[0].row_span = Some(24);
+        deck.pages[0].controls[0].column_span = Some(4);
+        deck.validate().unwrap();
+        let dir = TempDir::new();
+        let store = DeckStore::new(dir.0.join(DECK_FILE_NAME));
+        let initial = store.load().await.unwrap();
+        store.save(initial.revision, deck.clone()).await.unwrap();
+        assert_eq!(DeckStore::new(dir.0.join(DECK_FILE_NAME)).load().await.unwrap().deck, deck);
+        deck.pages[0].controls[0].column_span = Some(5);
+        assert!(deck.validate().is_err());
     }
 
     #[test]

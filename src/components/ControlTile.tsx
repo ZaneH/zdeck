@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { GripVertical } from "lucide-react";
 import { controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
@@ -10,6 +12,7 @@ const VOLUME_COMMIT_KEYS = new Set([
 
 interface ControlTileProps {
   control: Control;
+  order?: { index: number; total: number; move: (sourceId: string, targetIndex: number) => void };
   variant: "editor" | "phone";
   volume: number;
   selected?: boolean;
@@ -27,8 +30,10 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit,
+  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order,
 }: ControlTileProps) {
+  const [dragOver, setDragOver] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const remote = semantics === "remote";
   const live = semantics === "live";
   const volumeGesture = useRef<string | null>(null);
@@ -51,9 +56,50 @@ export function ControlTile({
 
   return (
     <article
-      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}`}
+      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}${dragOver ? " is-drop-target" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
+      style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}` } as CSSProperties}
       data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
+      onDragOver={(event) => {
+        if (!order || disabled || !event.dataTransfer.types.includes("application/x-zdeck-control")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setDragOver(true);
+      }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false); }}
+      onDrop={(event) => {
+        setDragOver(false);
+        if (!order || disabled) return;
+        event.preventDefault();
+        order.move(event.dataTransfer.getData("application/x-zdeck-control"), order.index);
+      }}
     >
+      {order ? <details className="tile-order">
+        <summary aria-label={`Move ${control.label}`} title="Drag to reorder, or choose a position"
+          draggable={!disabled} onClick={(event) => event.stopPropagation()}
+          onDragStart={(event) => {
+            event.currentTarget.closest("details")!.open = false;
+            event.dataTransfer.setData("application/x-zdeck-control", control.id);
+            event.dataTransfer.effectAllowed = "move";
+            setDragging(true);
+          }} onDragEnd={() => { setDragging(false); setDragOver(false); }}>
+          <GripVertical size={16} aria-hidden="true" />
+        </summary>
+        <label className="field"><span>Position</span><select aria-label={`Position of ${control.label}`} value={order.index} disabled={disabled}
+          onChange={(event) => order.move(control.id, Number(event.target.value))}
+          onKeyDown={(event) => {
+            if (event.altKey || event.ctrlKey || event.metaKey) return;
+            const target = event.key === "Home" ? 0 : event.key === "End" ? order.total - 1
+              : event.key === "ArrowUp" ? Math.max(0, order.index - 1)
+              : event.key === "ArrowDown" ? Math.min(order.total - 1, order.index + 1) : null;
+            if (target === null) return;
+            event.preventDefault();
+            const select = event.currentTarget;
+            order.move(control.id, target);
+            window.requestAnimationFrame(() => select.focus());
+          }}>
+          {Array.from({ length: order.total }, (_, index) => <option key={index} value={index}>{index + 1} of {order.total}</option>)}
+        </select></label>
+      </details> : null}
       {control.action === "volume" && variant === "phone" ? (
         <div className="tile-primary tile-primary-static">{content}</div>
       ) : (

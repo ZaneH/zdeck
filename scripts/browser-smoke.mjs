@@ -556,30 +556,65 @@ try {
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live'));
   await editor.waitFor("!!document.querySelector('.inspector-form')");
   check("selecting a key opens its inspector", await editor.eval("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live'"));
-  await editor.eval(click('.icon-picker > summary'));
+  await editor.eval(click('.icon-picker:not(.action-picker) > summary'));
   check('built-in icons are grouped by category', await editor.eval("[...document.querySelectorAll('.icon-picker legend')].map(el => el.textContent).join('|') === 'Built-in / Media|Built-in / System|Built-in / General'"));
   await editor.eval(setValue('.icon-picker input[type=search]', 'star'));
   check('icon search filters choices', await editor.waitFor("document.querySelectorAll('.icon-picker-grid button').length === 1"));
   await editor.eval("document.querySelector('.icon-picker-grid button').focus()");
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
-  check('keyboard selects a custom icon without changing the action', await editor.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-star') && document.querySelector('.inspector-form select').value === 'obs-scene'"));
+  check('keyboard selects a custom icon without changing the action', await editor.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-star') && document.querySelector('.action-picker [aria-pressed=\"true\"]').textContent === 'OBS scene'"));
   await editor.eval(setValue('.icon-picker input[type=search]', ''));
   await editor.screenshot('/tmp/zdeck-custom-icons-builtins.png');
   check("remove button keeps danger text with a visible tinted surface and border", await editor.eval("(() => { const cs = getComputedStyle(document.querySelector('.inspector-actions .button.danger')); return cs.color === 'rgb(239, 167, 176)' && cs.borderTopWidth === '1px' && cs.borderTopColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.boxShadow !== 'none'; })()"));
   await editor.eval(setValue('.inspector-form input[type="text"]', 'Go live edited'));
   check("inspector rename persists in the field", await editor.waitFor("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live edited'"));
 
-  const orderBefore = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
-  await editor.eval("document.querySelector('.inspector-actions .move-group button[title=\"Move down\"]').click()");
-  const orderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
-  check("inspector move-group reorders controls", orderBefore !== orderAfter, `${orderBefore} -> ${orderAfter}`);
-  check("reorder controls are labelled buttons", await editor.eval("[...document.querySelectorAll('.inspector-actions .move-group button')].every((b) => b.tagName === 'BUTTON' && !!b.getAttribute('aria-label'))"));
+  check('sidebar has collapsible appearance, layout and action sections without reorder arrows', await editor.eval("document.querySelectorAll('.inspector-section > summary').length === 3 && !document.querySelector('.inspector-actions .move-group')"));
+  await editor.eval("[...document.querySelectorAll('.inspector-section > summary')].find(el => el.textContent === 'Layout').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check('sidebar sections collapse with the keyboard', await editor.waitFor("(() => { const section = document.querySelector('.span-fields').parentElement; return !section.open && section.getBoundingClientRect().height <= section.querySelector('summary').getBoundingClientRect().height + 14; })()"));
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  await editor.eval("document.querySelector('.control-tile.is-selected .tile-order > summary').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check('keyboard opens a labelled position alternative to dragging', await editor.eval("document.querySelector('.control-tile.is-selected .tile-order').open && !!document.querySelector('.control-tile.is-selected .tile-order select[aria-label]')"));
+  const orderBefore = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
+  await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '3'));
+  const orderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
+  check('position menu moves a control without swapping intervening controls', orderAfter === 'Starting soon|Mic mute|Play / pause|Go live edited', `${orderBefore} -> ${orderAfter}`);
+  const keyboardOrderBefore = orderAfter;
+  await editor.eval("document.querySelector('.control-tile.is-selected .tile-order select').focus()");
+  await pressKey(editor, 'Home', 'Home', 36);
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
+  check('keyboard selection of a position reorders the control', keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
 
-  const keyboardOrderBefore = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
-  await editor.eval("document.querySelector('.inspector-actions .move-group button[title=\"Move up\"]').focus()");
-  await pressKey(editor, "Enter", "Enter", 13, "\r");
-  const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
-  check("keyboard activation of the focused move button reorders", keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
+  // Drag handlers expose source/target feedback and never invoke the tile action.
+  check('drag handle and drop target provide clear feedback', await editor.eval("(() => { const source = document.querySelectorAll('.control-tile')[0], target = document.querySelectorAll('.control-tile')[1]; window.__reorderData = new DataTransfer(); source.querySelector('.tile-order summary').dispatchEvent(new DragEvent('dragstart', { bubbles:true, dataTransfer:window.__reorderData })); target.dispatchEvent(new DragEvent('dragover', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); return window.__reorderData.getData('application/x-zdeck-control') !== ''; })()") && await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
+  await editor.eval("document.querySelector('.is-drop-target').dispatchEvent(new DragEvent('drop', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); document.querySelector('.is-dragging .tile-order summary').dispatchEvent(new DragEvent('dragend', { bubbles:true, dataTransfer:window.__reorderData }));");
+  check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-footer').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
+  await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '0'));
+
+  // Spans persist without forcing extra implicit columns on narrower grids.
+  await editor.eval(setValue('.span-fields label:first-child input', '2'));
+  await editor.eval(setValue('.span-fields label:nth-child(2) input', '4'));
+  check('editor honors configured row and column spans', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.control-tile.is-selected')).gridColumnStart === 'span 4'"));
+  await designPhone.eval(clickText('.phone-page-tab', 'Stream'));
+  check('phone renderer honors rows and clamps columns in portrait', await designPhone.waitFor("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 2'"));
+  await designPhone.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
+  check('phone renderer restores saved column span in landscape', await designPhone.eval("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 4' && document.documentElement.scrollWidth <= innerWidth"));
+  await designPhone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await editor.eval(setValue('.span-fields label:first-child input', '0'));
+  check('invalid span restores the last valid integer', await editor.eval("document.querySelector('.span-fields input').value === '2'"));
+  await editor.reload();
+  await editor.waitFor("!!document.querySelector('.control-tile')");
+  check('layout spans survive reload', await editor.eval("getComputedStyle(document.querySelector('.control-tile')).gridRowStart === 'span 2'"));
+  await editor.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  check('saved four-column span clamps to the two-column responsive grid', await editor.eval("getComputedStyle(document.querySelector('.control-tile')).gridColumnStart === 'span 2' && document.documentElement.scrollWidth <= innerWidth"));
+  await editor.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
+  await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
+  await editor.eval(setValue('.span-fields label:first-child input', '1'));
+  await editor.eval(setValue('.span-fields label:nth-child(2) input', '1'));
 
   // refresh persistence
   await editor.reload();
@@ -589,13 +624,23 @@ try {
   check("saved deck no longer shows onboarding", await editor.eval("!document.querySelector('.setup-shell')"));
   check('custom icon survives reload', await editor.eval("!!document.querySelector('.control-tile .lucide-star')"));
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
-  await editor.eval(click('.icon-picker > summary'));
-  await editor.eval(clickText('.icon-picker button', 'Use action default'));
+  await editor.eval(click('.icon-picker:not(.action-picker) > summary'));
+  await editor.eval(clickText('.icon-picker:not(.action-picker) button', 'Use action default'));
   check('reset restores action default', await editor.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-clapperboard') && !document.querySelector('.control-tile.is-selected .lucide-star')"));
+
+  await editor.eval("document.querySelector('.action-picker > summary').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check('action dropdown opens with a keyboard and exposes its selected action', await editor.eval("document.querySelector('.action-picker').open && document.querySelector('.action-picker [aria-pressed=true]').textContent === 'OBS scene'"));
+  await editor.eval("document.querySelector('.action-picker [aria-pressed=true]').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check('action choice closes the picker and restores focus to its trigger', await editor.waitFor("!document.querySelector('.action-picker').open && document.activeElement === document.querySelector('.action-picker > summary')"));
 
   // ------------------------------------------------------------ settings + theme segmented control
   await editor.eval(click('[aria-label="Open settings"]'));
   check("settings opens from the topbar", await editor.waitFor("!!document.querySelector('.settings-view')"));
+  await editor.eval("window.scrollTo(0, document.documentElement.scrollHeight)");
+  check('Settings back navigation remains visible while scrolling', await editor.eval("(() => { const button = document.querySelector('[aria-label=\"Back to editor\"]'); const r = button.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.closest('a') === button; })()"));
+  await editor.eval("window.scrollTo(0,0)");
   check("active settings control toggles back to the editor", await editor.eval("document.querySelector('[aria-label=\"Back to editor\"]')?.getAttribute('href') === '#/' && document.querySelector('[aria-label=\"Back to editor\"]').getAttribute('aria-current') === 'page'"));
   check("closed About this preview reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.preview-scope'); const s = d.querySelector('summary'); return !d.open && getComputedStyle(d).display === 'block' && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
   check("closed Storage details reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.storage-details'); const s = d.querySelector('summary'); return !d.open && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
@@ -884,14 +929,14 @@ try {
   check('desktop pairing status distinguishes local service from phone access', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Phone access is not checked.')"));
   check('background HTTPS command is visible outside Connection help', await admin.eval("document.querySelector('.remote-command pre').textContent === 'tailscale serve --bg --https=443 http://127.0.0.1:45829' && !document.querySelector('.remote-help').open && !document.querySelector('.remote-help .remote-command')"));
   const connectionPanelSpacing = "(() => { const panel = document.querySelector('.remote-panel:not([hidden])'), hidden = document.querySelector('.remote-panel[hidden]'); const intro = panel.querySelector(':scope > p').getBoundingClientRect(), steps = panel.querySelector('.remote-steps').getBoundingClientRect(), command = panel.querySelector('.remote-command').getBoundingClientRect(), field = panel.querySelector('.field').getBoundingClientRect(); return steps.top - intro.bottom >= 11.5 && field.top - command.bottom >= 11.5 && getComputedStyle(hidden).display === 'none' && hidden.getBoundingClientRect().height === 0; })()";
-  const commandRowVisible = "(() => { const row = document.querySelector('.remote-command-row'), pre = row.querySelector('pre'), button = row.querySelector('button'); const p = pre.getBoundingClientRect(), b = button.getBoundingClientRect(); return button.textContent === 'Copy command' && b.width > 0 && b.height > 0 && b.left - p.right >= 7.5 && Math.abs((b.top + b.height / 2) - (p.top + p.height / 2)) <= 1.5 && b.top >= 0 && b.bottom <= innerHeight && b.right <= innerWidth && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('button') === button; })()";
+  const commandRowVisible = "(() => { const row = document.querySelector('.remote-command-row'), pre = row.querySelector('pre'), button = row.querySelector('button'); const p = pre.getBoundingClientRect(), b = button.getBoundingClientRect(); return button.getAttribute('aria-label') === 'Copy command' && b.width > 0 && b.height > 0 && b.left - p.right >= 7.5 && Math.abs((b.top + b.height / 2) - (p.top + p.height / 2)) <= 1.5 && b.top >= 0 && b.bottom <= innerHeight && b.right <= innerWidth && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('button') === button; })()";
   check('visible connection panel restores 12px intro/field gaps and hidden panel takes no space', await admin.eval(connectionPanelSpacing));
   await admin.eval("document.querySelector('.remote-command-row').scrollIntoView({block:'center'})");
   check('Tailscale copy button is adjacent to the command, visible and not clipped', await admin.eval(commandRowVisible));
-  await admin.eval(clickText('.remote-command button', 'Copy command'));
+  await admin.eval(click('.remote-command button'));
   check('Copy command copies exact background command and announces success', await admin.waitFor("document.querySelector('.remote-command [role=status]')?.textContent === 'Command copied.' && window.__clipboardText === 'tailscale serve --bg --https=443 http://127.0.0.1:45829'"));
   await admin.eval("window.__clipboardFails = true");
-  await admin.eval(clickText('.remote-command button', 'Copy command'));
+  await admin.eval(click('.remote-command button'));
   check('blocked clipboard provides a selectable command and manual-copy fallback', await admin.waitFor("document.querySelector('.remote-command [role=status]')?.textContent.includes('copy it manually') && document.querySelector('.remote-command pre').tabIndex === 0"));
   await admin.eval("window.__clipboardFails = false");
   check('running service hydrates the address without persisting session or pairing data', await admin.eval("document.querySelector('input[type=url]').value === 'https://fixture.tailnet.ts.net' && !localStorage.getItem('deck.remote.origin.v1') && !window.__adminCalls.includes('remote_start')"));
@@ -993,6 +1038,25 @@ try {
   check('Settings remount restores the last successful address, not its unsaved draft', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
   await admin.reload();
   check('program-session reload remembers the address without auto-starting service', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  check('explicit start saves desired on without pairing data', await admin.waitFor("JSON.parse(localStorage.getItem('deck.remote.desired.v1'))?.origin === 'https://new.tailnet.ts.net'"));
+  await admin.eval("location.hash='#/'");
+  await admin.waitFor("!!document.querySelector('.workspace')");
+  check('leaving Settings does not stop the service or overwrite desired on', await admin.eval("JSON.parse(localStorage.getItem('deck.remote.desired.v1')).mode === 'tailscale'"));
+  await admin.reload();
+  check('application relaunch restores desired on outside Settings exactly once', await admin.waitFor("window.__remoteStartArgs.length === 1 && !!document.querySelector('.workspace')") && await admin.eval("window.__remoteStartArgs[0].origin === 'https://new.tailnet.ts.net' && JSON.parse(localStorage.getItem('deck.remote.desired.v1')).mode === 'tailscale'"));
+  await admin.eval("location.hash='#/settings'");
+  await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service running')");
+  await admin.eval("window.__originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if(key === 'deck.remote.desired.v1') throw new Error('blocked'); return window.__originalSetItem.call(this,key,value); }");
+  await admin.eval(clickText('.settings-actions button', 'Stop local service'));
+  check('failed off-state persistence accurately warns that the service may restart', await admin.waitFor("document.querySelector('[aria-labelledby=remote-heading] .settings-error')?.textContent.includes('off state could not be saved')"));
+  await admin.eval("Storage.prototype.setItem = window.__originalSetItem");
+  await admin.eval(clickText('.settings-actions button', 'Start local service'));
+  await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service running')");
+  await admin.eval(clickText('.settings-actions button', 'Stop local service'));
+  check('deliberate stop persists desired off', await admin.waitFor("localStorage.getItem('deck.remote.desired.v1') === 'false'"));
+  await admin.reload();
+  check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
   check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   // ------------------------------------------------------------ plugin UI (owned IPC fake, never osascript)
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
@@ -1067,14 +1131,14 @@ try {
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.add-control')");
   await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
-  await admin.eval(click('.icon-picker > summary'));
+  await admin.eval(click('.icon-picker:not(.action-picker) > summary'));
   await admin.eval(click('[aria-label="spotify / Media: Media badge"]'));
   check('a plugin icon can decorate an unrelated built-in action', await admin.waitFor("document.querySelector('.control-tile.is-selected[data-action=mic-mute] img')?.naturalWidth > 0"));
   await admin.eval(click('.add-control'));
   check('all enabled manifests appear in the action library as escaped text', await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Spotify <volume>') && [...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Other action')") && await admin.eval("!document.querySelector('.action-library volume')"));
   await admin.eval(clickText('.action-row', 'Spotify <volume>'));
   await admin.waitFor("!!document.querySelector('.inspector-form .native-control input[type=number]')");
-  await admin.eval(click('.icon-picker > summary'));
+  await admin.eval(click('.icon-picker:not(.action-picker) > summary'));
   check('plugin icons grouped by plugin and category', await admin.waitFor("[...document.querySelectorAll('.icon-picker legend')].some(el => el.textContent === 'spotify / Media') && [...document.querySelectorAll('.icon-picker legend')].some(el => el.textContent === 'spotify / Brand')"));
   await admin.eval(click('[aria-label="spotify / Brand: Logo"]'));
   check('plugin PNG decodes on the control', await admin.waitFor("document.querySelector('.control-tile.is-selected img')?.naturalWidth === 32"));
@@ -1401,7 +1465,12 @@ try {
   check('full editor with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
   check('narrow editor stacks the inspector below the grid', await narrow.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom - 1"));
   check('full page does not offer an extra control slot', await narrow.eval("!document.querySelector('.empty-key')"));
-  check('narrow editor reorder targets are touch-sized', await narrow.eval("(() => { const buttons = [...document.querySelectorAll('.inspector-actions .move-group button')]; return buttons.length === 2 && buttons.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
+  check('narrow editor reorder targets are touch-sized', await narrow.eval("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
+  await narrow.eval("document.querySelector('.tile-order > summary').scrollIntoView({block:'center'})");
+  const touchOrderHandle = await narrow.eval(rectOf('.tile-order > summary'));
+  await narrow.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x:touchOrderHandle.cx,y:touchOrderHandle.cy}] });
+  await narrow.send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] });
+  check('touch opens the labelled position alternative without pressing the key', await narrow.waitFor("document.querySelector('.tile-order').open && !!document.querySelector('.tile-order select[aria-label]') && !document.querySelector('.is-pressed')"));
   await narrow.eval("location.hash = '#/phone'");
   await narrow.waitFor("!!document.querySelector('.phone-shell')");
   check('full phone deck with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));

@@ -29,6 +29,8 @@ interface ControlBase {
   id: string;
   label: string;
   icon?: ControlIcon;
+  rowSpan?: number;
+  columnSpan?: number;
 }
 
 export interface ObsSceneControl extends ControlBase {
@@ -87,6 +89,8 @@ export interface Deck {
 }
 
 export type ControlPatch = {
+  rowSpan?: number;
+  columnSpan?: number;
   label?: string;
   /** null resets to the action's default icon. */
   icon?: ControlIcon | null;

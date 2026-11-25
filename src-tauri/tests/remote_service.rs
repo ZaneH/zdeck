@@ -1307,7 +1307,7 @@ async fn commands_are_strict_and_reject_bad_input() {
 async fn plugin_deck(env: &TestEnv) {
     let mut deck = default_deck();
     deck.pages[0].controls.push(deck_lib::deck::Control {
-        id: "ctl_plugin".into(), label: "Plugin volume".into(), icon: None,
+        id: "ctl_plugin".into(), label: "Plugin volume".into(), row_span: None, column_span: None, icon: None,
         action: deck_lib::deck::ControlAction::Plugin {
             plugin_id: "fake".into(), plugin_action: "set-volume".into(),
             plugin_args: json!({"volume":50}).as_object().unwrap().clone(),
@@ -1352,7 +1352,7 @@ let count=0;require('node:readline').createInterface({input:process.stdin}).on('
 });
 "#;
         std::fs::write(&entry,source).unwrap();env.plugin.connect(id,node.clone(),entry.to_str().unwrap().into()).await.unwrap();
-        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),icon:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
+        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),row_span:None,column_span:None,icon:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
     }
     env.deck.save(1,deck).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
     for (id,volume) in [("alpha",17),("beta",83)] {

@@ -116,7 +116,8 @@ describe("pairing QR code", () => {
     // The link is present exactly once, as the selectable input value.
     expect(html.split(INVITE_URL).length - 1).toBe(1);
     // The raw token never appears in the SVG element.
-    const svg = html.slice(html.indexOf("<svg"), html.indexOf("</svg>") + 6);
+    const svg = html.match(/<svg[^>]*class="pairing-qr"[\s\S]*?<\/svg>/)?.[0];
+    expect(svg).toBeDefined();
     expect(svg).not.toContain("a".repeat(64));
     expect(svg).not.toContain(INVITE_URL);
   });
@@ -128,18 +129,18 @@ describe("pairing QR code", () => {
     });
     const html = render();
     expect(html).toContain("QR code unavailable");
-    expect(html).not.toContain("<svg");
+    expect(html).not.toContain('class="pairing-qr"');
     expect(html).toContain(overflowUrl);
     expect(html).toContain("Copy link");
   });
 
   it("shows no QR code without a live invitation or while stopped", () => {
     state.remote = makeRemote({ invitation: null });
-    expect(render()).not.toContain("<svg");
+    expect(render()).not.toContain('class="pairing-qr"');
 
     state.remote = makeRemote({ running: false, invitation: null });
     const stopped = render();
-    expect(stopped).not.toContain("<svg");
+    expect(stopped).not.toContain('class="pairing-qr"');
     expect(stopped).not.toContain("Copy link");
   });
 
@@ -195,7 +196,7 @@ describe("local service clarity", () => {
     expect(start).toBeGreaterThan(-1);
     const steps = html.slice(start, html.indexOf("</ol>", start));
     expect((steps.match(/<li>/g) ?? []).length).toBe(4);
-    expect(steps).toContain("Start the desktop service below.");
+    expect(steps).toContain("Enter this computer’s address, then start the local service.");
     expect(steps).toContain("Publish its address with Tailscale Serve.");
     expect(steps).toContain("Open that address on your phone, then scan the QR.");
     expect(steps).toContain("Request access, then approve this phone here.");
