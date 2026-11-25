@@ -507,7 +507,7 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
   .copy-command.is-copied svg { animation: copy-confirm .18s ease-out; }
   @keyframes copy-confirm { from { transform: scale(.8); opacity: .5; } to { transform: scale(1); opacity: 1; } }
 }
-.tile-order { position: absolute; top: 2px; right: 2px; z-index: 2; }
+.tile-order { position: absolute; top: 2px; left: 2px; z-index: 2; }
 .tile-order > summary { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 4px; cursor: grab; color: var(--text-muted); background: var(--surface); list-style: none; }
 .tile-order > summary::-webkit-details-marker { display: none; }
 .reorder-note { margin: 0 0 10px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
@@ -517,7 +517,7 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
   .tile-order > label { top: 46px; }
 }
 .tile-order[open] { z-index: 5; }
-.tile-order > label { position: absolute; top: 30px; right: 0; width: 140px; padding: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 5px; box-shadow: 0 3px 8px #0004; }
+.tile-order > label { position: absolute; top: 30px; left: 0; width: 140px; padding: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 5px; box-shadow: 0 3px 8px #0004; }
 .is-reorderable .tile-primary { padding-top: 26px; }
 .control-tile.is-dragging { opacity: .45; }
 .control-tile.is-drop-target { outline: 3px dashed var(--accent); outline-offset: 3px; }
