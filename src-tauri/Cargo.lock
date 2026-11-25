@@ -644,6 +644,7 @@ dependencies = [
  "tokio-websockets",
  "url",
  "zdeck-obs",
+ "zdeck-schema",
 ]
 
 [[package]]
@@ -4753,6 +4754,14 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tokio-websockets",
+]
+
+[[package]]
+name = "zdeck-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

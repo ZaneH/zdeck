@@ -13,7 +13,6 @@ use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, proce
 const REQUEST_BYTES: usize = 16_384;
 const RESPONSE_BYTES: usize = 65_536;
 const STDERR_BYTES: usize = 8192;
-const SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
 /// Deliberately not deserializable or serializable. Only explicit local trust
 /// configuration may supply this record. Path arguments must be absolute;
@@ -96,13 +95,8 @@ pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<Stri
 #[serde(deny_unknown_fields)]
 pub struct IntegerField { #[serde(rename = "type")] pub field_type: String, pub minimum: Value, pub maximum: Value }
 
-pub(crate) fn identifier(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.as_bytes()[0].is_ascii_lowercase()
-        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-pub(crate) fn integer(v: &Value) -> Option<f64> {
-    v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0 && n.abs() <= SAFE_INTEGER)
-}
+pub(crate) use zdeck_schema::plugin::{identifier, integer};
+
 pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
     // JSON.parse/JSON.stringify in the SDK canonicalize integer-valued numbers
     // (including 1.0 and -0) before measuring the manifest.

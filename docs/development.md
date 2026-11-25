@@ -17,7 +17,8 @@ Use Node.js 22.18+ and npm 10+. Run `npm ci` in the repository root to install t
 | `npm run tauri:build -- --debug --no-bundle` | Debug executable without installer packaging |
 | `cargo test --locked --manifest-path src-tauri/Cargo.toml` | Desktop Rust suite; use the native build environment |
 | `cargo test --locked --manifest-path src-tauri/Cargo.toml -p zdeck-obs` | Standalone OBS fake-peer tests; no desktop/native dependencies or live OBS required |
-| `cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace` | Full Rust workspace suite (desktop and OBS); requires the native build environment |
+| `cargo test --locked --manifest-path src-tauri/Cargo.toml -p zdeck-schema` | Standalone deck/icon validation and stored-document migration tests; no desktop/native dependencies |
+| `cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace` | Full Rust workspace suite (desktop, OBS and schema); requires the native build environment |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml --all --check` | Workspace Rust formatting |
 | `npm run storybook` | Real components with local fixtures at `http://localhost:6006` |
 | `npm run storybook:build` | Standalone fixture site in ignored `storybook-static/` |
@@ -25,7 +26,7 @@ Use Node.js 22.18+ and npm 10+. Run `npm ci` in the repository root to install t
 | `npm run plugin:package:spotify` | Complete local Spotify folder in `dist/plugins/spotify/`; run after frontend build |
 | `(cd packages/plugin-sdk && npm test)` | SDK, packed-consumer and fake Spotify checks; see [plugin verification](plugins.md#verification) |
 
-The Cargo workspace is rooted at `src-tauri/Cargo.toml`, with a shared `src-tauri/Cargo.lock` and target directory. The reusable OBS adapter lives in `crates/zdeck-obs`; desktop callers retain the `deck_lib::obs` path through a re-export. `cargo test --locked --manifest-path crates/zdeck-obs/Cargo.toml` also runs just the OBS crate. Neither standalone command builds Tauri or needs frontend assets; full-workspace tests need the native prerequisites and `npm run build` first.
+The Cargo workspace is rooted at `src-tauri/Cargo.toml`, with a shared `src-tauri/Cargo.lock` and target directory. The reusable OBS adapter lives in `crates/zdeck-obs`; desktop callers retain the `deck_lib::obs` path through a re-export. `cargo test --locked --manifest-path crates/zdeck-obs/Cargo.toml` also runs just the OBS crate. The pure schema crate lives in `crates/zdeck-schema` and depends only on `serde` and `serde_json`. It owns deck/icon models, defaults, validation, typed deck errors, plugin identifier/safe-integer primitives and stored-document v1-to-v2 decoding. Desktop callers retain `deck_lib::deck::*` and `deck_lib::icons::*` through re-exports; `DeckStore`, file limits/naming, bounded reads, locking, atomic writes and revision conflict handling stay in the app. `cargo test --locked --manifest-path crates/zdeck-schema/Cargo.toml` runs just the schema crate. Standalone schema/OBS commands do not build Tauri or need frontend assets; full-workspace tests need the native prerequisites and `npm run build` first. CI runs both standalone crates on the existing macOS/Windows/Linux matrix before installing native prerequisites.
 
 A later frontend build can clear `dist/`, including a packaged plugin folder. Packaging a plugin does not install, enable or publish it. No automatic download or registry service is part of the desktop catalog.
 
@@ -114,6 +115,8 @@ Reference: [Tauri system tray](https://v2.tauri.app/learn/system-tray/) and [`Tr
 ```text
 src/                    React editor, simulated preview, authenticated phone client
 src/lib/                Schema, persistence, native bridges, connection/action lifecycles
+crates/zdeck-schema/    Pure Rust deck/icon models, validation and stored-document migration
+crates/zdeck-obs/       Reusable OBS adapter and fake-peer tests
 src-tauri/src/          Native deck store, shared action runner, OBS/system/plugin adapters,
                         private phone service, Linux display initialization
 src-tauri/tests/        Rust adapter, storage, host/discovery and real loopback service tests

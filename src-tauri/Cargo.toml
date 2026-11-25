@@ -1,5 +1,5 @@
 [workspace]
-members = ["../crates/zdeck-obs"]
+members = ["../crates/zdeck-obs", "../crates/zdeck-schema"]
 resolver = "2"
 
 [package]
@@ -28,6 +28,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 zdeck-obs = { path = "../crates/zdeck-obs" }
+zdeck-schema = { path = "../crates/zdeck-schema" }
 axum = "0.8"
 base64 = "0.22"
 futures-util = "0.3"
