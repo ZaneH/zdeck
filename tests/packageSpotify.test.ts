@@ -123,10 +123,10 @@ describe("self-contained Spotify folder packaging", () => {
     const npmCli = process.env.npm_execpath ?? (process.platform === "win32"
       ? join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js") : undefined);
     const install = spawnSync(npmCli ? process.execPath : "npm", [
-      ...(npmCli ? [npmCli] : []), "install", "--prefix", plugin, "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
+      ...(npmCli ? [npmCli] : []), "install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
       "--cache", join(temp, "empty-cache"), "--registry", "http://127.0.0.1:1",
       "--userconfig", join(temp, "empty-user.npmrc"), "--globalconfig", join(temp, "empty-global.npmrc"),
-    ], { cwd: temp, encoding: "utf8", timeout: 30000, maxBuffer: 65536 });
+    ], { cwd: plugin, encoding: "utf8", timeout: 30000, maxBuffer: 65536 });
     expect(install.error, install.error?.stack).toBeUndefined();
     expect(install.status, install.stderr).toBe(0);
     const lock = JSON.parse(await readFile(join(plugin, "package-lock.json"), "utf8"));
