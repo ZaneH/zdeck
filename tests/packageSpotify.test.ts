@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { packageSpotify } from "../scripts/package-spotify.mjs";
 
+const scriptUrl = new URL("../scripts/package-spotify.mjs", import.meta.url).href;
+const { packageSpotify } = await import(scriptUrl) as { packageSpotify: (directory: string) => Promise<string> };
 const fixtures: string[] = [];
 async function fixture() {
   const temp = await realpath(await mkdtemp(join(tmpdir(), "zdeck-spotify-package-")));

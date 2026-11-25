@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Offline file packaging only. Never installs dependencies or evaluates plugin code.
 import { constants } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
