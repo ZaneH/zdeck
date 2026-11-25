@@ -15,13 +15,17 @@ Use Node.js 22.18+ and npm 10+. Run `npm ci` in the repository root to install t
 | `npm run preview` | Serve the production build at `http://localhost:4173`; build first |
 | `npm run tauri:dev` | Native app; requires Rust and platform libraries |
 | `npm run tauri:build -- --debug --no-bundle` | Debug executable without installer packaging |
-| `cargo test --locked --manifest-path src-tauri/Cargo.toml` | Default Rust suite; use the native build environment |
-| `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | Rust formatting |
+| `cargo test --locked --manifest-path src-tauri/Cargo.toml` | Desktop Rust suite; use the native build environment |
+| `cargo test --locked --manifest-path src-tauri/Cargo.toml -p zdeck-obs` | Standalone OBS fake-peer tests; no desktop/native dependencies or live OBS required |
+| `cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace` | Full Rust workspace suite (desktop and OBS); requires the native build environment |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --all --check` | Workspace Rust formatting |
 | `npm run storybook` | Real components with local fixtures at `http://localhost:6006` |
 | `npm run storybook:build` | Standalone fixture site in ignored `storybook-static/` |
 | `npm run landing:dev` / `npm run landing:build` | Separate landing site / build to `dist-landing/` |
 | `npm run plugin:package:spotify` | Complete local Spotify folder in `dist/plugins/spotify/`; run after frontend build |
 | `(cd packages/plugin-sdk && npm test)` | SDK, packed-consumer and fake Spotify checks; see [plugin verification](plugins.md#verification) |
+
+The Cargo workspace is rooted at `src-tauri/Cargo.toml`, with a shared `src-tauri/Cargo.lock` and target directory. The reusable OBS adapter lives in `crates/zdeck-obs`; desktop callers retain the `deck_lib::obs` path through a re-export. `cargo test --locked --manifest-path crates/zdeck-obs/Cargo.toml` also runs just the OBS crate. Neither standalone command builds Tauri or needs frontend assets; full-workspace tests need the native prerequisites and `npm run build` first.
 
 A later frontend build can clear `dist/`, including a packaged plugin folder. Packaging a plugin does not install, enable or publish it. No automatic download or registry service is part of the desktop catalog.
 

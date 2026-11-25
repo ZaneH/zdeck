@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use base64::engine::{general_purpose, Engine as _};
-use deck_lib::obs::{ObsError, ObsState, Timeouts};
+use zdeck_obs::{ObsError, ObsState, Timeouts};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

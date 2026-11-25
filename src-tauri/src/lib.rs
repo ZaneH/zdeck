@@ -5,7 +5,7 @@ pub mod icons;
 mod linux_display;
 #[cfg(feature = "native-smoke")]
 mod native_smoke;
-pub mod obs;
+pub use zdeck_obs as obs;
 pub mod plugin;
 pub mod plugin_install;
 pub mod remote;
