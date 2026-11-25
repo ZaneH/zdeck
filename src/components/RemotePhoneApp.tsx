@@ -252,6 +252,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const active = remote.phase === "active";
   const controlsDisabled = !active || remote.busyControlId !== null;
   const hasVolume = page.controls.some((control) => control.action === "volume");
+  const latestActivity = remote.activity[0];
 
   return (
     <div className="remote-app">
@@ -295,6 +296,12 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
           <p className="remote-target-note">
             Volume sliders set a target level. They show the value about to be
             sent, not a live device reading.
+          </p>
+        ) : null}
+
+        {latestActivity && (latestActivity.state === "failed" || latestActivity.state === "not_applied") ? (
+          <p className="remote-error" role="status">
+            {latestActivity.label}: {stateLabel(latestActivity.state)} — {latestActivity.message}
           </p>
         ) : null}
 

@@ -183,9 +183,13 @@ fn obs_error_result(id: &str, error: ObsError) -> CommandResult {
     CommandResult { id: id.to_string(), state, message: error.to_string(), code: None, observed: None }
 }
 fn system_error_result(id: &str, error: SystemError) -> CommandResult {
-    let code = matches!(&error, SystemError::Unsupported { .. }).then_some("platform_unsupported");
+    let code = match &error {
+        SystemError::Unsupported { .. } => Some("platform_unsupported"),
+        SystemError::MediaKeySent { .. } => Some("media_key_sent"),
+        _ => None,
+    };
     let state = match error {
-        SystemError::Timeout { .. } | SystemError::OutcomeUnknown { .. } => CommandState::Unknown,
+        SystemError::Timeout { .. } | SystemError::OutcomeUnknown { .. } | SystemError::MediaKeySent { .. } => CommandState::Unknown,
         _ => CommandState::Failed,
     };
     CommandResult { id: id.to_string(), state, message: error.to_string(), code, observed: None }
@@ -195,9 +199,29 @@ mod platform_tests {
     use super::*;
     #[test]
     fn unsupported_system_actions_keep_a_machine_readable_reason() {
-        let result = system_error_result("test", SystemError::Unsupported { message: "Linux only".into() });
+        let result = system_error_result("test", SystemError::Unsupported { message: "This backend is unavailable".into() });
         assert_eq!(result.state, CommandState::Failed);
         assert_eq!(result.code, Some("platform_unsupported"));
+    }
+    #[test]
+    fn sent_media_keys_are_distinct_from_genuine_unknown_outcomes() {
+        let sent = system_error_result("media", SystemError::MediaKeySent { message: "Media key sent".into() });
+        assert_eq!(sent.state, CommandState::Unknown);
+        assert_eq!(sent.code, Some("media_key_sent"));
+        assert!(sent.observed.is_none());
+        let wire = serde_json::to_value(&sent).unwrap();
+        assert_eq!(wire["state"], "unknown");
+        assert_eq!(wire["code"], "media_key_sent");
+        assert!(wire.get("observed").is_none());
+        for error in [
+            SystemError::OutcomeUnknown { message: "Media key sent; playback is unobservable".into() },
+            SystemError::Timeout { message: "Native request deadline".into() },
+        ] {
+            let result = system_error_result("media", error);
+            assert_eq!(result.state, CommandState::Unknown);
+            assert!(result.observed.is_none());
+            assert_eq!(result.code, None);
+        }
     }
 }
 pub(crate) fn interrupted_result(id: &str, plugin: bool) -> CommandResult {

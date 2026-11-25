@@ -2,15 +2,20 @@
 // Headless Chrome smoke test over raw CDP. No browser dependency: Node 22 fetch/WebSocket only.
 // Usage: node scripts/browser-smoke.mjs [--keep]
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, cpSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { readFile, stat } from "node:fs/promises";
 
 const ROOT = process.cwd();
-const CHROME = process.env.CHROME_BIN || "google-chrome";
+const CHROME = process.env.CHROME_BIN || (existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  : "google-chrome");
 const KEEP = process.argv.includes("--keep");
+// Optional: SMOKE_ARTIFACT_DIR=<dir> writes a screenshot, the full AX tree and console errors per screen.
+const ARTIFACT_DIR = process.env.SMOKE_ARTIFACT_DIR || "";
+if (ARTIFACT_DIR) mkdirSync(ARTIFACT_DIR, { recursive: true });
 const results = [];
 let failures = 0;
 
@@ -43,32 +48,40 @@ const MIME = {
   ".ttf": "font/ttf",
 };
 let serveRoot = "";
-const server = createServer(async (req, res) => {
-  const url = new URL(req.url, "http://localhost");
-  let pathname = decodeURIComponent(url.pathname);
-  if (pathname.endsWith("/")) pathname += "index.html";
-  let filePath = join(serveRoot, normalize(pathname).replace(/^(\.\.[/\\])+/, ""));
-  try {
-    const info = await stat(filePath);
-    if (info.isDirectory()) filePath = join(filePath, "index.html");
-  } catch {
-    filePath = join(serveRoot, "index.html");
-  }
-  try {
-    const data = await readFile(filePath);
-    res.writeHead(200, {
-      "content-type": MIME[extname(filePath)] ?? "application/octet-stream",
-      "cache-control": "no-store",
-    });
-    res.end(data);
-  } catch {
-    res.writeHead(404);
-    res.end("not found");
-  }
-});
+let landingRoot = "";
+function createStaticServer(rootRef) {
+  return createServer(async (req, res) => {
+    const root = rootRef();
+    const url = new URL(req.url, "http://localhost");
+    let pathname = decodeURIComponent(url.pathname);
+    if (pathname.endsWith("/")) pathname += "index.html";
+    let filePath = join(root, normalize(pathname).replace(/^(\.\.[/\\])+/, ""));
+    try {
+      const info = await stat(filePath);
+      if (info.isDirectory()) filePath = join(filePath, "index.html");
+    } catch {
+      filePath = join(root, "index.html");
+    }
+    try {
+      const data = await readFile(filePath);
+      res.writeHead(200, {
+        "content-type": MIME[extname(filePath)] ?? "application/octet-stream",
+        "cache-control": "no-store",
+      });
+      res.end(data);
+    } catch {
+      res.writeHead(404);
+      res.end("not found");
+    }
+  });
+}
+const server = createStaticServer(() => serveRoot);
+const landingServer = createStaticServer(() => landingRoot);
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
+await new Promise((r) => landingServer.listen(0, "127.0.0.1", r));
 const PORT = server.address().port;
 const BASE = `http://127.0.0.1:${PORT}`;
+const LANDING_BASE = `http://127.0.0.1:${landingServer.address().port}`;
 
 // ---------------------------------------------------------------- CDP client
 class Cdp {
@@ -182,6 +195,15 @@ class Page {
     const { data } = await this.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(path, Buffer.from(data, "base64"));
   }
+  // Optional artifact bundle for one screen. No-op unless SMOKE_ARTIFACT_DIR is set.
+  async captureArtifacts(name) {
+    if (!ARTIFACT_DIR) return;
+    await this.screenshot(join(ARTIFACT_DIR, `${name}.png`));
+    await this.send("Accessibility.enable").catch(() => {});
+    const { nodes } = await this.send("Accessibility.getFullAXTree");
+    writeFileSync(join(ARTIFACT_DIR, `${name}.ax.json`), JSON.stringify(nodes, null, 2));
+    writeFileSync(join(ARTIFACT_DIR, `${name}.console.json`), JSON.stringify(this.errors, null, 2));
+  }
 }
 
 // ---------------------------------------------------------------- chrome
@@ -237,6 +259,8 @@ async function openPage(label, url, viewport, browserContextId) {
   await page.send("Runtime.enable");
   await page.send("Log.enable");
   await page.send("Network.enable");
+  // Keep the page focused the way a real user window is; without this, headless windows blur mid-test.
+  await page.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
   if (viewport) {
     await page.send("Emulation.setDeviceMetricsOverride", {
       width: viewport.width,
@@ -303,10 +327,83 @@ const versionA = swVersion(buildA);
 const versionB = swVersion(buildB);
 check("two builds produce distinct service-worker cache versions", versionA !== versionB, `${versionA} vs ${versionB}`);
 
+const landingDir = mkdtempSync(join(tmpdir(), "deck-landing-"));
+console.log("Building landing page...");
+execFileSync("npm", ["run", "landing:build"], { cwd: ROOT, stdio: "ignore" });
+cpSync(join(ROOT, "dist-landing"), landingDir, { recursive: true });
+landingRoot = landingDir;
+
 serveRoot = buildA;
 const livePages = [];
 
 try {
+  // ------------------------------------------------------------ landing page mini deck
+  const landingDesktop = await openPage("landing-desktop", `${LANDING_BASE}/`, { width: 1280, height: 900 });
+  livePages.push(landingDesktop);
+  await landingDesktop.waitFor("!!document.querySelector('.lp-deck-grid')");
+  const landingStatus = () => landingDesktop.eval("document.querySelector('.lp-status-pill').textContent.trim()");
+  const heldKey = "document.querySelector('.lp-deck-grid .control-tile.is-pressed')";
+  check("landing mini deck renders its essential controls", await landingDesktop.eval("[...document.querySelectorAll('.lp-deck-grid button')].length === 4 && !!document.querySelector('.lp-deck-grid input[type=range]')"));
+  check("landing desktop has no horizontal overflow", await landingDesktop.eval("document.documentElement.scrollWidth <= innerWidth"));
+  await landingDesktop.captureArtifacts("landing-desktop");
+
+  // Press holds the key; releasing off the key must clear it and never stick.
+  const sceneButton = await landingDesktop.eval(rectOf('.lp-deck-grid button[aria-label^="Press"]'));
+  await landingDesktop.send("Input.dispatchMouseEvent", { type: "mousePressed", x: sceneButton.cx, y: sceneButton.cy, button: "left", clickCount: 1, buttons: 1 });
+  check("landing pointer press shows the held state", await landingDesktop.waitFor(`!!${heldKey}`));
+  await landingDesktop.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.max(2, sceneButton.left - 20), y: Math.min(890, sceneButton.bottom + 40), button: "left", buttons: 1 });
+  await landingDesktop.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.max(2, sceneButton.left - 20), y: Math.min(890, sceneButton.bottom + 40), button: "left", clickCount: 1, buttons: 1 });
+  check("landing release outside the key clears the held state", await landingDesktop.waitFor(`!${heldKey}`));
+
+  // A number shortcut fires once and ignores auto-repeat; release clears the held state.
+  await landingDesktop.reload();
+  await landingDesktop.waitFor("!!document.querySelector('.lp-deck-grid')");
+  await landingDesktop.send("Page.bringToFront").catch(() => {});
+  const digitKey = (type, repeat) => landingDesktop.send("Input.dispatchKeyEvent", { type, key: "1", code: "Digit1", windowsVirtualKeyCode: 49, nativeVirtualKeyCode: 49, ...(repeat ? { autoRepeat: true } : {}) });
+  await digitKey("rawKeyDown", false);
+  check("number shortcut holds the matching key", await landingDesktop.waitFor(`!!${heldKey}`));
+  await digitKey("rawKeyDown", true);
+  check("number shortcut ignores auto-repeat", (await landingStatus()) === "Scene: Desktop", await landingStatus());
+  await digitKey("keyUp", false);
+  check("releasing the number clears the held state", await landingDesktop.waitFor(`!${heldKey}`));
+
+  // One Enter press on a focused key activates exactly once.
+  await landingDesktop.eval("document.querySelector('.lp-deck-grid button').focus()");
+  await pressKey(landingDesktop, "Enter", "Enter", 13, "\r");
+  check("Enter activates a focused landing key once", (await landingStatus()) === "Scene: Be right back", await landingStatus());
+
+  // Slider commit fires on release, not while the key gesture is in flight.
+  await landingDesktop.eval("document.querySelector('.lp-deck-grid input[type=range]').focus()");
+  await landingDesktop.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 });
+  check("landing slider does not commit during the key gesture", !(await landingStatus()).startsWith("Speakers"), await landingStatus());
+  await landingDesktop.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 });
+  check("landing slider commits on release", (await landingStatus()).startsWith("Speakers"), await landingStatus());
+
+  // Narrow phone: same controls, no overflow, and a cancelled touch never commits.
+  const landingPhone = await openPage("landing-phone", `${LANDING_BASE}/`, { width: 390, height: 844, mobile: true });
+  livePages.push(landingPhone);
+  await landingPhone.waitFor("!!document.querySelector('.lp-deck-grid')");
+  check("landing phone fits without horizontal overflow", await landingPhone.eval("document.documentElement.scrollWidth <= innerWidth"));
+  check("landing phone keeps the essential mini deck controls", await landingPhone.eval("[...document.querySelectorAll('.lp-deck-grid button')].length === 4 && !!document.querySelector('.lp-deck-grid input[type=range]')"));
+  await landingPhone.captureArtifacts("landing-phone");
+
+  const phoneStatus = () => landingPhone.eval("document.querySelector('.lp-status-pill').textContent.trim()");
+  const phoneSlider = await landingPhone.eval(rectOf(".lp-deck-grid input[type=range]"));
+  const sliderX = (fraction) => phoneSlider.left + (phoneSlider.right - phoneSlider.left) * fraction;
+  const touchSlider = (type, x) => landingPhone.send("Input.dispatchTouchEvent", {
+    type,
+    touchPoints: type === "touchEnd" || type === "touchCancel" ? [] : [{ x, y: phoneSlider.cy }],
+  });
+  const statusBeforeCancel = await phoneStatus();
+  await touchSlider("touchStart", sliderX(0.15));
+  await touchSlider("touchMove", sliderX(0.85));
+  await touchSlider("touchCancel");
+  check("cancelled slider touch does not commit", (await phoneStatus()) === statusBeforeCancel, `${statusBeforeCancel} -> ${await phoneStatus()}`);
+  await touchSlider("touchStart", sliderX(0.15));
+  await touchSlider("touchMove", sliderX(0.85));
+  await touchSlider("touchEnd");
+  check("released slider touch commits", (await phoneStatus()).startsWith("Speakers"), await phoneStatus());
+
   // ------------------------------------------------------------ editor shell + onboarding
   const editor = await openPage("editor", `${BASE}/`, { width: 960, height: 680 });
   livePages.push(editor);
@@ -342,6 +439,7 @@ try {
   check("control keys keep a shallow physical depth", await editor.eval("(() => { const shadow = getComputedStyle(document.querySelector('.control-tile')).boxShadow; return shadow.includes('0px 3px 0px') && !shadow.includes('0px 3px 0px 4px'); })()"), await editor.eval("getComputedStyle(document.querySelector('.control-tile')).boxShadow"));
   check("page switcher lists the deck pages", await editor.eval("document.querySelectorAll('#page-switcher option').length === 2"));
   await editor.screenshot("/tmp/deck-design-desktop.png");
+  await editor.captureArtifacts("editor-desktop");
 
   // page switcher drives the active page
   await editor.eval(setSelect("#page-switcher", "page_media"));
@@ -426,6 +524,7 @@ try {
   check("real phone viewport hides the desktop preview chrome", await designPhone.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none'"));
   await designPhone.eval('document.fonts.ready.then(() => true)');
   await designPhone.screenshot('/tmp/deck-design-phone.png');
+  await designPhone.captureArtifacts('phone-preview');
   check("clean phone preview shows the two sample pages", await designPhone.eval("document.querySelectorAll('.phone-page-tab').length === 2"));
   await designPhone.eval(clickText('.phone-page-tab', 'Media'));
   await designPhone.waitFor("document.querySelector('.phone-page-heading h1').textContent === 'Media'");
@@ -1473,6 +1572,7 @@ try {
     setTimeout(resolve, 3000);
   });
   server.close();
+  landingServer.close();
   // Leave dist/ as the unmarked build, not the marker build used for the update test.
   if (existsSync(join(buildA, "index.html"))) {
     rmSync(join(ROOT, "dist"), { recursive: true, force: true });
@@ -1482,6 +1582,7 @@ try {
     await removeWithRetry(chromeDir);
     await removeWithRetry(buildA);
     await removeWithRetry(buildB);
+    await removeWithRetry(landingDir);
   }
   } catch (cleanupError) {
     console.error("cleanup warning:", cleanupError?.message || cleanupError);

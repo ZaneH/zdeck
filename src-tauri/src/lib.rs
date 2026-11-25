@@ -151,6 +151,59 @@ async fn system_media_snapshot(
 }
 
 #[tauri::command]
+fn system_media_permission_status() -> system::media_permission::MediaPermission {
+    system::media_permission::status()
+}
+
+fn local_media_setup_window(label: &str, url: &tauri::Url) -> bool {
+    let local = matches!((url.scheme(), url.host_str()),
+        ("tauri", Some("localhost")) | ("http" | "https", Some("tauri.localhost")))
+        || (cfg!(debug_assertions) && url.scheme() == "http"
+            && url.host_str() == Some("localhost") && url.port() == Some(1420));
+    label == "main" && local
+}
+
+#[cfg(test)]
+mod media_setup_tests {
+    use super::*;
+    #[test]
+    fn setup_rejects_remote_windows_and_origins() {
+        for url in ["tauri://localhost/", "http://tauri.localhost/", "https://tauri.localhost/"] {
+            let url = tauri::Url::parse(url).unwrap();
+            assert!(local_media_setup_window("main", &url));
+            assert!(!local_media_setup_window("phone", &url));
+        }
+        for url in ["https://example.com/", "http://127.0.0.1:1420/", "http://localhost:9876/", "file:///tmp/editor.html"] {
+            assert!(!local_media_setup_window("main", &tauri::Url::parse(url).unwrap()));
+        }
+    }
+}
+
+#[tauri::command]
+async fn system_media_permission_request(
+    window: tauri::WebviewWindow,
+) -> Result<system::media_permission::MediaPermission, SystemError> {
+    // No remote ControlAction exposes setup. Also restrict IPC to the local editor.
+    let url = window.url().map_err(|_| SystemError::CommandFailed {
+        message: "Media setup is only available in the local desktop editor.".into(),
+    })?;
+    if !local_media_setup_window(window.label(), &url) {
+        return Err(SystemError::CommandFailed {
+            message: "Media setup is only available in the local desktop editor.".into(),
+        });
+    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    window.run_on_main_thread(move || {
+        let _ = send.send(system::media_permission::request());
+    }).map_err(|_| SystemError::CommandFailed {
+        message: "Could not start media permission setup.".into(),
+    })?;
+    receive.await.map_err(|_| SystemError::CommandFailed {
+        message: "Media permission setup did not complete. Check System Settings before trying again.".into(),
+    })?
+}
+
+#[tauri::command]
 async fn system_media_play_pause(
     state: tauri::State<'_, AppState>,
 ) -> Result<MediaApplyResult, SystemError> {
@@ -374,6 +427,8 @@ pub fn run() {
             system_microphone_set_muted,
             system_media_snapshot,
             system_media_play_pause,
+            system_media_permission_status,
+            system_media_permission_request,
             native_deck_load,
             native_deck_save,
             desktop_run_control,

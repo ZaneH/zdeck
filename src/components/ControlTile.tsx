@@ -15,7 +15,7 @@ interface ControlTileProps {
   selected?: boolean;
   pressed?: boolean;
   disabled?: boolean;
-  /** In-flight remote action; announced without a separate routine toast. */
+  /** In-flight action; shown separately from disabled controls. */
   busy?: boolean;
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
   semantics?: "preview" | "remote" | "live";
@@ -35,7 +35,7 @@ export function ControlTile({
   useEffect(() => { volumeGesture.current = null; }, [disabled, control.id, semantics]);
   const content = (
     <>
-      <span className="tile-icon"><ActionIcon kind={control.action} icon={control.icon} size={22} /></span>
+      <span className="tile-icon">{busy ? <span className="tile-running">Running…</span> : <ActionIcon kind={control.action} icon={control.icon} size={22} />}</span>
       <span className="tile-label" title={control.label}>{control.label}</span>
     </>
   );
@@ -51,7 +51,7 @@ export function ControlTile({
 
   return (
     <article
-      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}`}
+      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}`}
       data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
     >
       {control.action === "volume" && variant === "phone" ? (
@@ -59,7 +59,7 @@ export function ControlTile({
       ) : (
         <button
           type="button" className="tile-primary" onClick={onPrimary} disabled={disabled}
-          aria-label={primaryLabel}
+          aria-label={busy ? `${primaryLabel} — running` : primaryLabel}
           aria-pressed={variant === "editor" ? selected : undefined} title={controlSummary(control)}
         >
           {content}

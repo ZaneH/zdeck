@@ -69,11 +69,27 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
       <ul>{diagnostics.checks.map((check, index) => <li key={index}><strong>{check.name} · {check.status}</strong><p>{check.message}</p></li>)}</ul>
     </section> : null}
     {snapshot.manifest ? <details className="plugin-state"><summary className="disclosure">Actions and last read state</summary>
-      <ul>{snapshot.manifest.actions.map((action) => <li key={action.id}>{action.title} ({action.id})</li>)}</ul>
-      <button type="button" className="button secondary" disabled={busy || !connected || !!snapshot.lastError} onClick={() => void plugin.readState(id)}>Read state</button>
-      <p className="field-note">Intentional read may prompt for macOS Automation permission. State is the last successful read, not live. No background polling.</p>
-      {state ? <dl><dt>Title</dt><dd>{state.title ?? "No track"}</dd><dt>Artist</dt><dd>{state.artist ?? "No artist"}</dd><dt>Playback</dt><dd>{state.playback}</dd><dt>Spotify volume</dt><dd>{state.volume}%</dd></dl>
-        : <p className="field-note">No supported Spotify state has been read. Arbitrary plugin state is not displayed.</p>}
+      <div className="plugin-state-content">
+        <section className="plugin-state-section" aria-label={`Available actions for ${entry.name}`}>
+          <h4>Available actions</h4>
+          <ul className="plugin-action-list">{snapshot.manifest.actions.map((action) => <li key={action.id}>
+            <span>{action.title}</span><code>{action.id}</code>
+          </li>)}</ul>
+        </section>
+        <section className="plugin-state-section" aria-label={`Last read state for ${entry.name}`}>
+          <h4>Last read state</h4>
+          <p className="field-note">Last successful read, not live. No background polling.</p>
+          {state ? <dl className="plugin-state-values"><dt>Title</dt><dd>{state.title ?? "No track"}</dd><dt>Artist</dt><dd>{state.artist ?? "No artist"}</dd><dt>Playback</dt><dd>{state.playback}</dd><dt>Spotify volume</dt><dd>{state.volume}%</dd></dl>
+            : <p className="field-note">No supported Spotify state has been read.</p>}
+          <div className="plugin-read-control">
+            <button type="button" className="button secondary" disabled={busy || !connected || !!snapshot.lastError} onClick={() => void plugin.readState(id)}>Read state</button>
+            <p className="field-note">May prompt for macOS Automation permission.</p>
+          </div>
+          <details className="settings-help"><summary className="disclosure">About state reads</summary>
+            <p>Only supported Spotify state is displayed. Arbitrary plugin state is not displayed. Read state explicitly to update the values above.</p>
+          </details>
+        </section>
+      </div>
     </details> : null}
   </li>;
 }
@@ -88,10 +104,14 @@ export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
   }
   return <section className="settings-card plugin-settings" aria-labelledby="plugin-heading">
     <h2 id="plugin-heading">External plugins</h2>
-    <p>Install complete plugin folders once, then enable each trusted plugin explicitly. Node.js ≥22.18.0 is detected automatically. The Spotify reference requires macOS and Spotify desktop.</p>
+    <p>Install complete plugin folders, then enable each trusted plugin explicitly.</p>
+    <details className="settings-help"><summary className="disclosure">Requirements and session behavior</summary>
+      <p>Node.js ≥22.18.0 is detected automatically. The Spotify reference requires macOS and Spotify desktop.</p>
+      <p>Up to 16 plugins can be enabled independently. Trust and enabling last only for this session. Nothing is automatically enabled, reconnected, read or retried. Refresh clears pending trust, not enabled sessions. Use a row’s menu for diagnostics or reversible uninstall.</p>
+    </details>
     {!plugin.native ? <p>This browser stays preview-only. Previews never scan folders, launch plugins or run actions.</p> : <>
       <p className="obs-status" role="status">{!runtime ? "Runtime not checked." : runtime.status === "detected" ? `Detected Node ${runtime.version}.` : runtime.status === "unsupported" ? `Unsupported Node ${runtime.version}. Install Node.js 22.18.0 or newer.` : "Node not found. Install Node.js 22.18.0 or newer, then Refresh."}</p>
-      <details className="plugin-locations"><summary className="disclosure">Local folder and runtime details</summary>
+      <details className="plugin-locations settings-help"><summary className="disclosure">Local folder and runtime details</summary>
         <p>Plugin folder: <code>{plugin.catalog?.directory ?? "~/.config/zdeck/plugins"}</code></p>{runtime?.path ? <p>Detected runtime: <code>{runtime.path}</code></p> : null}
       </details>
       <div className="settings-actions"><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
@@ -100,7 +120,6 @@ export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
       {!plugin.sessionsReady && !plugin.loading ? <p className="settings-error" role="alert">Cached plugin sessions could not be loaded. Reload the app before enabling plugins.</p> : null}
       {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Copy the complete self-contained packaged folder, including manifest.json, main.js and node_modules, into the plugin folder, then Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
       <ul className="plugin-list" aria-label="Installed plugins">{entries.map((entry, index) => <PluginRow key={entry.id || `invalid-${index}`} entry={entry} plugin={plugin} />)}</ul>
-      <p className="muted">Up to 16 plugins can be enabled independently. Trust and enabling last only for this session. Nothing is automatically enabled, reconnected, read or retried. Refresh clears pending trust, not enabled sessions. Use a row’s menu for diagnostics or reversible uninstall.</p>
       <PluginErrorNotice error={plugin.catalogError} />
     </>}
   </section>;

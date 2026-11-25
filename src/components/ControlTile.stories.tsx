@@ -29,6 +29,8 @@ type Story = StoryObj<typeof meta>;
 export const AllActions: Story = { render: () => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, maxWidth: 900 }}>
   {controls.map((control) => <TileExample key={control.id} control={control} />)}
 </div> };
+export const Busy: Story = { args: { busy: true, disabled: true, semantics: "remote" },
+  decorators: [(Story) => <div style={{ maxWidth: 240 }}><Story /></div>] };
 export const Disabled: Story = { render: () => <div style={{ maxWidth: 240 }}><TileExample control={controls[1]} disabled /></div> };
 export const SelectedEditor: Story = { render: () => <div style={{ maxWidth: 240 }}><TileExample control={controls[0]} selected /></div> };
 export const LongLabel: Story = { render: () => <div style={{ width: 200, maxWidth: "100%" }}>

@@ -123,6 +123,7 @@ export const SYSTEM_ERROR_KINDS = [
   "invalid_input",
   "timeout",
   "outcome_unknown",
+  "media_key_sent",
   "tool_missing",
   "no_device",
   "no_player",
@@ -150,7 +151,8 @@ export interface MicrophoneSnapshot {
   observedAtMs: number;
 }
 
-export type MediaStatus = "playing" | "paused" | "stopped";
+/** Native system media keys cannot provide a global playback snapshot. */
+export type MediaStatus = "playing" | "paused" | "stopped" | "unknown";
 
 export interface MediaSnapshot {
   status: MediaStatus;
@@ -169,6 +171,21 @@ export interface MicrophoneApplyResult {
   snapshot: MicrophoneSnapshot;
 }
 
+export interface MediaPermission {
+  platform: "macos" | "windows" | "linux" | "unsupported";
+  status: "granted" | "required" | "not_required" | "unsupported";
+}
+
+/** Observational only. Never requests permission or opens settings. */
+export function systemMediaPermissionStatus(): Promise<MediaPermission> {
+  return invokeSystem<MediaPermission>("system_media_permission_status");
+}
+
+/** Explicit local setup button only; never call from media action routing. */
+export function systemMediaPermissionRequest(): Promise<MediaPermission> {
+  return invokeSystem<MediaPermission>("system_media_permission_request");
+}
+
 export interface MediaApplyResult {
   requested: MediaStatus;
   confirmed: boolean;
@@ -179,6 +196,7 @@ const SYSTEM_FALLBACK_MESSAGES: Record<SystemErrorKind, string> = {
   invalid_input: "That value is not valid.",
   timeout: "The system tool did not respond in time.",
   outcome_unknown: "Action sent, but its resulting state could not be confirmed. Check before retrying.",
+  media_key_sent: "Media key sent. Playback state is unavailable.",
   tool_missing: "A required system tool is not installed.",
   no_device: "The default audio device is not available.",
   no_player: "No media player is available.",
@@ -208,7 +226,7 @@ export function toSystemError(value: unknown): SystemError {
 
 /** A command may have taken effect before its acknowledgement or readback failed. */
 export function systemFailureState(error: SystemError): "unknown" | "failed" {
-  return error.kind === "timeout" || error.kind === "outcome_unknown" ? "unknown" : "failed";
+  return error.kind === "timeout" || error.kind === "outcome_unknown" || error.kind === "media_key_sent" ? "unknown" : "failed";
 }
 
 function requireNativeSystem(): void {

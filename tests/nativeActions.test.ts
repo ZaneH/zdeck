@@ -39,13 +39,21 @@ describe("saved desktop control bridge", () => {
       expect(toDesktopActionError(error).outcome).toBe("unknown");
     }
   });
+  it("keeps sent media keys unknown with a distinct non-warning message", () => {
+    expect(parseDesktopResult({ ...result, state: "unknown", code: "media_key_sent" }, "cmd-1")).toMatchObject({
+      state: "unknown", code: "media_key_sent", message: "Media key sent. Playback state is unavailable.",
+    });
+    for (const state of ["confirmed", "pending", "failed", "not_applied"]) {
+      expect(parseDesktopResult({ ...result, state, code: "media_key_sent" }, "cmd-1")).toBeNull();
+    }
+  });
   it("validates correlated bounded replies and never exposes observed state or raw messages", async () => {
     for (const state of ["pending", "confirmed", "not_applied", "failed", "unknown"]) expect(parseDesktopResult({ ...result, state }, "cmd-1")?.state).toBe(state);
     const parsed = parseDesktopResult({ ...result, state: "failed", message: "private-secret", observed: { secret: "private-secret" }, code: "plugin_unavailable" }, "cmd-1");
     expect(parsed?.message).toContain("Enable the trusted plugin");
     const unsupported = parseDesktopResult({ ...result, state: "failed", code: "platform_unsupported" }, "cmd-1");
-    expect(unsupported?.message).toContain("currently require Linux");
-    expect(unsupported?.message).toContain("macOS");
+    expect(unsupported?.message).toContain("macOS, Windows, or Linux");
+    expect(unsupported?.message).not.toContain("Spotify");
     expect(parseDesktopResult({ ...result, state: "confirmed", code: "platform_unsupported" }, "cmd-1")).toBeNull();
     expect(JSON.stringify(parsed)).not.toContain("private-secret");
     for (const bad of [null, [], { ...result, id: "different" }, { ...result, state: "done" }, { ...result, message: "" },

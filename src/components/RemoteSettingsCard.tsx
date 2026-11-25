@@ -156,7 +156,7 @@ https://192.168.1.20:8443 {
             </>}
             <p>On iPhone, open the root address in Safari and install the app first, then paste a fresh pairing link inside the installed app.
               A camera QR usually opens the browser, not the installed app’s session. Opening a link never approves a phone; approve it separately here.</p>
-            <p>Keep the IP/name and certificate stable. Changing the origin requires re-pairing and may require removing and reinstalling the PWA at the new address. Stopping the service clears its phone credentials.</p>
+            <p>Only the last successfully used address for each method is remembered on this device when storage is available, not pairing links or approvals. Start the service explicitly each session.</p>
           </details>
           {mode === "tailscale" ? <div className="remote-command">
             <p>On this desktop, review <code>tailscale serve status</code> first. Do not enable Funnel or overwrite an existing Serve configuration without reviewing it.</p>
@@ -176,9 +176,8 @@ https://192.168.1.20:8443 {
             {mode === "tailscale" ? "Use https:// followed by this computer’s Tailscale name. No port needed. "
               : "Use HTTPS with a private IPv4, local IPv6, or .local/.lan/.home.arpa name; include your proxy’s port if not 443. "}
             Use only the root address, without credentials, path, query or fragment.
-            Only the last successfully used address for each method is remembered on this device when storage is available, not pairing links or approvals. Start the service explicitly each session.
           </p>
-          {mode === "local_https" ? <p className="field-note">Wi-Fi client isolation may block access. Use a permitted home network or hotspot, not a policy bypass. The trusted certificate and reachable proxy are prerequisites, not configured by this app.</p> : null}
+          <p className="field-note">Changing the address requires re-pairing and may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
         </> : null}
       </div>)}
       <div className="settings-actions">

@@ -211,8 +211,11 @@ export function useSystemConsole(): SystemConsole {
       });
     } catch (cause) {
       const error = toSystemError(cause);
-      setMedia(null);
-      setMediaFeedback({ state: systemFailureState(error), message: error.message });
+      // A fully dispatched key has no readback; keep the control ready for a new gesture.
+      if (error.kind !== "media_key_sent") {
+        setMedia(null);
+        setMediaFeedback({ state: systemFailureState(error), message: error.message });
+      }
     } finally {
       setMediaPending(false);
     }

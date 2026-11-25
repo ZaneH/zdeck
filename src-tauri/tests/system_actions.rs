@@ -87,6 +87,18 @@ fn test_state(fake: Arc<FakeRunner>) -> SystemState {
     )
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[tokio::test]
+async fn native_default_uses_unknown_media_state_and_validates_before_os_access() {
+    let state = SystemState::default();
+    let snapshot = state.media_snapshot().await.unwrap();
+    assert_eq!(snapshot.status, MediaStatus::Unknown);
+    assert_eq!(serde_json::to_value(snapshot).unwrap()["status"], "unknown");
+    for bad in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
+        assert!(matches!(state.set_output_volume(bad).await, Err(SystemError::InvalidInput { .. })));
+    }
+}
+
 #[tokio::test]
 async fn failed_readback_after_an_applied_action_is_unknown_and_not_retried() {
     let fake = Arc::new(FakeRunner::new(vec![ok(""), nonzero()]));

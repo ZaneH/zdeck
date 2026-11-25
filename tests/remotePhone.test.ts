@@ -618,6 +618,35 @@ describe("connection lifecycle", () => {
     expect(connection.getSnapshot().warning).toBeNull();
   });
 
+  it("quietly completes sent media keys, accepting only unknown state and never replaying", async () => {
+    expect(parseCommandResult({ state: "confirmed", code: "media_key_sent" })).toBeNull();
+    expect(parseCommandResult({ state: "unknown", code: "media_key_sent" })).toMatchObject({ state: "unknown", code: "media_key_sent" });
+    let count = 0;
+    const { connection } = await driveToActive((_path, init) => {
+      count += 1;
+      return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "unknown", code: "media_key_sent" });
+    });
+    const control = sampleDeck.pages.flatMap(page => page.controls).find(control => control.action === "media-play-pause")!;
+    connection.pressControl(control);
+    await flush();
+    expect(count).toBe(1);
+    expect(connection.getSnapshot()).toMatchObject({ busyControlId: null, result: null, resultKind: "none", warning: null, activity: [] });
+    connection.pressControl(control);
+    await flush();
+    expect(count).toBe(2);
+  });
+
+  it("still warns for plugin unknown outcomes", async () => {
+    const { connection } = await driveToActive((_path, init) => jsonResponse(200, {
+      id: JSON.parse(String(init.body)).id, state: "unknown", code: "plugin_outcome_unknown", message: "Inspect plugin state before retrying.",
+    }));
+    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    await flush();
+    expect(connection.getSnapshot().resultKind).toBe("unknown");
+    expect(connection.getSnapshot().warning).toBeTruthy();
+    expect(connection.getSnapshot().activity[0].state).toBe("unknown");
+  });
+
   it("retains a visible unknown warning and clears the log on a new session", async () => {
     let fail = true;
     const { connection } = await driveToActive((_path, init) => {

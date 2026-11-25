@@ -2,10 +2,9 @@ import type { Control } from "../lib/types";
 
 export const LINKS = {
   github: "https://github.com/ZaneH/zdeck",
-  // Placeholder anchors until releases, docs, and Discord URLs are live.
   download: "#download",
   docs: "#docs",
-  discord: "#discord",
+  discord: "https://discord.gg/PyeaPSPZe2",
 } as const;
 
 export type OsId = "macos" | "linux" | "windows";

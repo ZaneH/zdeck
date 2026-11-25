@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
 import { IconPicker } from "./IconPicker";
@@ -9,6 +10,7 @@ import { PluginErrorNotice } from "./PluginSettingsCard";
 import type { ActionKind, Control, ControlPatch } from "../lib/types";
 import type { ObsConsole, SceneSwitchFeedback } from "../lib/useObsConsole";
 import { formatPercent } from "../lib/useSystemConsole";
+import { useMediaPermission } from "../lib/useMediaPermission";
 import type { ApplyFeedback, SystemConsole } from "../lib/useSystemConsole";
 
 interface InspectorProps {
@@ -50,6 +52,22 @@ function NativeStatus({ feedback, error }: { feedback: ApplyFeedback | null; err
       ) : null}
     </>
   );
+}
+
+function MediaPermissionGate({ children }: { children: ReactNode }) {
+  const { permission, error, busy, refresh, openSettings } = useMediaPermission();
+  const missing = permission?.platform === "macos" && permission.status === "required";
+  if (missing) return <div className="media-permission-setup">
+    <p className="field-note">Allow zDeck to control playback.</p>
+    <button type="button" className="button primary" disabled={busy}
+      onClick={() => void openSettings()}>Open System Settings</button>
+    {error ? <p className="settings-error" role="alert">{error}</p> : null}
+  </div>;
+  return <>{children}{error ? <div className="native-control">
+    <p className="settings-error" role="alert">{error}</p>
+    <button type="button" className="button secondary" disabled={busy}
+      onClick={() => void refresh()}>Check permission</button>
+  </div> : null}</>;
 }
 
 function switchFeedbackText(
@@ -386,6 +404,11 @@ export function Inspector({
                     feedback={system.microphoneFeedback}
                     error={system.microphoneError}
                   />
+                  <p className="field-note">
+                    macOS devices without native mute use zero input level with saved-level restore,
+                    not a hardware privacy switch. Unmute restores this device’s saved levels, even after restart.
+                    If you switch inputs while muted, switch back and unmute to restore the previous device.
+                  </p>
                 </div>
               ) : (
                 <p className="field-note">
@@ -396,38 +419,42 @@ export function Inspector({
 
             {control.action === "media-play-pause" ? (
               systemNative ? (
-                <div className="native-control">
-                  <p className="native-state">
-                    Default MPRIS player: {system.media ? system.media.status : "unknown"} ·{" "}
-                    {observedLine(system.media?.observedAtMs)}
-                  </p>
-                  <div className="native-actions">
-                    <button
-                      type="button"
-                      className="button primary"
-                      onClick={() => void system.runMedia()}
-                      disabled={system.mediaPending || system.media === null}
-                    >
-                      {system.mediaPending
-                        ? "Sending…"
-                        : system.media?.status === "playing"
-                          ? "Pause"
-                          : "Play"}
-                    </button>
-                    <button
-                      type="button"
-                      className="button secondary"
-                      onClick={() => void system.refreshMedia()}
-                      disabled={system.mediaRefreshing || system.mediaPending}
-                    >
-                      Refresh
-                    </button>
+                <MediaPermissionGate key={control.id}>
+                  <div className="native-control">
+                    <p className="native-state">
+                      System media: {system.media ? system.media.status : "unknown"} ·{" "}
+                      {observedLine(system.media?.observedAtMs)}
+                    </p>
+                    <div className="native-actions">
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() => void system.runMedia()}
+                        disabled={system.mediaPending || system.media === null}
+                      >
+                        {system.mediaPending
+                          ? "Sending…"
+                          : system.media?.status === "playing"
+                            ? "Pause"
+                            : system.media?.status === "unknown"
+                              ? "Play / pause"
+                              : "Play"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => void system.refreshMedia()}
+                        disabled={system.mediaRefreshing || system.mediaPending}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <NativeStatus feedback={system.mediaFeedback} error={system.mediaError} />
                   </div>
-                  <NativeStatus feedback={system.mediaFeedback} error={system.mediaError} />
-                </div>
+                </MediaPermissionGate>
               ) : (
                 <p className="field-note">
-                  Uses the default MPRIS player in the desktop app.
+                  System play/pause in the desktop app (default MPRIS player on Linux).
                 </p>
               )
             ) : null}
