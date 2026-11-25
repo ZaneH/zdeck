@@ -17,7 +17,7 @@ npm run build
 npm run plugin:package:spotify
 ```
 
-The result is `dist/plugins/spotify/`, including the SDK runtime and licenses. A later frontend build can clear `dist`, so package after building. Distribute the **complete folder**; copying `plugins/spotify` directly from the source tree is not a supported installation. Its development dependency is a repository-relative link, while the generated folder contains real SDK files and version-only dependency metadata without repository references. Nothing is published, installed or enabled by the packaging command.
+The result is `dist/plugins/spotify/`, including the SDK runtime and licenses. A later frontend build can clear `dist`, so package after building. Distribute the **complete folder**; copying `plugins/spotify` directly from the source tree is not a supported installation. The source dependency now pins the published SDK version `0.1.0`; the generated folder includes real SDK files and version-only metadata, so recipients do not need npm or a repository checkout. Nothing is published, installed or enabled by the packaging command.
 
 For users:
 
@@ -41,14 +41,18 @@ Deck schema v2 stores only plugin IDs, action IDs and bounded integer argumentsâ
 
 ## Develop the Spotify source plugin
 
-The SDK is **not published**. The reference plugin depends on the repository SDK through `file:../../packages/plugin-sdk`, so this source-development setup needs no registry package:
+`@zdeck/plugin-sdk@0.1.0` is published on the public npm registry. The reference plugin now pins that exact version:
 
 ```sh
-npm install --prefix plugins/spotify --ignore-scripts --offline --no-audit --no-fund
+npm install --prefix plugins/spotify --ignore-scripts --no-audit --no-fund
 printf '{"protocolVersion":1,"id":"dev","type":"describe"}\n' | node plugins/spotify/main.js
 ```
 
-Keep the repository layout intact. The request above is **describe only**, with no Spotify access or Automation prompt. npm normally links local directory dependencies; the desktop catalog intentionally rejects symlinked SDK folders. Launch source development directly, and use `npm run plugin:package:spotify` to prepare a real copied SDK for desktop installation or distribution. Recipients of that complete generated folder run **no npm install**. The packager excludes the source lockfile and does not preserve its `file:` dependency.
+The lockfile records the public registry tarball and its integrity, not a local `file:` resolution or `link: true`. npm installs the SDK as a real directory; no sibling SDK source tree is required. The plugin-only `.npmrc` retains `install-links=true` for intentional local-file experiments, but normal development uses the registry version. Offline tests substitute a local SDK only inside isolated temporary fixtures.
+
+Running this command updates dependency-managed files in the repository plugin, not a separate installed `~/.config` copy. Older installed source metadata or SDK symlinks are not automatically repaired. The desktop catalog continues to reject symlinks; replace an old installation with the complete packaged artifact after reviewing/backing it up.
+
+The request above is **describe only**, with no Spotify access or Automation prompt. Use `npm run plugin:package:spotify` for installation or distribution: it copies SDK runtime files directly from the repository's SDK source and records the bundled version. Recipients run **no npm install**. The source `.npmrc` and lockfile are not distributed.
 
 ## SDK author quickstart (local artifact, no dependency install)
 
@@ -66,7 +70,7 @@ printf '{"protocolVersion":1,"id":"d1","type":"describe"}\n{"protocolVersion":1,
   | (cd "$WORK" && node hello.ts)
 ```
 
-Expect three JSONL results: the `hello` manifest, `{ "count": 1 }`, then the same state. EOF ends the process. The package name is reserved here as an authoring contract, **not a claim that it has been published**. Local tar extraction deliberately avoids npm lifecycle scripts or registry access. A future intentional npm install can use the tarball, with lifecycle scripts disabled after reviewing its contents.
+Expect three JSONL results: the `hello` manifest, `{ "count": 1 }`, then the same state. EOF ends the process. The SDK is also published as `@zdeck/plugin-sdk@0.1.0`. This local-tarball workflow deliberately avoids npm lifecycle scripts and registry access, and can be used to test reviewed SDK source changes before a future release.
 
 To stage Spotify against the same public package (no relative SDK-source imports), copy only runtime files, not development `node_modules` or the source lockfile:
 
@@ -87,6 +91,24 @@ printf '{"protocolVersion":1,"id":"d1","type":"describe"}\n' \
 ```
 
 This runs the SDK suite locally, then `npm pack --ignore-scripts` into a fresh temporary directory, checks its exact file allowlist, extracts it, and uses `node --test` to run SDK and Spotify fake-runner suites against the **packed public import**. It also runs the TypeScript quickstart and Spotify `describe` as real child processes. Only Node built-ins and local npm/tar are used. No publishing, dependency installation, live Spotify call or permission prompt is part of the tests. Temporary artifacts are removed after the check.
+
+## SDK publication (maintainer only; 0.1.0 published)
+
+The package remains `@zdeck/plugin-sdk@0.1.0`, ESM-only, MIT-licensed, with no runtime dependencies. Public access is configured in `packages/plugin-sdk/package.json`; the public runtime, declarations, typed example, README and license are the only packed files.
+
+Version **0.1.0** has been published and verified against the public registry. Its integrity is `sha512-6TrAo35L2qjpfnlIIWsM3s2oXOYkOey7kb5yOkdjaSdUrnAqpbflgWqaQaB0RJxkEEspvXxlcoOjRHfPeQF4Zg==` and SHA-1 is `9a4f090bc79f961897c2ca9b04dfb0c869799e4d`.
+
+For future releases, the maintainer must authenticate externally, confirm publishing rights under **`@zdeck`**, and deliberately choose a new version. Do not republish or modify the released 0.1.0 artifact, and do not put credentials in project files, chats or logs.
+
+After authentication and scope verification, from `packages/plugin-sdk`:
+
+```sh
+npm test
+npm pack --ignore-scripts --dry-run --json
+npm publish --access public --ignore-scripts
+```
+
+The publish command is an intentional maintainer action for a future version, not part of tests or packaging. Verify the registry version and tarball integrity after every release. The Spotify source dependency is now pinned to the verified registry version 0.1.0. Publishing the SDK alone does not repair any existing installed plugin directory.
 
 ## Protocol v1 (Rust host handoff)
 
@@ -178,4 +200,4 @@ The first intentional state/action request may trigger macOS's Automation consen
 
 The Rust host in `src-tauri/src/plugin.rs` implements this language-neutral protocol without Node SDK internals and maintains independently bounded per-plugin sessions shared by native commands and the phone service. `plugin_install.rs` validates local folders, probes Node and revalidates the complete manifest contract before describing a selected plugin. Plugin launches remove `NODE_OPTIONS` and `NODE_PATH`. The host serializes requests, bounds response framing, discards stderr, and kills/reaps failed processes. Any wire error stops only that pluginâ€™s host instance, not healthy neighbors; recover through explicit enabling, never automatic action replay. Known Spotify setup errors use host-owned messages and hints; arbitrary plugin diagnostics are not reflected. Unknown-outcome warnings appear alongside setup hints. Terminating the direct plugin child does not guarantee termination of grandchildren: an already-started external command may still apply after a host timeout.
 
-Automated verification covers Rust host/discovery, schema migration, TypeScript bridge/control validation, packed SDK consumption, self-contained Spotify packaging, and browser flows with fake IPC. Live Spotify/JXA, Automation attribution, the real folder opener, signed macOS distribution and real-phone plugin execution remain unverified. Python authoring, events, richer schemas, secret injection, cancellation, bundled Node and cross-platform Spotify support are deferred. The npm SDK is prepared, **not published**.
+Automated verification covers Rust host/discovery, schema migration, TypeScript bridge/control validation, packed SDK consumption, self-contained Spotify packaging, and browser flows with fake IPC. Live Spotify/JXA, Automation attribution, the real folder opener, signed macOS distribution and real-phone plugin execution remain unverified. Python authoring, events, richer schemas, secret injection, cancellation, bundled Node and cross-platform Spotify support are deferred. The npm SDK **0.1.0 is published**; installed plugin folders still require a complete SDK runtime, not a symlink.

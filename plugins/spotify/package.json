@@ -5,6 +5,6 @@
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=22.18.0" },
-  "dependencies": { "@zdeck/plugin-sdk": "file:../../packages/plugin-sdk" },
+  "dependencies": { "@zdeck/plugin-sdk": "0.1.0" },
   "scripts": { "start": "node main.js", "test": "node --test test/*.test.js" }
 }

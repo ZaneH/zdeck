@@ -4,20 +4,22 @@ This MIT-licensed reference plugin controls Spotify desktop on macOS through loc
 
 ## Develop from this repository
 
-The SDK is not published to npm. From the repository root, install the plugin's **local SDK dependency**:
+`@zdeck/plugin-sdk@0.1.0` is published on the public npm registry. The plugin pins that exact version. From the repository root:
 
 ```sh
-npm install --prefix plugins/spotify --ignore-scripts --offline --no-audit --no-fund
+npm install --prefix plugins/spotify --ignore-scripts --no-audit --no-fund
 printf '{"protocolVersion":1,"id":"dev","type":"describe"}\n' | node plugins/spotify/main.js
 ```
 
-This uses `file:../../packages/plugin-sdk`, not the npm registry. Keep the repository layout intact. `describe` reads only the manifest; it does not access Spotify or request Automation permission. npm normally creates a symlink for this development dependency. The desktop catalog intentionally rejects symlinked SDK installations: do not copy the source folder or its development `node_modules` into the plugin directory. Use the packaged folder below instead.
+npm installs regular SDK files from the registry, not a repository-relative `file:` dependency or symlink. The lockfile records the published tarball and integrity. The project-only `.npmrc` retains `install-links=true` as a safeguard for intentional local-file experiments; normal installs use the registry package. `describe` reads only the manifest and does not access Spotify or request Automation permission.
+
+This command updates the repository's dependency-managed `node_modules`; it does not repair a separate installed `~/.config` plugin folder. The desktop catalog still rejects SDK symlinks. For desktop installation, use the complete packaged folder below rather than an older source copy or partial SDK installation.
 
 ## Build the self-contained folder (from the repository)
 
 Run `npm run plugin:package:spotify` from the repository root. This offline command copies the runtime files and the public SDK into `dist/plugins/spotify`. It installs nothing, makes no network request and does not execute the plugin. Build the app before packaging: the normal app build may clear `dist`.
 
-Recipients do **not** run `npm install`. The packager copies real SDK files, not the development symlink, and replaces the source `file:` dependency with the bundled SDK version (`0.1.0`); no repository-relative dependency or development lockfile is distributed.
+Recipients do **not** run `npm install`. The packager copies real SDK files directly from the SDK source, not from development `node_modules`, and records the bundled SDK version (`0.1.0`); no repository-relative dependency or development lockfile is distributed.
 
 The generated folder contains `manifest.json`, `main.js`, `spotify.js`, ESM package metadata, this README, the plugin MIT license, and the real SDK under `node_modules/@zdeck/plugin-sdk` with its own MIT license. The `.zdeck-generated` marker identifies packager-owned output. Keep the whole folder together; the source scripts alone are not a self-contained installation.
 

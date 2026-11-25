@@ -66,7 +66,7 @@ export async function packageSpotify(output = OUTPUT) {
   const metadata = JSON.parse(await sourceFile(source('plugins/spotify/package.json')));
   const { name, version, type, license, engines } = metadata;
   const sdk = JSON.parse(await sourceFile(source('packages/plugin-sdk/package.json')));
-  // Source development uses a local link; distribution carries the actual SDK files.
+  // Distribution copies SDK files directly, never development node_modules.
   const dependencies = { '@zdeck/plugin-sdk': sdk.version };
   files.set('package.json', Buffer.from(JSON.stringify({ name, version, private: true, type, license, engines, dependencies }, null, 2) + '\n'));
   for (const name of ['index.js', 'index.d.ts', 'package.json', 'LICENSE']) {

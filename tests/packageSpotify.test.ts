@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -92,31 +92,48 @@ describe("self-contained Spotify folder packaging", () => {
     expect((await files(sourceCopy)).some((name) => name.startsWith("node_modules/"))).toBe(false);
   });
 
-  it("installs the source SDK offline from a clean repository layout and describes without any registry dependency", async () => {
+  it("keeps source metadata registry-pinned while an isolated local-SDK fixture installs offline without symlinks", async () => {
     const temp = await fixture();
     const plugin = join(temp, "repo/plugins/spotify");
     const sdk = join(temp, "repo/packages/plugin-sdk");
     await mkdir(plugin, { recursive: true });
     await mkdir(sdk, { recursive: true });
-    for (const name of ["package.json", "package-lock.json", "manifest.json", "main.js", "spotify.js"]) {
+    for (const name of ["package.json", ".npmrc", "manifest.json", "main.js", "spotify.js"]) {
       await cp(new URL(`../plugins/spotify/${name}`, import.meta.url), join(plugin, name));
     }
-    for (const name of ["package.json", "index.js", "index.d.ts", "LICENSE"]) {
+    for (const name of ["package.json", "index.js", "index.d.ts", "LICENSE", "README.md", "examples/hello.ts"]) {
+      await mkdir(dirname(join(sdk, name)), { recursive: true });
       await cp(new URL(`../packages/plugin-sdk/${name}`, import.meta.url), join(sdk, name));
     }
+    expect(await readFile(join(plugin, ".npmrc"), "utf8")).toBe("install-links=true\n");
     const metadata = JSON.parse(await readFile(join(plugin, "package.json"), "utf8"));
-    expect(metadata.dependencies).toEqual({ "@zdeck/plugin-sdk": "file:../../packages/plugin-sdk" });
+    expect(metadata.dependencies).toEqual({ "@zdeck/plugin-sdk": "0.1.0" });
+    const sourceLock = JSON.parse(await readFile(new URL("../plugins/spotify/package-lock.json", import.meta.url), "utf8"));
+    expect(sourceLock.packages[""].dependencies).toEqual(metadata.dependencies);
+    expect(sourceLock.packages["node_modules/@zdeck/plugin-sdk"]).toMatchObject({ version: "0.1.0",
+      resolved: "https://registry.npmjs.org/@zdeck/plugin-sdk/-/plugin-sdk-0.1.0.tgz",
+      integrity: "sha512-6TrAo35L2qjpfnlIIWsM3s2oXOYkOey7kb5yOkdjaSdUrnAqpbflgWqaQaB0RJxkEEspvXxlcoOjRHfPeQF4Zg==" });
+    expect(JSON.stringify(sourceLock)).not.toContain("file:");
+    expect(sourceLock.packages["node_modules/@zdeck/plugin-sdk"]).not.toHaveProperty("link");
+    // Only this temporary fixture substitutes the SDK source to keep tests offline.
+    metadata.dependencies["@zdeck/plugin-sdk"] = "file:../../packages/plugin-sdk";
+    await writeFile(join(plugin, "package.json"), JSON.stringify(metadata));
     const install = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", [
       "install", "--prefix", plugin, "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
       "--cache", join(temp, "empty-cache"), "--registry", "http://127.0.0.1:1",
+      "--userconfig", join(temp, "empty-user.npmrc"), "--globalconfig", join(temp, "empty-global.npmrc"),
     ], { cwd: temp, encoding: "utf8", timeout: 30000, maxBuffer: 65536 });
     expect(install.status, install.stderr).toBe(0);
     const lock = JSON.parse(await readFile(join(plugin, "package-lock.json"), "utf8"));
-    expect(Object.keys(lock.packages).sort()).toEqual(["", "../../packages/plugin-sdk", "node_modules/@zdeck/plugin-sdk"]);
-    expect(lock.packages["node_modules/@zdeck/plugin-sdk"]).toEqual({ resolved: "../../packages/plugin-sdk", link: true });
+    expect(Object.keys(lock.packages).sort()).toEqual(["", "node_modules/@zdeck/plugin-sdk"]);
+    expect(lock.packages["node_modules/@zdeck/plugin-sdk"]).toMatchObject({ version: "0.1.0", resolved: "file:../../packages/plugin-sdk" });
+    expect(lock.packages["node_modules/@zdeck/plugin-sdk"]).not.toHaveProperty("link");
     expect(JSON.stringify(lock)).not.toMatch(/https?:/);
-    expect(await realpath(join(plugin, "node_modules/@zdeck/plugin-sdk"))).toBe(sdk);
-    expect((await lstat(join(plugin, "node_modules/@zdeck/plugin-sdk"))).isSymbolicLink()).toBe(true);
+    const installedSDK = join(plugin, "node_modules/@zdeck/plugin-sdk");
+    expect(await realpath(installedSDK)).toBe(installedSDK);
+    expect((await lstat(installedSDK)).isSymbolicLink()).toBe(false);
+    expect(await files(installedSDK)).toEqual(["LICENSE", "README.md", "examples/hello.ts", "index.d.ts", "index.js", "package.json"]);
+    await rename(sdk, join(temp, "moved-sdk-source"));
     const describe = spawnSync(process.execPath, [join(plugin, "main.js")], {
       cwd: plugin, encoding: "utf8", timeout: 5000, maxBuffer: 65536,
       input: '{"protocolVersion":1,"id":"local-install","type":"describe"}\n',
