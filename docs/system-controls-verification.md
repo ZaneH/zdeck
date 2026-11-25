@@ -106,6 +106,108 @@ not applied. A native call that never returns blocks subsequent native system
 controls until app restart. Ordinary permission/device failures never prevent
 app launch or other independent control families from working.
 
+## Desktop tray and menu bar
+
+Implementation uses Tauri's existing native tray/menu feature, not a new plugin.
+Open restores/focuses the existing window; tray Settings and service errors navigate
+to `#/settings/phone`. Settings has General, Phone connection and Integrations
+sections with keyboard-accessible links and active-section indication. Section
+changes keep cards mounted, retaining drafts and polling without stopping services.
+
+**Close-to-tray is opt-in, OFF by default**, under General in the desktop app only.
+The native close handler reads `desktop-preferences.json` in app-data, never a
+browser draft. Missing preferences mean OFF. Load errors are reported without
+blocking launch and fall back to OFF; failed saves report an error and do not
+optimistically change the checkbox. OFF closes via the same graceful shutdown
+as Quit, disconnecting phones/OBS/plugins. Explicit Quit exits regardless of the
+preference. ON hides the window without changing the service; macOS also hides the
+Dock icon and restores it on Open/Settings/reopen. Windows supports native left
+double-click; Linux tray-icon click events are not provided by Tauri, so use its
+native menu's **Open zDeck** action. Right-click menus follow Windows/Linux
+conventions; macOS also opens the menu on left click.
+
+The grouped menu is also available under **zDeck** in the application/window
+menu, including explicit Quit. With close-to-tray ON, tray creation failure leaves
+the window accessible. With it OFF, closing still quits. Linux checks `org.kde.StatusNotifierWatcher`'s
+`IsStatusNotifierHostRegistered` before hiding: an absent/unrecognized/legacy
+host conservatively keeps the window visible, with a short notice and Quit
+fallback. A successful tray object alone is not proof of a Linux panel host.
+Panel crashes/removal after hiding cannot be guaranteed recoverable; verify the
+host is working before relying on unattended background operation.
+
+Tray Start uses the last successfully saved **native** origin/mode, not an
+unsaved browser draft. Missing settings open Settings with an actionable error;
+no default origin or silent retry is used. Menu and Settings mutations share a
+native gate and authoritative RemoteAdmin state; a stale menu action cannot
+accidentally toggle the service back. Failures restore Settings and remain
+visible in the desktop notice. Stop retains existing persistence-error handling.
+Quit waits for an in-flight service operation, closes phone connections,
+disconnects OBS/plugins, then exits. Unlike explicit Stop, Quit preserves the
+saved auto-start preference.
+
+### Evidence from the close-preference / grouped Settings implementation
+
+On macOS arm64 using installed Cargo/Rust (`~/.cargo/bin` on PATH; Nix unavailable):
+
+- `cargo test --locked --manifest-path src-tauri/Cargo.toml`: 157 passed,
+  one existing opt-in real-service browser smoke ignored. Includes opt-in default,
+  persisted ON/OFF, failed-save retention, malformed preference errors, tray-host
+  hide/fallback policy, duplicate/shutdown gate and existing service lifecycle tests.
+- `cargo build --locked --manifest-path src-tauri/Cargo.toml`: passed.
+- Focused `npm test -- tests/desktopPreferences.test.ts tests/desktopTrayNotice.test.ts`:
+  9 passed (native read/save failures, no optimistic success, browser isolation and notices).
+- `npm run typecheck` and `npm run build`: passed.
+- `CHROME_BIN='/Applications/Brave Browser.app/Contents/MacOS/Brave Browser' npm run smoke`:
+  **364/364 passed**, including keyboard section navigation, active indication,
+  browser omission, mounted phone-card/draft retention, native preference save/failure,
+  and 320px General layout. Screenshots inspected at
+  `/tmp/zdeck-settings-general-desktop.png` and `/tmp/zdeck-settings-general-narrow.png`.
+  Smoke uses owned fake native preference/service stores, not real tray operations.
+  Service persistence assertions now reflect native ownership rather than the
+  removed browser desired-state store.
+- Final `npm test`: **223 passed, 1 failed** in concurrent, unrelated presentation
+  work: `tests/remotePhone.test.ts:138` accesses an absent `harness.sockets[0]`.
+  An earlier full run had a then-concurrent `tests/presentations.test.ts` failure.
+  Neither area was modified for this task; full-suite green is not claimed.
+- `git diff --check`: passed.
+- Initial plain `npm run smoke` could not find `google-chrome`; the installed Brave
+  binary was selected via `CHROME_BIN` instead. No dependencies were installed.
+- No Windows/Linux compilation or native tray interaction is claimed by these checks.
+
+No interactive tray/Dock/taskbar checks were performed. Windows and Linux were
+not built or run here; Linux-specific D-Bus code still needs compilation on a
+Linux host. Compilation and fake-backed tests do not establish OS behavior.
+
+### Required runtime checks on each OS
+
+1. Start without a desktop preference file: General must show OFF. Closing must
+   quit the process and disconnect phones. Enable, relaunch and confirm ON persists;
+   disable, relaunch and confirm OFF persists. Test malformed/unreadable preference
+   files: launch must still work and closing must quit. Test unwritable app-data:
+   save errors must remain visible and must not claim success.
+2. With close-to-tray ON and the service stopped, close the window, confirm native icon/menu access,
+   restore using Open and Settings, and confirm no duplicate window. On macOS
+   verify Dock disappearance/restoration and application Quit/reopen behavior;
+   on Windows/Linux verify the hidden taskbar entry. Check left double-click
+   on Windows; on Linux verify Open from the menu instead.
+3. With close-to-tray ON, start from Settings with saved origin/mode. Close while an
+   approved phone is connected: verify the same service/socket keeps working.
+   Stop/start from the tray and confirm Settings/menu converge to actual state.
+4. Rapidly press service controls in Settings and the tray. Verify no repeated
+   start/stop or stale-toggle reversal. Test occupied port, missing settings,
+   and unwritable app-data: no false success, no automatic retry, useful error.
+5. With both preference values, Quit while running and while a service mutation is pending. Confirm process,
+   listener and phone sockets close, then verify saved auto-start on relaunch.
+   Explicit Stop must still disable auto-start.
+6. With close-to-tray ON on Linux: check KDE and a GNOME/AppIndicator host, no watcher/host, and host loss
+   before Close. Without a confirmed host, Close must keep the window visible
+   and show the limitation; application-menu/UI Quit must remain available.
+   Check Linux tray packaging/runtime dependencies in the actual distribution.
+7. In Settings on each OS, use keyboard section links, direct section URLs, and
+   narrow windows. Edit a phone URL or integration form, switch away and back:
+   retain the draft, keep polling and service alive. Tray service failures must
+   restore Phone connection, not leave the error hidden in another section.
+
 ## Outstanding evidence
 
 - macOS: compilation and fake-backed automated checks only; no live device,

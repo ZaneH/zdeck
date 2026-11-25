@@ -2121,6 +2121,31 @@ async fn remembered_approval_restores_in_new_admin_and_revocation_survives_resta
 }
 
 #[tokio::test]
+async fn tray_start_uses_saved_scope_and_quit_preserves_auto_start() {
+    let dir = TempDir::new("tray-saved");
+    let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    let config = || transport_config(ORIGIN, ConnectionMode::Tailscale, deck.clone());
+    let admin = RemoteAdmin::persistent(Some(dir.path.clone()));
+    assert!(matches!(admin.start_saved(config()).await, Err(RemoteError::Unavailable { .. })));
+    let origin = "https://deck.home.arpa:8443";
+    admin.start(transport_config(origin, ConnectionMode::LocalHttps, deck.clone())).await.unwrap();
+    admin.stop().await;
+    let status = admin.start_saved(config()).await.unwrap();
+    assert_eq!(status.origin.as_deref(), Some(origin));
+    assert_eq!(status.mode, Some(ConnectionMode::LocalHttps));
+    assert!(matches!(admin.start_saved(config()).await, Err(RemoteError::AlreadyRunning { .. })));
+    admin.shutdown().await;
+    assert!(!admin.status().await.running);
+    let restored = RemoteAdmin::persistent(Some(dir.path.clone()));
+    restored.restore(config()).await;
+    assert!(restored.status().await.running, "Quit preserves auto-start, unlike Stop");
+    restored.stop().await;
+    let stopped = RemoteAdmin::persistent(Some(dir.path.clone()));
+    stopped.restore(config()).await;
+    assert!(!stopped.status().await.running);
+}
+
+#[tokio::test]
 async fn startup_bind_failure_is_visible_and_does_not_retry_after_stop() {
     let dir = TempDir::new("startup-bind");
     let deck = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));

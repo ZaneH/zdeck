@@ -717,6 +717,23 @@ impl RemoteAdmin {
         }
     }
 
+    /// Explicit tray start uses the last successfully saved native configuration.
+    pub async fn start_saved(&self, mut config: ServiceConfig) -> Result<RemoteStatus, RemoteError> {
+        let saved = self.trust.lock().await.state.clone()?;
+        config.origin = saved.origin.ok_or_else(|| RemoteError::Unavailable {
+            message: "Set up the local service connection in Settings before starting it from the tray.".into(),
+        })?;
+        config.mode = saved.mode;
+        self.start(config).await
+    }
+
+    /// Application exit preserves the user's auto-start preference.
+    pub async fn shutdown(&self) {
+        if let Some(service) = self.running.lock().await.take() {
+            service.stop().await;
+        }
+    }
+
     pub async fn start(&self, config: ServiceConfig) -> Result<RemoteStatus, RemoteError> {
         let mut running = self.running.lock().await;
         if running.is_some() {

@@ -75,6 +75,23 @@ describe("portable custom icons", () => {
     }
   });
 
+  it("keeps default and custom icons visible while a phone action is running", () => {
+    const base = createDefaultDeck().pages[0].controls[0];
+    for (const control of [base, { ...base, icon: { type: "image" as const, src } }]) {
+      const render = (busy: boolean) => renderToStaticMarkup(createElement(ControlTile, {
+        control, variant: "phone", semantics: "remote", volume: 50, busy, disabled: busy,
+      }));
+      const idle = render(false);
+      const busy = render(true);
+      expect(busy.match(/<span class="tile-icon">(.*?)<\/span>/)?.[1])
+        .toBe(idle.match(/<span class="tile-icon">(.*?)<\/span>/)?.[1]);
+      expect(busy).not.toContain("Running…");
+      expect(busy).toContain('aria-busy="true"');
+      expect(busy).toContain("— running");
+      expect(busy).toContain('disabled=""');
+    }
+  });
+
   it("groups by plugin and category, searches ownership and keeps image markup isolated", () => {
     const groups = iconGroups([manifest, { ...manifest, id: "other" }]);
     expect(groups.map(([group]) => group)).toEqual(["Built-in / Media", "Built-in / System", "Built-in / General", "player / Media", "other / Media"]);
