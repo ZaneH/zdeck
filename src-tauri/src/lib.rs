@@ -10,6 +10,7 @@ pub mod plugin;
 pub mod plugin_install;
 pub mod remote;
 pub mod system;
+mod tray;
 
 use std::sync::Arc;
 use actions::{ActionDispatcher, ActionError, ActionErrorCode, CommandResult, DesktopActions, DesktopCommand};
@@ -398,6 +399,9 @@ pub fn run() {
         })
         .setup(|app| {
             use tauri::Manager;
+            if let Err(error) = tray::setup(app) {
+                eprintln!("Could not create the zDeck tray icon: {error}");
+            }
             let store = match app.path().app_data_dir() {
                 Ok(directory) => Ok(Arc::new(DeckStore::new(directory.join(DECK_FILE_NAME)))),
                 Err(error) => Err(DeckError::unavailable(format!(
