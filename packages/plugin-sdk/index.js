@@ -31,8 +31,24 @@ const requestId = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x
 const text = (x) => typeof x === 'string' && x.length > 0 && x.length <= 80 && !/[\x00-\x1f\x7f]/.test(x);
 const integer = Number.isSafeInteger;
 
+function iconSource(value) {
+  return typeof value === 'string' && value.length <= 8192 && !value.endsWith(',')
+    && /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+}
+function pluginIcons(value) {
+  if (!Array.isArray(value) || value.length > 32) return false;
+  const ids = new Set();
+  return value.every((icon) => {
+    if (!exact(icon, ['id', 'title', 'category', 'src']) || !identifier(icon.id) || ids.has(icon.id)
+      || !text(icon.title) || !icon.title.trim() || !text(icon.category) || !icon.category.trim() || !iconSource(icon.src)) return false;
+    ids.add(icon.id);
+    return true;
+  });
+}
+
 export function validateManifest(value) {
-  let valid = exact(value, ['id', 'version', 'protocolVersion', 'actions']) && identifier(value.id)
+  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : [])])
+    && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && identifier(value.id)
     && typeof value.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     && value.protocolVersion === 1 && Array.isArray(value.actions) && value.actions.length > 0 && value.actions.length <= 32;
   const seen = new Set();

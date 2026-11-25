@@ -73,6 +73,8 @@ pub enum ControlAction {
 pub struct Control {
     pub id: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<crate::icons::ControlIcon>,
     #[serde(flatten)]
     pub action: ControlAction,
 }
@@ -85,6 +87,9 @@ impl<'de> Deserialize<'de> for Control {
             .ok_or_else(|| D::Error::custom("Control ID must be a string."))?;
         let label = fields.remove("label").and_then(|v| v.as_str().map(str::to_owned))
             .ok_or_else(|| D::Error::custom("Control label must be a string."))?;
+        let icon = fields.remove("icon").map(serde_json::from_value::<crate::icons::ControlIcon>).transpose()
+            .map_err(|_| D::Error::custom("Invalid control icon."))?;
+        if icon.as_ref().is_some_and(|icon| !icon.valid()) { return Err(D::Error::custom("Invalid control icon.")); }
         // Serde ignores extra fields on internally tagged unit variants even
         // with deny_unknown_fields. Do not silently drop data during migration.
         if matches!(fields.get("action").and_then(serde_json::Value::as_str), Some("mic-mute" | "media-play-pause")) && fields.len() != 1 {
@@ -92,7 +97,7 @@ impl<'de> Deserialize<'de> for Control {
         }
         let action = serde_json::from_value(serde_json::Value::Object(fields))
             .map_err(|_| D::Error::custom("Invalid control action fields."))?;
-        Ok(Self { id, label, action })
+        Ok(Self { id, label, icon, action })
     }
 }
 
@@ -256,6 +261,9 @@ impl Deck {
                         "Control labels must be non-empty and bounded.",
                     ));
                 }
+                if control.icon.as_ref().is_some_and(|icon| !icon.valid()) {
+                    return Err(DeckError::invalid_input("Control icons require a known built-in icon or a bounded image data URL."));
+                }
                 match &control.action {
                     ControlAction::ObsScene { scene } => {
                         if scene.trim().is_empty() || scene.len() > MAX_SCENE_BYTES {
@@ -296,6 +304,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
+            icon: None,
             action: ControlAction::ObsScene {
                 scene: scene.to_string(),
             },
@@ -305,6 +314,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
+            icon: None,
             action,
         }
     }
@@ -754,6 +764,30 @@ mod tests {
         let default = default_deck();
         default.validate().unwrap();
         assert_eq!(default, fixture_deck());
+    }
+
+    #[tokio::test]
+    async fn custom_icons_round_trip_without_plugin_access() {
+        use serde_json::json;
+        let dir = TempDir::new();
+        let store = DeckStore::new(dir.file());
+        let mut deck = default_deck();
+        deck.pages[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
+        deck.pages[0].controls[1].icon = Some(crate::icons::ControlIcon::Builtin { name: "music".into() });
+        let saved = store.save(0, deck.clone()).await.unwrap();
+        assert_eq!(saved.deck, deck);
+        assert_eq!(DeckStore::new(dir.file()).load().await.unwrap().deck, deck);
+        let encoded = serde_json::to_value(&deck).unwrap();
+        assert_eq!(encoded["pages"][0]["controls"][0]["icon"]["src"], "data:image/svg+xml;base64,PHN2Zy8+");
+        for icon in [json!(null), json!({"type":"builtin","name":"unknown"}),
+            json!({"type":"image","src":"https://example.com/icon.svg"}),
+            json!({"type":"image","src":"data:image/png;base64,AAAA","extra":true})] {
+            let mut bad = encoded.clone(); bad["pages"][0]["controls"][0]["icon"] = icon;
+            assert!(serde_json::from_value::<Deck>(bad).is_err());
+        }
+        deck.pages[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "file:///private".into() });
+        assert!(store.save(saved.revision, deck).await.is_err());
+        assert_eq!(store.load().await.unwrap().revision, saved.revision);
     }
 
     #[tokio::test]

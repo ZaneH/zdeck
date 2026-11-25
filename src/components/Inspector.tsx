@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
-import { canRunPlugin, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry } from "../lib/plugin";
+import { IconPicker } from "./IconPicker";
+import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry } from "../lib/plugin";
 import type { PluginControl } from "../lib/types";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { PluginErrorNotice } from "./PluginSettingsCard";
@@ -184,6 +185,8 @@ export function Inspector({
                 ))}
               </select>
             </label>
+
+            <IconPicker key={control.id} control={control} manifests={enabledPluginManifests(plugin.snapshots)} onPatch={onPatch} />
 
             {control.action === "plugin" ? <PluginControlEditor
               key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)?.config)}`}

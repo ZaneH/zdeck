@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod deck;
+pub mod icons;
 #[cfg(target_os = "linux")]
 mod linux_display;
 #[cfg(feature = "native-smoke")]

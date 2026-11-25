@@ -84,7 +84,11 @@ impl std::error::Error for PluginError {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct Manifest { pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action> }
+pub struct Manifest {
+    pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icons: Option<Vec<crate::icons::PluginIcon>>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, IntegerField> }
@@ -114,7 +118,14 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
     if serde_json::to_vec(&value).map_err(|_| ErrorKind::InvalidManifest)?.len() > REQUEST_BYTES {
         return Err(ErrorKind::InvalidManifest);
     }
+    if value.get("icons").is_some_and(|icons| !icons.is_array()) { return Err(ErrorKind::InvalidManifest); }
     let m: Manifest = serde_json::from_value(value).map_err(|_| ErrorKind::InvalidManifest)?;
+    if let Some(icons) = &m.icons {
+        let mut ids = HashSet::new();
+        if icons.len() > 32 || icons.iter().any(|icon| !icon.valid() || !ids.insert(&icon.id)) {
+            return Err(ErrorKind::InvalidManifest);
+        }
+    }
     let parts: Vec<_> = m.version.split('.').collect();
     let mut seen = HashSet::new();
     if !identifier(&m.id) || m.protocol_version != 1 || parts.len() != 3
@@ -583,6 +594,25 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn sample() -> Value { json!({"id":"test","version":"0.0.1","protocolVersion":1,"actions":[{"id":"go","title":"Go","config":{"n":{"type":"integer","minimum":0,"maximum":100}}}]}) }
+    #[test]
+    fn optional_icon_packs_match_sdk_bounds() {
+        let icon = json!({"id":"play","title":"Play","category":"Media","src":"data:image/svg+xml;base64,PHN2Zy8+"});
+        let mut v = sample(); v["icons"] = json!([icon.clone()]);
+        let parsed = manifest(v.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), v);
+        for icons in [json!(null), json!({}), json!([icon.clone(), icon.clone()]), json!(vec![icon.clone(); 33])] {
+            v["icons"] = icons; assert!(manifest(v.clone()).is_err());
+        }
+        for (field, value) in [("src", json!("file:///private")), ("category", json!(" ")), ("id", json!("../bad")),
+            ("title", json!("x".repeat(81))), ("extra", json!(true))] {
+            let mut bad = icon.clone(); bad[field] = value; v["icons"] = json!([bad]);
+            assert!(manifest(v.clone()).is_err());
+        }
+        let big: Vec<_> = (0..3).map(|i| json!({"id":format!("i{i}"),"title":"Big","category":"Media",
+            "src":format!("data:image/png;base64,{}", "A".repeat(8000))})).collect();
+        v["icons"] = json!(big); assert!(manifest(v).is_err());
+        assert!(serde_json::to_value(manifest(sample()).unwrap()).unwrap().get("icons").is_none());
+    }
     #[test]
     fn strict_manifest_and_arguments() {
         let m = manifest(sample()).unwrap();

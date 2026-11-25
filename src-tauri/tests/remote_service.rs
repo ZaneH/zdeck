@@ -1171,6 +1171,7 @@ async fn deck_store_changes_are_published_over_the_socket() {
 
     let mut deck = default_deck();
     deck.pages[0].name = "Changed".to_string();
+    deck.pages[0].controls[0].icon = Some(deck_lib::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
     let saved = store.save(1, deck).await.expect("save");
     assert_eq!(saved.revision, 2);
 
@@ -1178,6 +1179,7 @@ async fn deck_store_changes_are_published_over_the_socket() {
     assert_eq!(update["type"], "snapshot");
     assert_eq!(update["revision"], 2);
     assert_eq!(update["deck"]["pages"][0]["name"], "Changed");
+    assert_eq!(update["deck"]["pages"][0]["controls"][0]["icon"], json!({"type":"image","src":"data:image/svg+xml;base64,PHN2Zy8+"}));
 
     close_websocket(&mut websocket).await;
     service.stop().await;
@@ -1305,7 +1307,7 @@ async fn commands_are_strict_and_reject_bad_input() {
 async fn plugin_deck(env: &TestEnv) {
     let mut deck = default_deck();
     deck.pages[0].controls.push(deck_lib::deck::Control {
-        id: "ctl_plugin".into(), label: "Plugin volume".into(),
+        id: "ctl_plugin".into(), label: "Plugin volume".into(), icon: None,
         action: deck_lib::deck::ControlAction::Plugin {
             plugin_id: "fake".into(), plugin_action: "set-volume".into(),
             plugin_args: json!({"volume":50}).as_object().unwrap().clone(),
@@ -1350,7 +1352,7 @@ let count=0;require('node:readline').createInterface({input:process.stdin}).on('
 });
 "#;
         std::fs::write(&entry,source).unwrap();env.plugin.connect(id,node.clone(),entry.to_str().unwrap().into()).await.unwrap();
-        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
+        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),icon:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
     }
     env.deck.save(1,deck).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
     for (id,volume) in [("alpha",17),("beta",83)] {

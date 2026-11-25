@@ -457,6 +457,15 @@ try {
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live'));
   await editor.waitFor("!!document.querySelector('.inspector-form')");
   check("selecting a key opens its inspector", await editor.eval("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live'"));
+  await editor.eval(click('.icon-picker > summary'));
+  check('built-in icons are grouped by category', await editor.eval("[...document.querySelectorAll('.icon-picker legend')].map(el => el.textContent).join('|') === 'Built-in / Media|Built-in / System|Built-in / General'"));
+  await editor.eval(setValue('.icon-picker input[type=search]', 'star'));
+  check('icon search filters choices', await editor.waitFor("document.querySelectorAll('.icon-picker-grid button').length === 1"));
+  await editor.eval("document.querySelector('.icon-picker-grid button').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check('keyboard selects a custom icon without changing the action', await editor.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-star') && document.querySelector('.inspector-form select').value === 'obs-scene'"));
+  await editor.eval(setValue('.icon-picker input[type=search]', ''));
+  await editor.screenshot('/tmp/zdeck-custom-icons-builtins.png');
   check("remove button keeps danger text with a visible tinted surface and border", await editor.eval("(() => { const cs = getComputedStyle(document.querySelector('.inspector-actions .button.danger')); return cs.color === 'rgb(239, 167, 176)' && cs.borderTopWidth === '1px' && cs.borderTopColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.boxShadow !== 'none'; })()"));
   await editor.eval(setValue('.inspector-form input[type="text"]', 'Go live edited'));
   check("inspector rename persists in the field", await editor.waitFor("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Go live edited'"));
@@ -479,6 +488,11 @@ try {
   const persisted = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
   check("refresh keeps the edited deck", persisted === keyboardOrderAfter, persisted);
   check("saved deck no longer shows onboarding", await editor.eval("!document.querySelector('.setup-shell')"));
+  check('custom icon survives reload', await editor.eval("!!document.querySelector('.control-tile .lucide-star')"));
+  await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
+  await editor.eval(click('.icon-picker > summary'));
+  await editor.eval(clickText('.icon-picker button', 'Use action default'));
+  check('reset restores action default', await editor.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-clapperboard') && !document.querySelector('.control-tile.is-selected .lucide-star')"));
 
   // ------------------------------------------------------------ settings + theme segmented control
   await editor.eval(click('[aria-label="Open settings"]'));
@@ -671,6 +685,8 @@ try {
   const admin = await openPage('pairing-settings', null, { width: 960, height: 680 }, adminCtx);
   livePages.push(admin);
   // Rust migrates this shared legacy fixture before returning native snapshots.
+  const smokeSvgSource = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><script>window.__iconScriptRan=true</script><circle cx="12" cy="12" r="10" fill="#6ee7b7"/></svg>').toString('base64');
+  const smokePngSource = 'data:image/png;base64,' + readFileSync(join(ROOT, 'public/icons/favicon-32.png')).toString('base64');
   const adminDeck = { ...JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8')), version: 2 };
   await admin.send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.isTauri = true;
@@ -689,6 +705,10 @@ try {
     window.__runtimeStatus = 'detected';
     const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
       {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}}
+    ], icons:[
+      {id:'badge', title:'Media badge', category:'Media', src:${JSON.stringify(smokeSvgSource)}},
+      {id:'logo', title:'Logo', category:'Brand', src:${JSON.stringify(smokePngSource)}},
+      {id:'unreadable', title:'Unreadable', category:'General', src:'data:image/png;base64,AAAA'}
     ]};
     let origin = 'https://fixture.tailnet.ts.net', mode = 'tailscale';
     window.__remoteStartArgs = [];
@@ -947,10 +967,27 @@ try {
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.add-control')");
+  await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
+  await admin.eval(click('.icon-picker > summary'));
+  await admin.eval(click('[aria-label="spotify / Media: Media badge"]'));
+  check('a plugin icon can decorate an unrelated built-in action', await admin.waitFor("document.querySelector('.control-tile.is-selected[data-action=mic-mute] img')?.naturalWidth > 0"));
   await admin.eval(click('.add-control'));
   check('all enabled manifests appear in the action library as escaped text', await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Spotify <volume>') && [...document.querySelectorAll('.action-row-name')].some(el => el.textContent === 'Other action')") && await admin.eval("!document.querySelector('.action-library volume')"));
   await admin.eval(clickText('.action-row', 'Spotify <volume>'));
   await admin.waitFor("!!document.querySelector('.inspector-form .native-control input[type=number]')");
+  await admin.eval(click('.icon-picker > summary'));
+  check('plugin icons grouped by plugin and category', await admin.waitFor("[...document.querySelectorAll('.icon-picker legend')].some(el => el.textContent === 'spotify / Media') && [...document.querySelectorAll('.icon-picker legend')].some(el => el.textContent === 'spotify / Brand')"));
+  await admin.eval(click('[aria-label="spotify / Brand: Logo"]'));
+  check('plugin PNG decodes on the control', await admin.waitFor("document.querySelector('.control-tile.is-selected img')?.naturalWidth === 32"));
+  await admin.eval(click('[aria-label="spotify / General: Unreadable"]'));
+  check('unreadable images fall back to the action icon', await admin.waitFor("!!document.querySelector('.control-tile.is-selected .lucide-plug') && !document.querySelector('.control-tile.is-selected img')"));
+  await admin.eval(click('[aria-label="spotify / Media: Media badge"]'));
+  check('plugin SVG decodes as an image without injecting scripts', await admin.waitFor("document.querySelector('.control-tile.is-selected img')?.naturalWidth > 0") && await admin.eval("!window.__iconScriptRan && !document.querySelector('.icon-picker script')"));
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
+  check('icon picker fits a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth"));
+  await admin.eval("document.querySelector('.icon-picker').scrollIntoView({block:'start'})");
+  await admin.screenshot('/tmp/zdeck-custom-icons-plugin-narrow.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
   check('plugin uses a configured button with sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelectorAll('.control-tile[data-action=plugin] input[type=range]').length === 0"));
   await admin.eval(setValue('.inspector-form .native-control input', '101'));
   check('invalid plugin bounds disable Run', await admin.eval("document.querySelector('.inspector-form .native-control .button.primary').disabled"));
@@ -963,6 +1000,7 @@ try {
   await admin.eval(click('[aria-label="Open phone preview"]'));
   await admin.waitFor("!!document.querySelector('.phone-shell .control-tile[data-action=plugin]')");
   await admin.eval(click('.phone-shell .control-tile[data-action=plugin] button'));
+  check('phone preview renders the saved SVG', await admin.waitFor("document.querySelector('.phone-shell .control-tile[data-action=plugin] img')?.naturalWidth > 0"));
   check('phone preview simulates the plugin without native execution', await admin.eval(`window.__adminCalls.filter(c => c === 'plugin_execute').length === ${executions} && document.querySelector('.phone-shell').textContent.includes('Preview only')`));
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.inspector-form .native-control')");
@@ -980,6 +1018,7 @@ try {
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
   check('disabling one row leaves the other plugin enabled', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Enable'") && await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && window.__pluginCalls.filter(c=>c.command==='plugin_disconnect').at(-1).args.pluginId==='spotify'"));
   await admin.eval("location.hash='#/'"); await admin.waitFor("!!document.querySelector('.add-control')");
+  check('saved plugin image survives disabling its source plugin', await admin.waitFor("document.querySelector('.control-tile[data-action=mic-mute] img')?.naturalWidth > 0"));
   await admin.eval(click('.add-control')); await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el=>el.textContent==='Other action')");
   await admin.eval(clickText('.action-row','Other action')); await admin.waitFor("!!document.querySelector('.native-control .button.primary')");
   await admin.eval(clickText('.native-control button','Run plugin action'));

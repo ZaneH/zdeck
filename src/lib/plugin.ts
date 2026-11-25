@@ -1,8 +1,10 @@
+import { isPluginIcons } from "./icons";
+import type { PluginIcon } from "./icons";
 import type { PluginControl } from "./types";
 
 export interface PluginField { type: "integer"; minimum: number; maximum: number }
 export interface PluginAction { id: string; title: string; config: Record<string, PluginField> }
-export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[] }
+export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[] }
 export interface PluginError {
   kind: string;
   code: string | null;
@@ -139,7 +141,8 @@ export function isPluginArgs(value: unknown): value is Record<string, number> {
     && Object.entries(value).every(([key, n]) => pluginIdentifier(key) && safeInteger(n));
 }
 export function parsePluginManifest(value: unknown): PluginManifest | null {
-  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions"])
+  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : [])])
+    || (Object.hasOwn(value, "icons") && !isPluginIcons(value.icons))
     || !pluginIdentifier(value.id) || typeof value.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     || value.protocolVersion !== 1 || !Array.isArray(value.actions) || value.actions.length < 1 || value.actions.length > 32) return null;
   const seen = new Set<string>();

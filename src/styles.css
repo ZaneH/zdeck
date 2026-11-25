@@ -78,6 +78,21 @@ code { font-family: var(--mono); font-size: .9em; overflow-wrap: anywhere; }
 .button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 18%, transparent); border-color: var(--danger); }
 .button.small { min-height: 30px; padding: 0 8px; }
 .button:disabled, .icon-button:disabled { opacity: .4; }
+.control-icon-image { object-fit: contain; flex: none; }
+.icon-picker { border: 1px solid var(--border); border-radius: 5px; }
+.icon-picker > summary { display: flex; align-items: center; gap: 8px; padding: 10px; cursor: pointer; }
+.icon-picker-status { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.icon-picker-toggle { flex: none; }
+.icon-picker[open] .icon-picker-toggle { transform: rotate(180deg); }
+.icon-picker-body { display: grid; gap: 12px; padding: 0 10px 10px; }
+.icon-picker-groups { max-height: 360px; overflow-y: auto; }
+.icon-picker-group { min-width: 0; margin: 0 0 12px; padding: 8px 0 0; border: 0; border-top: 1px solid var(--border); }
+.icon-picker-group legend { padding-right: 8px; font-size: 12px; color: var(--text-muted); }
+.icon-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.icon-picker-grid button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 64px; padding: 6px 3px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); }
+.icon-picker-grid button:hover { background: var(--surface-2); }
+.icon-picker-grid button[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
+.icon-picker-grid button span { max-width: 100%; overflow-wrap: anywhere; font-size: 10px; line-height: 1.3; }
 .icon-button { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); }
 .icon-button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .icon-button.danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }

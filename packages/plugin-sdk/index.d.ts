@@ -6,7 +6,9 @@ export const LIMITS: Readonly<{
 }>;
 export interface IntegerConfig { type: 'integer'; minimum: number; maximum: number }
 export interface Action { id: string; title: string; config: Record<string, IntegerConfig> }
-export interface Manifest { id: string; version: string; protocolVersion: 1; actions: Action[] }
+/** Base64 data URL: PNG, JPEG, WebP, GIF or SVG. At most 8192 characters, within the 16 KiB manifest budget. */
+export interface Icon { id: string; title: string; category: string; src: string }
+export interface Manifest { id: string; version: string; protocolVersion: 1; actions: Action[]; icons?: Icon[] }
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type State = { [key: string]: Json };
 export type Request =

@@ -35,7 +35,7 @@ export function ControlTile({
   useEffect(() => { volumeGesture.current = null; }, [disabled, control.id, semantics]);
   const content = (
     <>
-      <span className="tile-icon"><ActionIcon kind={control.action} size={22} /></span>
+      <span className="tile-icon"><ActionIcon kind={control.action} icon={control.icon} size={22} /></span>
       <span className="tile-label" title={control.label}>{control.label}</span>
     </>
   );

@@ -1,3 +1,4 @@
+import { isControlIcon } from "./icons";
 import { ACCENTS, DECK_VERSION } from "./types";
 import type {
   Accent,
@@ -112,7 +113,10 @@ export function addControl(
 function patchControl(control: Control, patch: ControlPatch): Control {
   const action = patch.action ?? control.action;
   const actionChanged = action !== control.action;
+  if (patch.icon !== undefined && patch.icon !== null && !isControlIcon(patch.icon)) return control;
+  const icon = patch.icon === undefined ? control.icon : patch.icon;
   const base = {
+    ...(icon ? { icon } : {}),
     id: control.id,
     label:
       patch.label !== undefined
@@ -281,7 +285,8 @@ function isControl(value: unknown): value is Control {
   if (typeof value.id !== "string" || !value.id) return false;
   if (typeof value.label !== "string" || !value.label.trim()) return false;
 
-  const fields = ["id", "label", "action"];
+  if (Object.hasOwn(value, "icon") && !isControlIcon(value.icon)) return false;
+  const fields = ["id", "label", "action", ...(Object.hasOwn(value, "icon") ? ["icon"] : [])];
   switch (value.action) {
     case "plugin":
       return onlyFields(value, [...fields, "pluginId", "pluginAction", "pluginArgs"])

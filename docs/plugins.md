@@ -39,6 +39,16 @@ Desktop startup requests `plugin_catalog` and cached `plugin_snapshots` only. Na
 
 Deck schema v2 stores only plugin IDs, action IDs and bounded integer arguments—not launch paths or secrets. Valid v1 decks migrate in memory; migration alone does not rewrite stored data. A later explicit edit/save writes v2. The native filename remains `deck.v1.json`; older app versions cannot read the new schema.
 
+## Customize control icons
+
+Select a control in the editor and expand **Icon** in the Inspector. Choose any built-in icon, or an icon supplied by an enabled plugin, regardless of the control's action. The picker groups built-ins by category and plugin icons by **plugin ID / category**; search matches icons, plugins and categories. **Use action default** removes the override. Changing a label or action preserves an explicitly chosen icon.
+
+Plugin authors can add optional `icons: [{ id, title, category, src }]` to the manifest. Sources are embedded base64 PNG, JPEG, WebP, GIF or SVG data URLs, not paths or network URLs. Each source is limited to 8192 characters, with at most 32 icons and the existing 16 KiB total manifest budget. SVGs render as images, not executable page markup; unreadable images fall back to the action icon. See `packages/plugin-sdk/README.md` and the typed hello example for the exact schema and encoding example. This SDK addition is **unreleased** and requires the updated SDK and app, not the published 0.1.0 package. Static `manifest.json` and runtime `describe` metadata must match.
+
+Deck v2 now accepts optional per-control `icon` overrides: `{ type: "builtin", name }` or `{ type: "image", src }`. Image data is copied into the deck so it remains available after disabling/uninstalling a plugin and on the paired phone, without new asset endpoints or plugin execution. Existing decks without icons load unchanged. Older app versions reject decks containing overrides; remove overrides before opening such a deck in an older app. The native deck-file budget remains 256 KiB, so keep image icons compact; exceeding it rejects a save without overwriting the previous file.
+
+This implementation uses portable browser image rendering and the same validation on Windows, macOS and Linux; it introduces no OS-specific image paths or permission requirements. Actual native/webview verification on all three platforms is still required before release.
+
 ## Develop the Spotify source plugin
 
 `@zdeck/plugin-sdk@0.1.0` is published on the public npm registry. The reference plugin now pins that exact version:

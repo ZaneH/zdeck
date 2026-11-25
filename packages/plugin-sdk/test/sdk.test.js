@@ -19,6 +19,19 @@ async function session(chunks, overrides = {}) {
   return { responses: output.trim().split('\n').filter(Boolean).map(JSON.parse), calls, output };
 }
 
+test('optional icon packs are bounded and accept only embedded image sources', async () => {
+  const icon = { id: 'play', title: 'Play', category: 'Media', src: 'data:image/svg+xml;base64,PHN2Zy8+' };
+  const pack = { ...manifest, icons: [icon] };
+  assert.equal(validateManifest(pack), pack);
+  const { responses } = await session([request('describe')], { manifest: pack });
+  assert.deepEqual(responses[0].manifest.icons, [icon]);
+  for (const icons of [null, [icon, icon], Array(33).fill(icon), [{ ...icon, src: 'https://example.com/icon.svg' }],
+    [{ ...icon, src: 'data:text/html;base64,PHN2Zy8+' }], [{ ...icon, src: 'data:image/png;base64,a===' }],
+    [{ ...icon, category: ' ' }], [{ ...icon, title: 'x'.repeat(81) }], [{ ...icon, unknown: true }]]) {
+    assert.throws(() => validateManifest({ ...manifest, icons }), /Invalid plugin manifest/);
+  }
+});
+
 test('public constants and strict manifest validation', () => {
   assert.equal(validateManifest(manifest), manifest);
   for (const bad of [null, {}, { ...manifest, protocolVersion: 2 }, { ...manifest, executable: '/bin/sh' },

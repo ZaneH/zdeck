@@ -1,3 +1,5 @@
+import type { ControlIcon } from "./icons";
+
 export const DECK_VERSION = 2 as const;
 
 export const THEMES = ["dark", "light"] as const;
@@ -26,6 +28,7 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
 interface ControlBase {
   id: string;
   label: string;
+  icon?: ControlIcon;
 }
 
 export interface ObsSceneControl extends ControlBase {
@@ -85,6 +88,8 @@ export interface Deck {
 
 export type ControlPatch = {
   label?: string;
+  /** null resets to the action's default icon. */
+  icon?: ControlIcon | null;
   action?: ActionKind;
   scene?: string;
   volume?: number;

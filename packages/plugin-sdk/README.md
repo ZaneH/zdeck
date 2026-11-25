@@ -20,6 +20,29 @@ npm install @zdeck/plugin-sdk
 
 End users of the desktop app receive the complete generated Spotify folder and run no npm install. Plugin authors can install this package normally from npm. Repository development can also use a local `file:../../packages/plugin-sdk` dependency with `install-links=true` to copy files instead of creating symlinks. This does not automatically migrate old development links or repair installed plugins.
 
+## Shared icon packs (unreleased)
+
+The repository SDK and updated app accept an optional `manifest.icons` array. This addition is **not in the published 0.1.0 SDK**: use a locally packed copy of this source until a new version is published. Older apps reject manifests with this field. Existing manifests without it still work.
+
+```ts
+import { readFileSync } from 'node:fs';
+import type { Icon } from '@zdeck/plugin-sdk';
+
+const icons: Icon[] = [{
+  id: 'play', title: 'Play', category: 'Media',
+  src: 'data:image/svg+xml;base64,' + readFileSync(new URL('./icons/play.svg', import.meta.url)).toString('base64'),
+}];
+// Include `icons` alongside id, version, protocolVersion and actions in your manifest.
+```
+
+Any control can use these icons, not just this plugin's actions. The picker groups them by plugin ID and category. Use short titles and recognizable artwork; SVGs should have a `viewBox` and explicit colors (image SVGs do not inherit the app's `currentColor`). For PNG, JPEG, WebP or GIF, use the matching `data:image/png;base64,`, `data:image/jpeg;base64,`, `data:image/webp;base64,` or `data:image/gif;base64,` prefix.
+
+Each icon has exactly `id`, `title`, `category`, `src`. IDs use the same rules as action IDs and must be unique within the pack. Titles/categories are nonblank, at most 80 UTF-16 code units, without ASCII control characters. At most 32 icons are allowed. Each source is a nonempty base64 data URL of at most **8192 characters**, and the **entire manifest still must fit within 16384 UTF-8 bytes**. Optimize artwork; these are small control icons, not album artwork. Paths, remote URLs, HTML and raw SVG markup are rejected. SVG is rendered through an image element, never injected into the page. Invalid image content falls back to the control's action icon.
+
+When distributing a folder, `manifest.json` and the process's `describe` response must include identical icon metadata, just like actions. Keep any authoring assets available to the process if it reads them at startup, or pre-encode the data into both manifests during packaging. The selected image is copied into the deck for persistence and phone rendering without fetching assets or keeping the plugin enabled. The existing 256 KiB native deck-file budget still applies; many distinct large images can exhaust it. Resetting to the action default removes the saved override.
+
+See `examples/hello.ts` for a self-contained SVG example. No icon-specific action execution, extra host permissions or network requests are required.
+
 ## Maintainer releases
 
 Releases use the public `@zdeck` scope. Authenticate externally and verify permission before publishing. Do not paste credentials into source, chats or logs.
