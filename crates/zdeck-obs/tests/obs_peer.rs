@@ -318,7 +318,8 @@ async fn rejects_a_wrong_password() {
 #[tokio::test]
 async fn reports_unavailable_when_nothing_is_listening() {
     let port = unused_port().await;
-    let state = test_state();
+    // Windows can take longer than the fake-peer 600 ms deadline to refuse TCP.
+    let state = ObsState::default();
 
     let error = state.connect(port, None).await.unwrap_err();
 
