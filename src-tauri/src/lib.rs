@@ -9,7 +9,7 @@ pub use zdeck_obs as obs;
 pub mod plugin;
 pub mod plugin_install;
 pub mod remote;
-pub mod system;
+pub use zdeck_system as system;
 mod tray;
 
 use std::sync::Arc;

@@ -627,7 +627,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
- "cc",
  "embed-resource",
  "futures-util",
  "getrandom 0.3.4",
@@ -646,6 +645,7 @@ dependencies = [
  "url",
  "zdeck-obs",
  "zdeck-schema",
+ "zdeck-system",
 ]
 
 [[package]]
@@ -4763,6 +4763,16 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "zdeck-system"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
