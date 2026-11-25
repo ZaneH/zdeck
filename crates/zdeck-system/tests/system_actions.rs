@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use deck_lib::system::{
+use zdeck_system::{
     CommandRunner, CommandSpec, MediaStatus, RunOutput, SystemError, SystemState, Timeouts,
     DEFAULT_SINK, DEFAULT_SOURCE,
 };
@@ -265,7 +265,7 @@ async fn missing_tool_is_reported_as_tool_missing() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_real_missing_executable_is_tool_missing() {
-    use deck_lib::system::ProcessRunner;
+    use zdeck_system::ProcessRunner;
 
     // The real runner maps spawn NotFound to a sanitized ToolMissing error.
     // Program names are compile-time constants in production; this name is only
@@ -284,7 +284,7 @@ async fn a_real_missing_executable_is_tool_missing() {
 async fn a_real_command_is_cancelled_on_timeout() {
     use std::time::Instant;
 
-    use deck_lib::system::ProcessRunner;
+    use zdeck_system::ProcessRunner;
 
     let runner = ProcessRunner;
     // `sleep` is only used to hold the child open; no machine state is touched.
