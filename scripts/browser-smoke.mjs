@@ -649,6 +649,13 @@ try {
   check("clicking the same settings control returns to the editor", await editor.waitFor("!!document.querySelector('.canvas-panel') && !document.querySelector('.settings-view')"));
   await editor.eval(click('[aria-label="Open settings"]'));
   await editor.waitFor("!!document.querySelector('.settings-view')");
+  check("settings groups are navigable with an active General section", await editor.eval("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General' && document.querySelectorAll('.settings-nav a').length === 3"));
+  check("browser Settings does not offer native close behavior", await editor.eval("!document.getElementById('desktop-preferences-heading')"));
+  await editor.eval("document.querySelector('.settings-nav a[href=\"#/settings/phone\"]').focus()");
+  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
+  check("Phone connection navigation works with the keyboard and updates active section", await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Phone connection' && !document.querySelector('[aria-label=\"Phone connection\"][role=region]').hidden"));
+  await editor.eval(click('.settings-nav a[href="#/settings/general"]'));
+  await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General'");
   check("settings shows the segmented theme buttons", await editor.eval("document.querySelectorAll('.segmented button').length === 2"));
   await editor.eval(clickText('.segmented .button', 'Light'));
   check("theme segmented control switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
@@ -835,8 +842,10 @@ try {
   await admin.send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.isTauri = true;
     window.__adminCalls = [];
-    // A reload with a saved preference simulates a new program session: service is stopped.
-    let running = !localStorage.getItem('deck.remote.origin.v1'), invitationNumber = 0;
+    // Fake native disk state uses a test-only key to survive browser reloads.
+    // Production service restoration/persistence belongs to RemoteAdmin, not browser storage.
+    const savedService = JSON.parse(localStorage.getItem('zdeck.smoke.nativeService') || 'null');
+    let running = savedService ? savedService.enabled : !localStorage.getItem('deck.remote.origin.v1'), invitationNumber = 0;
     window.__remoteStartOrigins = [];
     window.__desktopCalls = [];
     let savedDeck = ${JSON.stringify(adminDeck)}, savedRevision = 1;
@@ -854,11 +863,17 @@ try {
       {id:'logo', title:'Logo', category:'Brand', src:${JSON.stringify(smokePngSource)}},
       {id:'unreadable', title:'Unreadable', category:'General', src:'data:image/png;base64,AAAA'}
     ]};
-    let origin = 'https://fixture.tailnet.ts.net', mode = 'tailscale';
+    let origin = savedService?.origin || 'https://fixture.tailnet.ts.net', mode = savedService?.mode || 'tailscale';
     window.__remoteStartArgs = [];
     const status = () => ({running, mode: running ? mode : null, origin: running ? origin : null, port: running ? 45829 : null, pendingDevices: 0, approvedDevices: 0, connectedSockets: 0});
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       window.__adminCalls.push(command);
+      if (command === 'desktop_tray_notice') return null;
+      if (command === 'desktop_close_to_tray') return window.__closeToTray ?? false;
+      if (command === 'desktop_set_close_to_tray') {
+        if (window.__failPreferenceSave) throw 'Desktop preference save failed';
+        return window.__closeToTray = args.enabled;
+      }
       if (command === 'native_deck_load') return { exists: true, revision: savedRevision, deck: savedDeck };
       if (command === 'native_deck_save') {
         if (window.__holdSave) await new Promise(resolve => { window.__finishSave = resolve; });
@@ -911,9 +926,16 @@ try {
         window.__remoteStartArgs.push(args);
         if (window.__holdRemoteStart) await new Promise(resolve => { window.__finishRemoteStart = resolve; });
         if (window.__failRemoteStart) throw {kind:'invalid_origin',message:'The local service could not be started.'};
-        origin = args.origin; mode = args.mode; running = true; return status();
+        origin = args.origin; mode = args.mode; running = true;
+        localStorage.setItem('zdeck.smoke.nativeService', JSON.stringify({enabled:true,origin,mode}));
+        return status();
       }
-      if (command === 'remote_stop') { running = false; return status(); }
+      if (command === 'remote_stop') {
+        running = false;
+        if (window.__failRemoteStopSave) return {...status(), error:'The service stopped, but its off state could not be saved. It may restart next launch.'};
+        localStorage.setItem('zdeck.smoke.nativeService', JSON.stringify({enabled:false,origin,mode}));
+        return status();
+      }
       if (command === 'remote_create_invitation') {
         const invitation = (++invitationNumber % 2 ? 'a' : 'b').repeat(64);
         return { invitation, url: origin + '/#/pair?invite=' + invitation, expiresAtMs: Date.now() + (invitationNumber === 2 ? 1500 : 60000) };
@@ -925,7 +947,7 @@ try {
       window.__clipboardText = text;
     } } });
   ` });
-  await admin.navigate(`${BASE}/#/settings`);
+  await admin.navigate(`${BASE}/#/settings/phone`);
   check('desktop pairing status distinguishes local service from phone access', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Phone access is not checked.')"));
   check('background HTTPS command is visible outside Connection help', await admin.eval("document.querySelector('.remote-command pre').textContent === 'tailscale serve --bg --https=443 http://127.0.0.1:45829' && !document.querySelector('.remote-help').open && !document.querySelector('.remote-help .remote-command')"));
   const connectionPanelSpacing = "(() => { const panel = document.querySelector('.remote-panel:not([hidden])'), hidden = document.querySelector('.remote-panel[hidden]'); const intro = panel.querySelector(':scope > p').getBoundingClientRect(), steps = panel.querySelector('.remote-steps').getBoundingClientRect(), command = panel.querySelector('.remote-command').getBoundingClientRect(), field = panel.querySelector('.field').getBoundingClientRect(); return steps.top - intro.bottom >= 11.5 && field.top - command.bottom >= 11.5 && getComputedStyle(hidden).display === 'none' && hidden.getBoundingClientRect().height === 0; })()";
@@ -941,7 +963,18 @@ try {
   await admin.eval("window.__clipboardFails = false");
   check('running service hydrates the address without persisting session or pairing data', await admin.eval("document.querySelector('input[type=url]').value === 'https://fixture.tailnet.ts.net' && !localStorage.getItem('deck.remote.origin.v1') && !window.__adminCalls.includes('remote_start')"));
   check('pairing steps are four numbered circles', await admin.eval("(() => { const items = [...document.querySelectorAll('.remote-steps > li')]; return items.length === 4 && items.every((li) => { const mark = getComputedStyle(li, '::before'); return mark.borderRadius === '50%' && mark.content !== 'none' && parseFloat(mark.width) > 0; }); })()"));
-  check('Connection, Storage, and About disclosures share one row geometry and chevron', await admin.eval("(() => { const rows = [document.querySelector('.remote-help > .disclosure'), document.querySelector('.storage-details > summary'), document.querySelector('.preview-scope > summary')]; return rows.every((el) => !!el && el.classList.contains('disclosure')) && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().left))).size === 1 && new Set(rows.map((el) => Math.round(el.getBoundingClientRect().height))).size === 1 && getComputedStyle(rows[0], '::before').borderRightStyle === 'solid'; })()"));
+  const checkDisclosureGeometry = async () => {
+    const measure = "(() => [...document.querySelectorAll('.settings-group:not([hidden]) .disclosure')].map(el => { const range = document.createRange(); range.selectNodeContents(el); const r = el.getBoundingClientRect(), t = range.getBoundingClientRect(); return { left: Math.round(r.left), height: Math.round(r.height), chevron: getComputedStyle(el, '::before').borderRightStyle === 'solid', centered: Math.abs(t.top + t.height / 2 - r.top - r.height / 2) <= 1.5 }; }))()";
+    const phone = await admin.eval(measure);
+    await admin.eval("location.hash = '#/settings/general'");
+    await admin.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General'");
+    const general = await admin.eval(measure);
+    await admin.eval("location.hash = '#/settings/phone'");
+    await admin.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Phone connection'");
+    const rows = [...phone, ...general];
+    return rows.length === 3 && new Set(rows.map(row => row.left)).size === 1 && new Set(rows.map(row => row.height)).size === 1 && rows.every(row => row.chevron && row.centered);
+  };
+  check('Connection, Storage, and About disclosures share geometry across their sections', await checkDisclosureGeometry());
   check('step text is vertically centered with each number circle', await admin.eval("[...document.querySelectorAll('.remote-steps > li')].every(li => { const text = document.createRange(); text.selectNodeContents(li); const r = li.getBoundingClientRect(), t = text.getBoundingClientRect(); return Math.abs((t.top + t.height / 2) - (r.top + r.height / 2)) <= 1.5; })"));
   await admin.eval("document.querySelector('.remote-help > summary').focus()");
   await pressKey(admin, 'Enter', 'Enter', 13, '\r');
@@ -966,7 +999,7 @@ try {
   await admin.eval("document.querySelector('.remote-command-row').scrollIntoView({block:'center'})");
   check('narrow Tailscale command retains an adjacent visible unclipped copy button', await admin.eval(commandRowVisible));
   await admin.screenshot('/tmp/zdeck-settings-tailscale-narrow.png');
-  check('narrow disclosures align their arrows and centered labels', await admin.eval("(() => { const rows = [...document.querySelectorAll('.remote-help > .disclosure, .storage-details > summary, .preview-scope > summary')]; return rows.length === 3 && new Set(rows.map(el => Math.round(el.getBoundingClientRect().left))).size === 1 && rows.every(el => { const range = document.createRange(); range.selectNodeContents(el); const r = el.getBoundingClientRect(), t = range.getBoundingClientRect(); return Math.abs(t.top + t.height / 2 - r.top - r.height / 2) <= 1.5; }); })()"));
+  check('narrow disclosures align their arrows and centered labels across sections', await checkDisclosureGeometry());
   await admin.screenshot('/tmp/deck-design-pairing-narrow.png');
   await admin.eval(clickText('.settings-card button', 'Replace pairing link'));
   check('replacement invitation replaces the QR', await admin.waitFor(`document.querySelector('.pairing-qr path')?.getAttribute('d') !== ${JSON.stringify(originalQr)}`));
@@ -989,6 +1022,10 @@ try {
   await admin.waitFor("document.querySelector('.settings-view').textContent.includes('Local service stopped.')");
   await admin.eval(setValue('input[type=url]', 'https://draft.tailnet.ts.net'));
   const pollsBeforeDraft = await admin.eval("window.__adminCalls.filter(c => c === 'remote_status').length");
+  await admin.eval("window.__remoteCard = document.querySelector('[aria-labelledby=remote-heading]'); location.hash = '#/settings/integrations'");
+  await admin.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Integrations'");
+  await admin.eval("location.hash = '#/settings/phone'");
+  check('switching Settings sections preserves the phone form and mounted card', await admin.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Phone connection'") && await admin.eval("window.__remoteCard === document.querySelector('[aria-labelledby=remote-heading]') && document.querySelector('input[type=url]').value === 'https://draft.tailnet.ts.net'"));
   check('background service polls do not clobber an edited URL draft', await admin.waitFor(`window.__adminCalls.filter(c => c === 'remote_status').length > ${pollsBeforeDraft}`) && await admin.eval("document.querySelector('input[type=url]').value === 'https://draft.tailnet.ts.net' && localStorage.getItem('deck.remote.origin.v1') === 'https://new.tailnet.ts.net'"));
   await admin.eval("document.getElementById('remote-tab-tailscale').focus()");
   await pressKey(admin, 'ArrowRight', 'ArrowRight', 39);
@@ -1027,37 +1064,53 @@ try {
   await admin.eval(click('#remote-tab-local_https'));
   check('switching back restores the local draft but storage contains only successful origins and mode', await admin.waitFor("document.querySelector('input[type=url]').value === 'https://unsaved.lan:8443'") && await admin.eval("localStorage.getItem('deck.remote.mode.v1') === 'local_https' && localStorage.getItem('deck.remote.local-origin.v1') === 'https://192.168.1.20:8443' && !JSON.stringify(localStorage).includes('local-secret') && !JSON.stringify(localStorage).includes('invite')"));
   await admin.eval("location.hash = '#/'"); await admin.waitFor("!!document.querySelector('.deck-grid')");
-  await admin.eval("location.hash = '#/settings'");
+  await admin.eval("location.hash = '#/settings/phone'");
   check('Settings remount restores selected Local HTTPS and its successful address, not the draft', await admin.waitFor("document.getElementById('remote-tab-local_https')?.getAttribute('aria-selected') === 'true' && document.querySelector('input[type=url]').value === 'https://192.168.1.20:8443'"));
   await admin.send('Page.reload', { ignoreCache: true });
   check('restart restores local mode and origin without starting any service', await admin.waitFor("document.getElementById('remote-tab-local_https')?.getAttribute('aria-selected') === 'true' && document.querySelector('input[type=url]')?.value === 'https://192.168.1.20:8443' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
   await admin.eval(click('#remote-tab-tailscale'));
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.workspace')");
-  await admin.eval("location.hash = '#/settings'");
+  await admin.eval("location.hash = '#/settings/phone'");
   check('Settings remount restores the last successful address, not its unsaved draft', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')"));
   await admin.reload();
   check('program-session reload remembers the address without auto-starting service', await admin.waitFor("document.querySelector('input[type=url]')?.value === 'https://new.tailnet.ts.net' && document.querySelector('.settings-view').textContent.includes('Local service stopped.')") && await admin.eval("!window.__adminCalls.includes('remote_start')"));
+  await admin.waitFor("[...document.querySelectorAll('.settings-actions button')].some(button => button.textContent.includes('Start local service') && !button.disabled)");
   await admin.eval(clickText('.settings-actions button', 'Start local service'));
-  check('explicit start saves desired on without pairing data', await admin.waitFor("JSON.parse(localStorage.getItem('deck.remote.desired.v1'))?.origin === 'https://new.tailnet.ts.net'"));
+  check('explicit start reaches native persistence without browser desired-state storage', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === true") && await admin.eval("!localStorage.getItem('deck.remote.desired.v1')"));
   await admin.eval("location.hash='#/'");
   await admin.waitFor("!!document.querySelector('.workspace')");
-  check('leaving Settings does not stop the service or overwrite desired on', await admin.eval("JSON.parse(localStorage.getItem('deck.remote.desired.v1')).mode === 'tailscale'"));
+  check('leaving Settings does not stop the service or overwrite native desired on', await admin.eval("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService')).enabled === true"));
   await admin.reload();
-  check('application relaunch restores desired on outside Settings exactly once', await admin.waitFor("window.__remoteStartArgs.length === 1 && !!document.querySelector('.workspace')") && await admin.eval("window.__remoteStartArgs[0].origin === 'https://new.tailnet.ts.net' && JSON.parse(localStorage.getItem('deck.remote.desired.v1')).mode === 'tailscale'"));
-  await admin.eval("location.hash='#/settings'");
+  check('relaunch reads native service state outside Settings without a browser start request', await admin.waitFor("window.__adminCalls.includes('remote_status') && !!document.querySelector('.workspace')") && await admin.eval("window.__remoteStartArgs.length === 0 && JSON.parse(localStorage.getItem('zdeck.smoke.nativeService')).enabled === true"));
+  await admin.eval("location.hash='#/settings/phone'");
   await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service running')");
-  await admin.eval("window.__originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if(key === 'deck.remote.desired.v1') throw new Error('blocked'); return window.__originalSetItem.call(this,key,value); }");
+  await admin.eval("window.__failRemoteStopSave = true");
   await admin.eval(clickText('.settings-actions button', 'Stop local service'));
   check('failed off-state persistence accurately warns that the service may restart', await admin.waitFor("document.querySelector('[aria-labelledby=remote-heading] .settings-error')?.textContent.includes('off state could not be saved')"));
-  await admin.eval("Storage.prototype.setItem = window.__originalSetItem");
+  await admin.eval("window.__failRemoteStopSave = false");
   await admin.eval(clickText('.settings-actions button', 'Start local service'));
   await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service running')");
   await admin.eval(clickText('.settings-actions button', 'Stop local service'));
-  check('deliberate stop persists desired off', await admin.waitFor("localStorage.getItem('deck.remote.desired.v1') === 'false'"));
+  check('deliberate stop persists native desired off', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === false"));
   await admin.reload();
   check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  await admin.eval("location.hash = '#/settings/general'");
+  await admin.waitFor("!document.querySelector('[aria-label=General][role=region]').hidden");
+  check('close-to-tray defaults off', await admin.eval("!document.querySelector('[aria-describedby=close-to-tray-help]').checked"));
+  await admin.screenshot('/tmp/zdeck-settings-general-desktop.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: false });
+  check('General navigation and native preference fit a narrow screen', await admin.eval("document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.settings-nav a')].every(el => el.getBoundingClientRect().width > 0)"));
+  await admin.screenshot('/tmp/zdeck-settings-general-narrow.png');
+  await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
+  await admin.eval(click('[aria-describedby=close-to-tray-help]'));
+  check('native close preference is only enabled after successful persistence', await admin.waitFor("document.querySelector('[aria-describedby=close-to-tray-help]').checked && !document.querySelector('[aria-describedby=close-to-tray-help]').disabled"));
+  await admin.eval("window.__failPreferenceSave = true");
+  await admin.eval(click('[aria-describedby=close-to-tray-help]'));
+  check('failed preference save keeps the last confirmed value and shows error', await admin.waitFor("document.querySelector('[aria-describedby=close-to-tray-help]').checked && document.querySelector('[aria-labelledby=desktop-preferences-heading] [role=alert]')?.textContent.includes('Preference was not saved')"));
+  await admin.eval("location.hash = '#/settings/integrations'");
+  await admin.waitFor("!document.querySelector('[aria-label=Integrations][role=region]').hidden");
   // ------------------------------------------------------------ plugin UI (owned IPC fake, never osascript)
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
   check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshots','plugin_catalog'].includes(c))"));
@@ -1170,7 +1223,7 @@ try {
   await admin.eval("window.__failPlugin = true");
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('unknown outcome is sanitized, warns, disables Run and requires explicit reconnect', await admin.waitFor("document.querySelector('.inspector-form').textContent.includes('Outcome unknown')") && await admin.eval("document.querySelector('.native-control .button.primary').disabled && !document.querySelector('.inspector-form').textContent.includes('raw secret')"));
-  await admin.eval("location.hash = '#/settings'");
+  await admin.eval("location.hash = '#/settings/integrations'");
   await admin.waitFor("!!document.querySelector('.plugin-settings')");
   check('one failed plugin does not overwrite its healthy neighbor or retain trust', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));

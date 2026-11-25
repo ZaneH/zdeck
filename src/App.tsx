@@ -65,12 +65,16 @@ import { RemoteSettingsCard } from "./components/RemoteSettingsCard";
 import { useRestoreRemoteService } from "./lib/useRestoreRemoteService";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SetupGuide } from "./components/SetupGuide";
+import { DesktopTrayNotice } from "./components/DesktopTrayNotice";
+import { DesktopPreferencesCard } from "./components/DesktopPreferencesCard";
+
+import { SettingsSections } from "./components/SettingsSections";
 
 type Route = "editor" | "settings" | "phone";
 
 function parseRoute(): Route {
   if (window.location.hash === "#/phone") return "phone";
-  if (window.location.hash === "#/settings") return "settings";
+  if (window.location.hash === "#/settings" || window.location.hash.startsWith("#/settings/")) return "settings";
   return "editor";
 }
 
@@ -488,6 +492,7 @@ export default function App() {
         </a>
       </header>
 
+      <DesktopTrayNotice />
       {route === "settings" ? (
         <main className="settings-view" id="main">
           <div className="settings-header">
@@ -495,9 +500,11 @@ export default function App() {
             <p>Phone connection, OBS, external plugin, appearance, and local storage.</p>
           </div>
 
-          {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error}</p> : null}
-          {serviceRestore.pending ? <p role="status">Checking local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
-
+          <SettingsSections phone={<>
+            {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error}</p> : null}
+            {serviceRestore.pending ? <p role="status">Checking local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
+          </>} general={<>
+          <DesktopPreferencesCard />
           <section className="settings-card">
             <h2>Appearance</h2>
             <div className="field">
@@ -546,9 +553,6 @@ export default function App() {
               </div>
             </fieldset>
           </section>
-
-          <ObsSettingsCard obs={obs} />
-          <PluginSettingsCard plugin={plugin} />
 
           <section className="settings-card">
             <h2>Storage</h2>
@@ -606,12 +610,16 @@ export default function App() {
               Network-device installation remains unverified.
             </p>
           </section>
+          </>} integrations={<>
+            <ObsSettingsCard obs={obs} />
+            <PluginSettingsCard plugin={plugin} />
+          </>} />
         </main>
       ) : (
         <main className="workspace" id="main">
           <section className="canvas-panel" aria-labelledby="page-title">
             <h1 id="page-title" className="sr-only" tabIndex={-1}>{page.name}</h1>
-            {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error} <a className="button secondary small" href="#/settings">Review service settings</a></p> : null}
+            {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error} <a className="button secondary small" href="#/settings/phone">Review service settings</a></p> : null}
             {storageAlert ? (
               <p className="storage-alert" role="status">
                 {storageAlert}

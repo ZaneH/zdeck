@@ -10,6 +10,7 @@ pub mod plugin;
 pub mod plugin_install;
 pub mod remote;
 pub mod system;
+mod tray;
 
 use std::sync::Arc;
 use actions::{ActionDispatcher, ActionError, ActionErrorCode, CommandResult, DesktopActions, DesktopCommand};
@@ -79,6 +80,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    fn service_config(&self, origin: String, mode: ConnectionMode) -> Result<ServiceConfig, RemoteError> {
+        Ok(ServiceConfig {
+            origin, mode, port: DEFAULT_PORT,
+            deck: self.store().map_err(|_| RemoteError::Unavailable {
+                message: "The native deck store is unavailable.".into(),
+            })?.clone(),
+            actions: self.actions.clone(), assets: self.assets.clone(),
+            clock: Arc::new(SystemClock), limits: Limits::default(),
+        })
+    }
+
     fn store(&self) -> Result<&Arc<DeckStore>, DeckError> {
         self.store.as_ref().map_err(Clone::clone)
     }
@@ -310,33 +322,29 @@ async fn plugin_execute(
 
 #[tauri::command]
 async fn remote_start(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    tray: tauri::State<'_, tray::TrayState>,
     admin: tauri::State<'_, RemoteAdmin>,
     origin: String,
     mode: Option<ConnectionMode>,
 ) -> Result<RemoteStatus, RemoteError> {
-    let deck = state
-        .store()
-        .map_err(|_| RemoteError::Unavailable {
-            message: "The native deck store is unavailable.".to_string(),
-        })?
-        .clone();
-    let config = ServiceConfig {
-        origin,
-        mode: mode.unwrap_or_default(),
-        port: DEFAULT_PORT,
-        deck,
-        actions: Arc::clone(&state.actions),
-        assets: Arc::clone(&state.assets),
-        clock: Arc::new(SystemClock),
-        limits: Limits::default(),
-    };
-    admin.start(config).await
+    let _operation = tray.operation.try_lock().map_err(|_| tray::busy_error())?;
+    if tray.quitting.load(std::sync::atomic::Ordering::SeqCst) { return Err(tray::busy_error()); }
+    let result = admin.start(state.service_config(origin, mode.unwrap_or_default())?).await;
+    if result.is_ok() { tray::clear_error(&app); }
+    tray::refresh(&app).await;
+    result
 }
 
 #[tauri::command]
-async fn remote_stop(admin: tauri::State<'_, RemoteAdmin>) -> Result<RemoteStatus, RemoteError> {
-    Ok(admin.stop().await)
+async fn remote_stop(app: tauri::AppHandle, tray: tauri::State<'_, tray::TrayState>, admin: tauri::State<'_, RemoteAdmin>) -> Result<RemoteStatus, RemoteError> {
+    let _operation = tray.operation.try_lock().map_err(|_| tray::busy_error())?;
+    if tray.quitting.load(std::sync::atomic::Ordering::SeqCst) { return Err(tray::busy_error()); }
+    let status = admin.stop().await;
+    if status.error.is_none() { tray::clear_error(&app); }
+    tray::refresh(&app).await;
+    Ok(status)
 }
 
 #[tauri::command]
@@ -423,9 +431,21 @@ pub fn run() {
             }
             app.manage(admin);
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
+            tray::setup(app.handle());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    tray::close(window, api);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            tray::desktop_tray_notice,
+            tray::desktop_close_to_tray,
+            tray::desktop_set_close_to_tray,
+            tray::desktop_quit,
             obs_connect,
             obs_disconnect,
             obs_snapshot,
@@ -460,6 +480,20 @@ pub fn run() {
             remote_deny_device,
             remote_revoke_device
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Deck");
+        .build(tauri::generate_context!())
+        .expect("error while building Deck")
+        .run(|app, event| {
+            use tauri::Manager;
+            match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    if !app.state::<tray::TrayState>().exit_ready.load(std::sync::atomic::Ordering::SeqCst) {
+                        api.prevent_exit();
+                        tray::quit(app);
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => { let _ = tray::open(app, false); }
+                _ => {}
+            }
+        });
 }
