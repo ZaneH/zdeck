@@ -42,11 +42,15 @@ export function ObsSettingsCard({ obs }: ObsSettingsCardProps) {
   return (
     <section className="settings-card" aria-labelledby="obs-heading">
       <h2 id="obs-heading">OBS Studio</h2>
-      <p>
-        Connects to OBS Studio&apos;s WebSocket server on this machine only
-        (127.0.0.1 or ::1). The password stays in memory for this session — it is
-        never saved, logged, exported, or shared with the phone preview.
-      </p>
+      <p>In OBS: Tools → WebSocket Server Settings, enable the server, and copy the
+        password if authentication is on.</p>
+      <details className="settings-help">
+        <summary className="disclosure">Connection and privacy details</summary>
+        <p>Connects to OBS Studio&apos;s WebSocket server on this machine only
+          (127.0.0.1 or ::1). The password stays in memory for this session — it is
+          never saved, logged, exported, or shared with the phone preview.</p>
+        <p>Scene state is read on demand from OBS, not pushed live.</p>
+      </details>
 
       <label className="field">
         <span>WebSocket port</span>
@@ -110,12 +114,6 @@ export function ObsSettingsCard({ obs }: ObsSettingsCardProps) {
           {obs.error}
         </p>
       ) : null}
-
-      <p className="muted">
-        In OBS: Tools → WebSocket Server Settings, enable the server, and copy the
-        password if authentication is on. Scene state is read on demand from OBS,
-        not pushed live.
-      </p>
     </section>
   );
 }

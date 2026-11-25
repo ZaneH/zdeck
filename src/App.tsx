@@ -625,7 +625,6 @@ export default function App() {
                     variant="editor"
                     semantics={desktop.live ? "live" : "preview"}
                     disabled={desktop.inflight || !!desktop.pending}
-                    busy={desktop.inflight}
                     volume={previewVolumes[control.id] ?? controlVolume(control)}
                     selected={selectedControlId === control.id}
                     pressed={pressedId === control.id}
@@ -654,7 +653,7 @@ export default function App() {
             <div className="workspace-footer">
               {desktop.inflight || (desktop.result && desktop.result.code !== "media_key_sent") || desktop.error ? <p className={`native-feedback is-${desktop.inflight ? "pending" : desktop.result?.state ?? (desktop.error ? "failed" : "pending")}`}
                 role={!desktop.inflight && desktop.result?.state === "unknown" ? "alert" : "status"} aria-live={!desktop.inflight && desktop.result?.state === "unknown" ? "assertive" : "polite"}>
-                {desktop.inflight ? "Sending saved control to this computer…" : `Last desktop result: ${desktop.error ?? desktop.result?.message}`}
+                {desktop.inflight ? "Running saved control on this computer…" : `Last desktop result: ${desktop.error ?? desktop.result?.message}`}
               </p> : <p className="preview-feedback" title={desktop.live ? undefined : obsPill.title} role="status" aria-live="polite">
                 {desktop.live ? "Live is ready. Only saved control IDs are sent; nothing runs until you press." : previewNotice ?? obsPill.text}
               </p>}

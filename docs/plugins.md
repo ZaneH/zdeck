@@ -2,7 +2,7 @@
 
 ## Implemented vs planned
 
-Implemented: an MIT-licensed npm-ready SDK, protocol v1, typed author example, Rust process host shared by desktop and phone, local plugin-folder discovery, Node detection, explicit trust/enable controls, generic deck actions, and a macOS Spotify reference plugin. There is no runtime bundling, automatic download/update, persistent enabling or marketplace. One plugin can be active per desktop session. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
+Implemented: an MIT-licensed npm-ready SDK, protocol v1, typed author example, Rust process host shared by desktop and phone, local plugin-folder discovery, Node detection, explicit trust/enable controls, generic deck actions, and a macOS Spotify reference plugin. There is no runtime bundling, automatic download/update, persistent enabling or marketplace. Up to 16 plugins can be enabled independently per desktop session. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
 
 The SDK is plain ESM JavaScript plus `.d.ts`, with explicit package exports and no dependencies or build scripts. An **installed Node.js >=22.18.0** is required, including for Spotify; npm distribution is not end-user runtime distribution. Node >=22.18 runs the included `.ts` example using native type stripping, not typechecking. No `tsc` is required to pack, run or test. Consumers using a TypeScript compiler supply their usual Node types. This preview was exercised on Node 26.12.1; the declared minimum was selected for stable built-in type stripping but was not separately exercised here.
 
