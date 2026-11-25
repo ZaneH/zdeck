@@ -31,6 +31,18 @@ jobs:
       - run: npm test
       - name: Native compile and fake-backed system/dispatcher tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --test system_actions --test desktop_actions --test remote_service
+      - name: Diagnose Windows native loader failure
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/diagnose-windows-loader.ps1 -OutputDirectory "$env:RUNNER_TEMP/windows-loader"
+      - name: Upload Windows loader evidence
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-loader-evidence
+          path: ${{ runner.temp }}/windows-loader
+          if-no-files-found: warn
+          retention-days: 7
       - name: macOS fake CoreAudio regression tests (no live controls)
         if: runner.os == 'macOS'
         run: bash scripts/test-system-macos.sh
