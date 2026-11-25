@@ -156,7 +156,7 @@ https://192.168.1.20:8443 {
             </>}
             <p>On iPhone, open the root address in Safari and install the app first, then paste a fresh pairing link inside the installed app.
               A camera QR usually opens the browser, not the installed app’s session. Opening a link never approves a phone; approve it separately here.</p>
-            <p>Only the last successfully used address for each method is remembered on this device when storage is available, not pairing links or approvals. Start the service explicitly each session.</p>
+            <p>Start remembers this service for the next zDeck launch. Stop pauses access and disables auto-start, but keeps approved phones. Revoke forgets a phone. Pairing links are never saved.</p>
           </details>
           {mode === "tailscale" ? <div className="remote-command">
             <p>On this desktop, review <code>tailscale serve status</code> first. Do not enable Funnel or overwrite an existing Serve configuration without reviewing it.</p>
@@ -177,7 +177,7 @@ https://192.168.1.20:8443 {
               : "Use HTTPS with a private IPv4, local IPv6, or .local/.lan/.home.arpa name; include your proxy’s port if not 443. "}
             Use only the root address, without credentials, path, query or fragment.
           </p>
-          <p className="field-note">Changing the address requires re-pairing and may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
+          <p className="field-note">Changing the address or connection method forgets approved phones and requires re-pairing; a new address may require reinstalling the phone app. Keep the address{mode === "local_https" ? " and trusted certificate" : ""} stable.</p>
         </> : null}
       </div>)}
       <div className="settings-actions">
@@ -195,17 +195,18 @@ https://192.168.1.20:8443 {
             : "Local service stopped."}
       </p>
 
-      {remote.error ? (
+      {remote.status?.error || remote.error ? (
         <p className="settings-error" role="alert">
-          {remote.error}
+          {remote.status?.error || remote.error}
         </p>
       ) : null}
 
       {running ? (
         <>
           <p className="muted">
-            Stopping the service or restarting zDeck disconnects all phones.
-            Pair again next time.
+            After pairing once, bookmark or revisit the same HTTPS address in the same browser or installed app.
+            Approved phones reconnect after Stop/Start or a zDeck restart, for up to 180 days from pairing.
+            Start enables auto-start; Stop pauses access without forgetting phones. Revoke forgets a phone.
           </p>
 
           <div className="settings-actions">

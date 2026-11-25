@@ -135,6 +135,15 @@ describe("native remote admin bridge", () => {
     });
   });
 
+  it("preserves native startup and Stop persistence warnings alongside usable status", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    const warning = { ...STOPPED, error: "Service paused, but auto-start could not be disabled. Check app-data permissions." };
+    mocks.invoke.mockResolvedValue(warning);
+    await expect(remoteStop()).resolves.toEqual(warning);
+    await expect(remoteStatus()).resolves.toEqual(warning);
+    expect(parseRemoteStatus({ ...STOPPED, error: null })).toEqual(STOPPED);
+  });
+
   it("returns the stopped status unchanged", async () => {
     mocks.isTauri.mockReturnValue(true);
     mocks.invoke.mockResolvedValue(STOPPED);

@@ -396,7 +396,6 @@ pub fn run() {
             }
             let _ = (webview, payload);
         })
-        .manage(RemoteAdmin::default())
         .setup(|app| {
             use tauri::Manager;
             let store = match app.path().app_data_dir() {
@@ -413,6 +412,16 @@ pub fn run() {
             let plugin = Arc::new(PluginRegistry::default());
             let actions = Arc::new(ActionDispatcher::new(obs.clone(), system.clone(), plugin.clone()));
             let desktop = DesktopActions::new(actions.clone());
+            let admin = RemoteAdmin::persistent(app.path().app_data_dir().ok());
+            if let Ok(deck) = &store {
+                let config = ServiceConfig {
+                    origin: String::new(), mode: ConnectionMode::default(), port: DEFAULT_PORT,
+                    deck: deck.clone(), actions: actions.clone(), assets: assets.clone(),
+                    clock: Arc::new(SystemClock), limits: Limits::default(),
+                };
+                tauri::async_runtime::block_on(admin.restore(config));
+            }
+            app.manage(admin);
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
             Ok(())
         })
