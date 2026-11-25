@@ -106,7 +106,7 @@ describe("self-contained Spotify folder packaging", () => {
       await mkdir(dirname(join(sdk, name)), { recursive: true });
       await cp(new URL(`../packages/plugin-sdk/${name}`, import.meta.url), join(sdk, name));
     }
-    expect(await readFile(join(plugin, ".npmrc"), "utf8")).toBe("install-links=true\n");
+    expect((await readFile(join(plugin, ".npmrc"), "utf8")).replace(/\r\n/g, "\n")).toBe("install-links=true\n");
     const metadata = JSON.parse(await readFile(join(plugin, "package.json"), "utf8"));
     expect(metadata.dependencies).toEqual({ "@zdeck/plugin-sdk": "0.1.0" });
     const sourceLock = JSON.parse(await readFile(new URL("../plugins/spotify/package-lock.json", import.meta.url), "utf8"));
