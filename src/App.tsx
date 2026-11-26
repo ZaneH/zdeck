@@ -57,6 +57,7 @@ import { useDesktopActions } from "./lib/useDesktopActions";
 import { usePluginConsole } from "./lib/usePluginConsole";
 import { enabledPluginManifests } from "./lib/plugin";
 import { PluginSettingsCard } from "./components/PluginSettingsCard";
+import { PluginArchiveInstaller } from "./components/PluginArchiveInstaller";
 import { ActionLibrary } from "./components/ActionLibrary";
 import { BrandMark } from "./components/BrandMark";
 import { effectivePresentation } from "./lib/presentations";
@@ -524,7 +525,7 @@ export default function App() {
             : "Local storage is unavailable.";
 
   if (setupOpen && route === "editor") {
-    return <><SetupGuide pageName={page.name} canAdd={pageControls(page).length < MAX_CONTROLS_PER_PAGE} storageAlert={storageAlert} onFinish={finishSetup} onDismiss={closeSetup} /><UpdateBanner /></>;
+    return <><SetupGuide pageName={page.name} canAdd={pageControls(page).length < MAX_CONTROLS_PER_PAGE} storageAlert={storageAlert} onFinish={finishSetup} onDismiss={closeSetup} /><UpdateBanner /><PluginArchiveInstaller onInstalled={() => { window.location.hash = "#/settings/integrations"; void plugin.refreshCatalog(); }} /></>;
   }
 
   return (
@@ -536,6 +537,7 @@ export default function App() {
           !event.target.closest(".control-tile, .inspector-dock, .sidebar-toggle, .status-footer, dialog")) setSelectedControlId(null);
       }}
     >
+      <PluginArchiveInstaller onInstalled={() => { window.location.hash = "#/settings/integrations"; void plugin.refreshCatalog(); }} />
       <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
         <a className="brand" href="#/" aria-label="zDeck editor"><BrandMark /></a>
         {route === "editor" ? (

@@ -7,6 +7,10 @@ use sha2::{Digest, Sha256};
 use tokio::{io::AsyncReadExt, process::Command, time::{timeout, Instant}};
 use crate::plugin::{identifier, manifest, ErrorKind, LaunchFailure, Manifest, Outcome, PluginError, PluginSnapshot, PluginRegistry, SettingsField};
 
+#[path = "plugin_archive.rs"]
+mod archive;
+pub use archive::{ArchiveReview, PreparedArchive};
+
 const MAX_RUNTIMES: usize = 32;
 /// Combined settings budget, measured as Windows credential UTF-16 bytes. A single
 /// credential blob stays within the 2560-byte Windows limit and is written atomically.
@@ -195,6 +199,7 @@ impl PluginInstall {
         Ok(plugins)
     }
     pub async fn catalog(&self) -> Result<PluginCatalog, PluginError> {
+        let _guard = PREFERENCES.lock().await;
         let install = self.clone();
         let plugins = tokio::task::spawn_blocking(move || install.discover()).await
             .map_err(|_| failure("Plugin discovery failed. Check the local directory and retry explicitly."))??;

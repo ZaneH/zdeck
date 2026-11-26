@@ -22,6 +22,8 @@
     "landing:build": "vite build --config vite.landing.config.ts",
     "plugin:package:spotify": "node scripts/package-spotify.mjs",
     "plugin:package:home-assistant": "node scripts/package-home-assistant.mjs",
+    "plugin:zdx:spotify": "node scripts/package-zdx.mjs spotify",
+    "plugin:zdx:home-assistant": "node scripts/package-zdx.mjs home-assistant",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
@@ -46,6 +48,7 @@
     "@vitest/browser": "^5.1.2",
     "@vitest/browser-playwright": "^5.1.2",
     "playwright": "^1.65.1",
+    "fflate": "0.8.3",
     "storybook": "10.6.8",
     "typescript": "^5.7.2",
     "vite": "^6.4.6",

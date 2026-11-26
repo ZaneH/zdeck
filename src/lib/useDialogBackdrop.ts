@@ -6,10 +6,10 @@ import type { RefObject } from "react";
  * Clicks on the dialog's own padding share the dialog as target, so the
  * geometry check keeps them (and inside drags) from closing it.
  */
-export function useDialogBackdrop(ref: RefObject<HTMLDialogElement | null>): void {
+export function useDialogBackdrop(ref: RefObject<HTMLDialogElement | null>, dismissible = true, onDismiss?: () => void): void {
   useEffect(() => {
     const dialog = ref.current;
-    if (!dialog) return;
+    if (!dialog || !dismissible) return;
     let startedOnBackdrop = false;
 
     const outsideRect = (event: MouseEvent) => {
@@ -26,7 +26,7 @@ export function useDialogBackdrop(ref: RefObject<HTMLDialogElement | null>): voi
     };
     const onClick = (event: MouseEvent) => {
       if (startedOnBackdrop && event.target === dialog && outsideRect(event)) {
-        dialog.close();
+        if (onDismiss) onDismiss(); else dialog.close();
       }
       startedOnBackdrop = false;
     };
@@ -37,5 +37,5 @@ export function useDialogBackdrop(ref: RefObject<HTMLDialogElement | null>): voi
       dialog.removeEventListener("pointerdown", onPointerDown);
       dialog.removeEventListener("click", onClick);
     };
-  }, [ref]);
+  }, [ref, dismissible, onDismiss]);
 }

@@ -27,6 +27,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+# Dialog 2.8 requires Rust 1.90; keep the declared 1.89 MSRV and the locked plugin dependencies.
+tauri-plugin-dialog = "=2.7.0"
 zdeck-obs = { path = "../crates/zdeck-obs" }
 zdeck-plugin-host = { path = "../crates/zdeck-plugin-host" }
 zdeck-schema = { path = "../crates/zdeck-schema" }

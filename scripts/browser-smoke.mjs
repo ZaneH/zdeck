@@ -981,7 +981,11 @@ try {
     let origin = savedService?.origin || 'https://fixture.tailnet.ts.net', mode = savedService?.mode || 'tailscale';
     window.__remoteStartArgs = [];
     const status = () => ({running, mode: running ? mode : null, origin: running ? origin : null, port: running ? 45829 : null, pendingDevices: 0, approvedDevices: 0, connectedSockets: 0});
-    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (command, args) => {
+      if (command === 'plugin:event|listen') return 1;
+      if (command === 'plugin:event|unlisten') return null;
+      if (command === 'plugin_archive_view') return {busy:false,review:null,error:null,installedEpoch:0};
       window.__adminCalls.push(command);
       if (command === 'desktop_tray_notice') return null;
       if (command === 'desktop_close_to_tray') return window.__closeToTray ?? false;

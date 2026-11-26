@@ -48,7 +48,11 @@ try {
     const snapshot = () => ({ status:'connected',manifest,state,lastError:null });
     window.isTauri = true;
     window.__haCalls = [];
-    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (command, args) => {
+      if(command==='plugin:event|listen')return 1;
+      if(command==='plugin:event|unlisten')return null;
+      if(command==='plugin_archive_view')return {busy:false,review:null,error:null,installedEpoch:0};
       window.__haCalls.push({command,args});
       if(command==='native_deck_load')return {exists:true,revision,deck};
       if(command==='native_deck_save'){deck=args.deck;window.__haSavedDeck=deck;revision++;return {exists:true,revision,deck};}

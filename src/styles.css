@@ -406,6 +406,12 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .plugin-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .plugin-dialog p { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .plugin-dialog .settings-actions { margin-top: 16px; }
+.archive-dialog { overflow-y: auto; }
+.archive-facts { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr); gap: 6px 12px; margin: 0 0 16px; font-size: 12px; line-height: 1.6; }
+.archive-facts dt { color: var(--text-muted); }
+.archive-facts dd { margin: 0; overflow-wrap: anywhere; }
+.archive-dialog .settings-error { color: var(--text); border-left: 0; border-radius: 6px; padding: 12px 14px; }
+.archive-dialog .settings-actions { flex-wrap: wrap; }
 /* Plugin errors read as content, not a colored stripe; keep padding and top separation. */
 .plugin-settings .settings-error { margin-top: 10px; margin-bottom: 0; padding: 12px 14px; border-left: 0; border-radius: 6px; }
 .plugin-settings .settings-error p { margin: 0; }

@@ -9,6 +9,7 @@ pub use zdeck_obs as obs;
 mod obs_preferences;
 pub use zdeck_plugin_host::{plugin, plugin_install};
 mod plugin_preferences;
+mod plugin_archive;
 pub mod remote;
 pub use zdeck_system as system;
 mod tray;
@@ -459,6 +460,15 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     linux_display::initialize();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .on_webview_event(|webview, event| {
+            use tauri::Manager;
+            if webview.label() == "main" {
+                if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                    plugin_archive::drop_paths(webview.app_handle(), paths.clone());
+                }
+            }
+        })
         .on_page_load(|webview, payload| {
             #[cfg(feature = "native-smoke")]
             if payload.event() == tauri::webview::PageLoadEvent::Finished
@@ -494,6 +504,7 @@ pub fn run() {
                 tauri::async_runtime::block_on(admin.restore(config));
             }
             app.manage(admin);
+            app.manage(plugin_archive::ArchiveInbox::default());
             // Restore in the background so slow/broken plugins cannot hold up the window.
             let install = local_plugin_install(app.handle());
             let restoring = plugin.clone();
@@ -536,6 +547,10 @@ pub fn run() {
             native_deck_save,
             desktop_run_control,
             plugin_catalog,
+            plugin_archive::plugin_archive_view,
+            plugin_archive::plugin_archive_pick,
+            plugin_archive::plugin_archive_cancel,
+            plugin_archive::plugin_archive_install,
             plugin_enable,
             plugin_trust,
             plugin_open_directory,

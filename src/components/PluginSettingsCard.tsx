@@ -6,6 +6,7 @@ import type { PluginCatalogEntry, PluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { ActionIcon } from "./ActionIcon";
 import { PluginConnectionSettings } from "./PluginConnectionSettings";
+import { PluginArchivePicker } from "./PluginArchiveInstaller";
 
 export function PluginErrorNotice({ error }: { error: PluginError | null }) {
   if (!error) return null;
@@ -143,7 +144,7 @@ export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
   }
   return <section className="settings-card plugin-settings" aria-labelledby="plugin-heading">
     <h2 id="plugin-heading">External plugins</h2>
-    <p>Install complete plugin folders, then trust and enable each plugin explicitly.</p>
+    <p>Choose a local .zdx archive or drop one onto the desktop window. Review and install it disabled, then trust and enable it separately.</p>
     <details className="settings-help"><summary className="disclosure">Requirements and startup behavior</summary>
       <p>Node.js ≥22.18.0 and Python ≥3.10 are detected automatically. Each plugin needs only its own runtime. The Spotify reference requires macOS and Spotify desktop.</p>
       <p>Trust is saved in local app settings for each exact installed package and survives restarts; changing its files revokes trust. Enabled preferences survive restarts for that exact trusted package. Native startup attempts to restore each saved plugin once, without reading state, running actions or retrying. Disable or uninstall turns off restoration. Use a row’s menu for diagnostics or reversible uninstall.</p>
@@ -154,10 +155,10 @@ export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
       <details className="plugin-locations settings-help"><summary className="disclosure">Local folder and runtime details</summary>
         <p>Plugin folder: <code>{plugin.catalog?.directory ?? "~/.config/zdeck/plugins"}</code></p>{runtime?.path ? <p>Node runtime: <code>{runtime.path}</code></p> : null}{python?.path ? <p>Python runtime: <code>{python.path}</code></p> : null}
       </details>
-      <div className="settings-actions"><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
+      <div className="settings-actions"><PluginArchivePicker /><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
         <button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.refreshCatalog()}>Refresh</button></div>
       {!plugin.sessionsReady && !plugin.loading ? <p className="settings-error" role="alert">Cached plugin sessions could not be loaded. Reload the app before enabling plugins.</p> : null}
-      {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Copy the complete self-contained packaged folder, including manifest.json and either main.js with its dependencies or main.py with zdeck_plugin_sdk, into the plugin folder, then Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
+      {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Choose Install .zdx or drop a local archive onto this window. Complete self-contained plugin folders can also be copied into the plugin folder, then discovered with Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
       <ul className="plugin-list" aria-label="Installed plugins">{entries.map((entry, index) => <PluginRow key={entry.id || `invalid-${index}`} entry={entry} plugin={plugin} />)}</ul>
       <PluginErrorNotice error={plugin.catalogError} />
     </>}

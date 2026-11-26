@@ -2,7 +2,7 @@
 
 ## Implemented vs planned
 
-Implemented: MIT-licensed JavaScript/TypeScript and Python SDKs, protocol v1, typed author examples, Rust process host shared by desktop and phone, local plugin-folder discovery, Node and Python detection, explicit trust/enable controls, generic deck actions, opt-in host-mediated settings backed by the OS credential store, a macOS Spotify reference plugin, and a cross-platform Home Assistant REST plugin. There is no runtime bundling, automatic download/update, or marketplace. Trust is remembered for each exact installed package; enabled intent is also remembered for that exact trusted fingerprint. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
+Implemented: MIT-licensed JavaScript/TypeScript and Python SDKs, protocol v1, typed author examples, Rust process host shared by desktop and phone, local plugin-folder discovery, Node and Python detection, explicit trust/enable controls, generic deck actions, opt-in host-mediated settings backed by the OS credential store, a macOS Spotify reference plugin, and a cross-platform Home Assistant REST plugin. Local `.zdx` ZIP installation through native drop/file picker is available (unreleased), with review before installing disabled and untrusted. See [the local archive contract, limits and verification gaps](zdx.md). There is no runtime bundling, automatic download/update, registry handoff, or marketplace. Trust is remembered for each exact installed package; enabled intent is also remembered for that exact trusted fingerprint. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
 
 The JavaScript/TypeScript SDK is plain ESM JavaScript plus `.d.ts`, with explicit package exports and no dependencies or build scripts. An **installed Node.js >=22.18.0** is required, including for Spotify; npm distribution is not end-user runtime distribution. Node >=22.18 runs the included `.ts` example using native type stripping, not typechecking. No `tsc` is required to pack, run or test. Consumers using a TypeScript compiler supply their usual Node types. This preview was exercised on Node 26.12.1; the declared minimum was selected for stable built-in type stripping but was not separately exercised here.
 
@@ -19,7 +19,9 @@ npm run plugin:package:spotify
 
 The result is `dist/plugins/spotify/`, including the SDK runtime and licenses. A later frontend build can clear `dist`, so package after building. Distribute the **complete folder**; copying `plugins/spotify` directly from the source tree is not a supported installation. The source dependency now pins the published SDK version `0.1.0`; the generated folder includes real SDK files and version-only metadata, so recipients do not need npm or a repository checkout. Nothing is published, installed or enabled by the packaging command.
 
-For users:
+For local archive users, build the app then package with `npm run plugin:zdx:spotify` (or `npm run plugin:zdx:home-assistant`). In desktop **Settings → Integrations → External plugins**, choose **Install .zdx…**, or drop one local archive onto the desktop window. Review its identity, runtime and local unsigned provenance; choose **Install disabled**, then trust and enable separately. Existing IDs are refused; disable and explicitly uninstall first to replace one. See [the `.zdx` guide](zdx.md) for the canonical root layout and security limits.
+
+The complete-folder method is also supported:
 
 1. Open desktop **Settings → External plugins → Open plugin folder**.
 2. Copy the complete `spotify` folder into `~/.config/zdeck/plugins/` (Linux honors an absolute `XDG_CONFIG_HOME`). The files should include `plugins/spotify/manifest.json` and `plugins/spotify/main.js`, without an extra nested folder.

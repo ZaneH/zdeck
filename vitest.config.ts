@@ -15,7 +15,7 @@ export default defineConfig({
         },
       },
       {
-        optimizeDeps: { include: ["react/jsx-dev-runtime"] },
+        optimizeDeps: { include: ["react/jsx-dev-runtime", "@tauri-apps/api/event"] },
         plugins: [
           storybookTest({ configDir: fileURLToPath(new URL(".storybook", import.meta.url)) }),
           argosVitestPlugin({ uploadToArgos: !!process.env.CI && !!process.env.ARGOS_TOKEN }),
@@ -28,6 +28,7 @@ export default defineConfig({
             provider: playwright({
               launchOptions: {
                 args: ["--disable-lcd-text", "--font-render-hinting=none"],
+                ...(process.env.CHROME_BIN ? { executablePath: process.env.CHROME_BIN } : {}),
               },
             }),
             instances: [{ browser: "chromium" }],
