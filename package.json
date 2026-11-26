@@ -9,8 +9,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --project=unit",
+    "test:watch": "vitest --project=unit",
+    "storybook:test": "vitest run --project=storybook",
     "smoke": "node scripts/browser-smoke.mjs",
     "smoke:remote": "npm run build && nix develop --command cargo test --manifest-path src-tauri/Cargo.toml --test remote_service remote_browser_smoke -- --ignored --nocapture --test-threads=1",
     "smoke:native": "nix develop --command bash -c 'npm run tauri:build -- --debug --no-bundle --features native-smoke && node scripts/native-smoke.mjs'",
@@ -32,15 +33,21 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@argos-ci/cli": "^6.15.0",
+    "@argos-ci/storybook": "^6.5.2",
+    "@storybook/addon-vitest": "10.6.8",
     "@storybook/react-vite": "10.6.8",
     "@tauri-apps/cli": "^2.2.0",
     "@types/node": "^22.20.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/browser": "^5.1.2",
+    "@vitest/browser-playwright": "^5.1.2",
+    "playwright": "^1.65.1",
     "storybook": "10.6.8",
     "typescript": "^5.7.2",
     "vite": "^6.4.6",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.2"
   }
 }

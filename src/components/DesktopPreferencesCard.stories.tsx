@@ -35,7 +35,7 @@ export const OptionalHelp: Story = {
     const help = canvas.getByRole("button", { name: "Closing behavior help" });
     await expect(canvas.queryByRole("tooltip")).not.toBeInTheDocument();
     await userEvent.hover(help);
-    await expect(canvas.getByRole("tooltip")).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole("tooltip")).toBeVisible());
     await expect(help).not.toHaveAttribute("title");
     await userEvent.unhover(help);
     await expect(canvas.queryByRole("tooltip")).not.toBeInTheDocument();

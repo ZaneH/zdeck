@@ -1,0 +1,46 @@
+name: Argos
+
+on:
+  pull_request:
+    branches: [dev, production]
+  push:
+    branches: [dev, production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: argos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  argos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      STORYBOOK_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Capture stories and upload to Argos when a token is available
+        run: npm run storybook:test
+        env:
+          ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+      - run: npm run storybook:build
+      - name: Deploy Storybook when a token is available
+        env:
+          ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+        run: |
+          if [ -n "$ARGOS_TOKEN" ]; then
+            npx --no-install argos deploy ./storybook-static
+          else
+            echo "::notice::Storybook tested and built locally; Argos upload/deployment skipped because ARGOS_TOKEN is unavailable (for example, on fork PRs)."
+          fi

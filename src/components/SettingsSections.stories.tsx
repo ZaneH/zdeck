@@ -16,6 +16,15 @@ const meta = {
   title: "Settings/Grouped navigation",
   component: SettingsExample,
   args: { width: 960 },
+  // Vitest's base URL would navigate hash-only links out of the test iframe.
+  decorators: [(Story) => <div onClick={(event) => {
+    const link = (event.target as Element).closest("a");
+    const href = link?.getAttribute("href");
+    if (!href?.startsWith("#")) return;
+    event.preventDefault();
+    window.history.pushState(null, "", href);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }}><Story /></div>],
   beforeEach: ({ parameters }) => {
     const hash = window.location.hash;
     window.history.replaceState(null, "", `#/settings/${parameters.settingsSection ?? "general"}`);

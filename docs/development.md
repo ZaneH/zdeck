@@ -65,6 +65,14 @@ Stories render real components with the local Geist font, app CSS tokens and Dar
 
 Serve `storybook-static/` with an HTTP static server rather than opening files directly. Fixture sites are separate from production `dist/` and are not evidence of native permissions, connectivity or action outcomes.
 
+#### Argos visual tests
+
+With Node 22 or later, run `npx playwright install chromium` once, then `npm run storybook:test`. Every story is captured automatically after its play function; screenshots are written to the ignored `screenshots/` directory. `npm test` remains unit-only. Use `argosScreenshot` from `@argos-ci/storybook/vitest` inside a play function only when an additional intermediate interaction state needs capturing.
+
+[Argos CI](../.github/workflows/argos.yml) runs visual tests and builds Storybook on PRs targeting `dev`/`production`, pushes to either branch, and manual dispatch. Upload and deployment require the repository Actions secret `ARGOS_TOKEN` (GitHub repository → Settings → Secrets and variables → Actions → New repository secret). Obtain the project token from Argos → project Settings → Authentication. Do not put it in source files, stories, logs, or chat. Fork PRs without the secret still test/build but do not upload or deploy; same-repository PR code can access repository secrets, so review contributors and workflow changes accordingly.
+
+Set the Argos project's reference/default branch to `dev` and run the workflow on `dev` once to establish a baseline. The deployment step prints the hosted Storybook URL; review and approve intentional visual changes in Argos. No local token is needed for screenshot capture.
+
 ## Native development
 
 Install the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust. The checked-in Tauri bundle targets are `deb` and `appimage`; neither packaging nor macOS/Windows installers are validated. A successful no-bundle build is not a release installer.

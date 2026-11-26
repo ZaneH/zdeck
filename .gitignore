@@ -3,6 +3,7 @@ dist/
 dist-landing/
 coverage/
 storybook-static/
+screenshots/
 .vite/
 .direnv/
 *.local
