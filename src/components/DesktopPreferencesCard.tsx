@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Info } from "lucide-react";
+import { HelpTooltip } from "./HelpTooltip";
 import { invoke } from "@tauri-apps/api/core";
 import { nativeAvailable } from "../lib/native";
 
@@ -8,7 +8,6 @@ export function DesktopPreferencesCard() {
   const [enabled, setEnabled] = useState(false);
   const [pending, setPending] = useState(native);
   const [error, setError] = useState<string | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
     if (!native) return;
     let mounted = true;
@@ -39,15 +38,9 @@ export function DesktopPreferencesCard() {
           aria-describedby="close-to-tray-help" onChange={event => void change(event.target.checked)} />
         <span>Keep running in the tray or menu bar when I close the window</span>
       </label>
-      <span className="setting-help" onMouseEnter={() => setHelpOpen(true)} onMouseLeave={() => setHelpOpen(false)}
-        onFocus={() => setHelpOpen(true)} onBlur={() => setHelpOpen(false)}
-        onKeyDown={event => { if (event.key === "Escape") setHelpOpen(false); }}>
-        <button type="button" aria-label="Closing behavior help" aria-describedby="closing-behavior-tooltip"
-          onClick={() => setHelpOpen(true)}><Info size={16} aria-hidden="true" /></button>
-        <span id="closing-behavior-tooltip" className="setting-tooltip" role="tooltip" aria-hidden={!helpOpen}>
-          On: closing hides zDeck and keeps it running. Off: closing quits zDeck.
-        </span>
-      </span>
+      <HelpTooltip label="Closing behavior help">
+        On: closing hides zDeck and keeps it running. Off: closing quits zDeck.
+      </HelpTooltip>
     </div>
     <span id="close-to-tray-help" className="sr-only">When off, closing quits zDeck and disconnects phones. When on, zDeck keeps running in the background.</span>
     {error ? <p className="settings-error" role="alert">{error}</p> : null}

@@ -1,8 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronUp, CircleHelp, Globe, GlobeLock, Unplug, Pencil, Play, Plug, Settings2 } from "lucide-react";
+import { ChevronUp, CircleHelp, Globe, GlobeLock, Unplug, Power, Plug, Settings2 } from "lucide-react";
 import type { FooterPreferences } from "../lib/footerPreferences";
+import { remoteStart, remoteStop, toRemoteError } from "../lib/nativeRemote";
 import type { RemoteStatus } from "../lib/nativeRemote";
+import { getStorage } from "../lib/persistence";
+import { loadRemoteMode, loadRemoteOrigin } from "../lib/remotePreferences";
+import { HelpTooltip } from "./HelpTooltip";
 
 type MenuItem = { label: string; href?: string; action?: () => void; disabled?: boolean; selected?: boolean };
 
@@ -55,42 +59,77 @@ function FooterMenu({ label, icon, tone, detail, items }: {
   </div>;
 }
 
-export function StatusFooter({ preferences, native, service, serviceFailed, pluginCount, pluginsUnknown,
+export function StatusFooter({ preferences, native, service: observedService, serviceFailed: observationFailed, pluginCount, pluginsUnknown,
   live, canRun, onEdit, onRun, feedback }: {
   preferences: FooterPreferences; native: boolean; service: RemoteStatus | null; serviceFailed: boolean;
   pluginCount: number; pluginsUnknown: boolean; live: boolean; canRun: boolean;
   onEdit: () => void; onRun: () => void; feedback: ReactNode;
 }) {
+  const [serviceBusy, setServiceBusy] = useState(false);
+  const serviceLock = useRef(false);
+  const [serviceError, setServiceError] = useState<string | null>(null);
+  const [serviceResult, setServiceResult] = useState<RemoteStatus | null | undefined>(undefined);
+  useEffect(() => {
+    // Show action results immediately while the next periodic observation is pending.
+    if (!serviceLock.current) setServiceResult(undefined);
+  }, [observedService, observationFailed]);
+  const service = serviceResult === undefined ? observedService : serviceResult;
+  const serviceFailed = serviceResult === null || (serviceResult === undefined && observationFailed);
+  const changeService = async (running: boolean) => {
+    if (!native || serviceLock.current || serviceFailed || !service || service.running === running) return;
+    const mode = loadRemoteMode(getStorage());
+    const origin = loadRemoteOrigin(getStorage(), mode);
+    if (running && !origin) { window.location.hash = "#/settings/phone"; return; }
+    serviceLock.current = true;
+    setServiceBusy(true);
+    setServiceError(null);
+    try {
+      setServiceResult(await (running ? remoteStart(origin, mode) : remoteStop()));
+    } catch (cause) {
+      setServiceResult(null);
+      setServiceError(toRemoteError(cause).message);
+    } finally {
+      serviceLock.current = false;
+      setServiceBusy(false);
+    }
+  };
   const serviceLabel = !native ? "Service unavailable" : serviceFailed ? "Service unknown" : !service ? "Checking service"
     : service.running ? "Service running" : "Service stopped";
   const serviceIcon = !native ? <GlobeLock size={14} aria-hidden="true" /> : serviceFailed || !service ? <CircleHelp size={14} aria-hidden="true" />
     : service.running ? <Globe size={14} aria-hidden="true" /> : <Unplug size={14} aria-hidden="true" />;
-  return <footer className={`status-footer${preferences.dividers ? " has-dividers" : ""}`} aria-label="Application status" data-live={live} data-ready={canRun}>
+  return <footer aria-busy={serviceBusy} className={`status-footer${preferences.dividers ? " has-dividers" : ""}`} aria-label="Application status" data-live={live} data-ready={canRun}>
     <span className="sr-only" role="status">{!native ? "Preview only. Controls are simulated." : live ? "Controls armed. Controls run on this computer." : "Editing. Controls are disarmed."}</span>
     {feedback}
+    {serviceError ? <p className="footer-error" role="alert">{serviceError} <a href="#/settings/phone">Review service settings</a></p> : null}
     <div className="status-footer-row">
-      <FooterMenu label={!native ? "Preview only" : live ? "Controls armed" : "Editing"}
-        icon={live ? <Play size={13} aria-hidden="true" /> : <Pencil size={13} aria-hidden="true" />}
-        tone={live ? "is-armed" : undefined}
-        detail={!native ? "Browser controls are simulated. Use the desktop app to run actions on this computer."
-          : live ? "Controls run on this computer. Editing or leaving the deck returns to Editing."
-            : "Controls do not run in Editing. Arm them explicitly to run saved actions on this computer."}
-        items={native ? [
-          { label: "Edit controls", selected: !live, action: onEdit },
-          { label: "Run controls", selected: live, disabled: !canRun, action: onRun },
-        ] : [{ label: "Open settings", href: "#/settings/general" }]} />
+      <div className="footer-item footer-mode">
+        <HelpTooltip label="Controls on/off help" trigger={descriptionId => (
+          <button type="button" className={`footer-trigger footer-mode-toggle${live ? " is-armed" : ""}`}
+            aria-label="Run controls on this computer" aria-pressed={live} aria-describedby={descriptionId}
+            disabled={!native || (!live && !canRun)} onClick={live ? onEdit : onRun}>
+            <Power size={15} aria-hidden="true" />
+          </button>
+        )}>
+          {!native ? "Browser controls are simulated. Use the desktop app to run actions on this computer."
+            : "Turn on to run saved controls; turn off to edit safely. Editing or leaving the deck turns controls off. Clear unsaved changes and unresolved actions before turning on."}
+        </HelpTooltip>
+      </div>
       {preferences.service ? <FooterMenu label={serviceLabel} icon={serviceIcon}
         tone={native && service?.running ? "is-connected" : native && service && !service.running ? "is-disconnected" : undefined}
         detail={!native ? "The private phone service is available only in the desktop app."
           : serviceFailed ? "Could not check the local service. Its current state is unknown."
-            : service ? `${service.running ? "The local service is running. Phone and network reachability are not checked." : "The local service is stopped."}${service.error ? ` ${service.error}` : ""}`
+            : service ? `${service.running ? "The local service is running. Phone and network reachability are not checked." : "The local service is stopped. Start uses your saved phone address, or opens connection settings if none is saved."}${service.error ? ` ${service.error}` : ""}`
               : "Waiting for local service status."}
-        items={[{ label: "Phone connection settings", href: "#/settings/phone" }]} /> : null}
+        items={[
+          { label: "Start service", disabled: !native || serviceBusy || serviceFailed || !service || service.running, action: () => void changeService(true) },
+          { label: "Stop service", disabled: !native || serviceBusy || serviceFailed || !service || !service.running, action: () => void changeService(false) },
+          { label: "Phone connection settings", href: "#/settings/phone" },
+        ]} /> : null}
       {preferences.plugins ? <FooterMenu label={pluginsUnknown ? "Plugins unknown" : `${pluginCount} ${pluginCount === 1 ? "plugin" : "plugins"} loaded`}
         icon={<Plug size={14} aria-hidden="true" />} detail={pluginsUnknown ? "Plugin status could not be read or is still loading. Open Integrations to review it."
-          : "Counts enabled plugins with a connected runtime and a loaded manifest, not all installed packages."}
+          : "Loaded plugins are enabled and ready to provide controls. Disabled plugins are not counted."}
         items={[{ label: "Manage plugins", href: "#/settings/integrations" }]} /> : null}
-      <a className="footer-settings" href="#/settings/footer" aria-label="Configure footer"><Settings2 size={14} aria-hidden="true" /></a>
+      <a className="footer-settings" href="#/settings" aria-label="Open settings"><Settings2 size={14} aria-hidden="true" /></a>
     </div>
   </footer>;
 }

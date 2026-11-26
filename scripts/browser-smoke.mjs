@@ -291,9 +291,10 @@ async function typeInput(page, selector, text) {
   await page.send('Input.insertText', { text });
 }
 async function chooseDesktopMode(page, mode) {
-  await page.eval(click('.status-footer .footer-trigger'));
-  await page.waitFor("!!document.querySelector('.status-footer [role=menu]')");
-  await page.eval(clickText('.status-footer [role=menuitemradio]', mode === 'Live' ? 'Run controls' : 'Edit controls'));
+  const live = mode === 'Live';
+  if (await page.eval(`document.querySelector('.footer-mode-toggle')?.getAttribute('aria-pressed') !== '${live}'`)) {
+    await page.eval(click('.footer-mode-toggle'));
+  }
   await page.waitFor(`document.querySelector('.status-footer')?.dataset.live === '${mode === 'Live'}'`);
 }
 async function presentationMode(page, mode) {
@@ -723,26 +724,28 @@ try {
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
 
   // ------------------------------------------------------------ custom footer menus and durable visibility
-  await editor.eval("document.querySelector('.footer-trigger').focus()");
+  await editor.eval("document.querySelector('.footer-trigger[aria-haspopup=menu]').focus()");
   await pressKey(editor, 'ArrowUp', 'ArrowUp', 38);
   check('footer menu opens from the keyboard and focuses its first item', await editor.waitFor("document.activeElement?.getAttribute('role') === 'menuitem' && !!document.querySelector('.footer-popup')"));
   await editor.screenshot('/tmp/zdeck-footer-menu.png');
   await pressKey(editor, 'Escape', 'Escape', 27);
-  check('Escape closes footer menu and restores trigger focus', await editor.waitFor("!document.querySelector('.footer-popup') && document.activeElement === document.querySelector('.footer-trigger')"));
+  check('Escape closes footer menu and restores trigger focus', await editor.waitFor("!document.querySelector('.footer-popup') && document.activeElement === document.querySelector('.footer-trigger[aria-haspopup=menu]')"));
   await editor.eval(clickText('.footer-trigger', 'Service unavailable'));
   check('browser footer explains service limitation without pretending to be connected', await editor.waitFor("document.querySelector('.footer-popup')?.textContent.includes('only in the desktop app')"));
   await editor.eval("document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
   check('clicking outside dismisses the footer menu', await editor.waitFor("!document.querySelector('.footer-popup')"));
-  await editor.eval("document.querySelector('.footer-trigger').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))");
+  await editor.eval("document.querySelector('.footer-trigger[aria-haspopup=menu]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))");
   check('right-click opens the custom footer menu', await editor.waitFor("!!document.querySelector('.footer-popup [role=menu]')"));
   await pressKey(editor, 'Escape', 'Escape', 27);
-  await editor.eval(click('[aria-label="Configure footer"]'));
-  await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Footer'");
-  await editor.eval("document.querySelectorAll('[aria-label=Footer][role=region] input').forEach(input => input.click())");
-  check('footer settings hide optional items but preserve mode and configuration', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && !document.querySelector('.status-footer').classList.contains('has-dividers') && !!document.querySelector('[aria-label=\"Configure footer\"]')"));
+  await editor.eval(click('[aria-label="Open settings"]'));
+  await editor.waitFor("!!document.querySelector('.settings-nav')");
+  await editor.eval(clickText('.settings-nav a', 'Toolbar'));
+  await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Toolbar'");
+  await editor.eval("document.querySelectorAll('[aria-label=Toolbar][role=region] input').forEach(input => input.click())");
+  check('toolbar settings hide optional items but preserve mode and configuration', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && !document.querySelector('.status-footer').classList.contains('has-dividers') && !!document.querySelector('[aria-label=\"Open settings\"]')"));
   await editor.send('Page.reload');
-  check('footer visibility round-trips through a page restart', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Footer' && [...document.querySelectorAll('[aria-label=Footer][role=region] input')].every(input => !input.checked)"));
-  await editor.eval("document.querySelectorAll('[aria-label=Footer][role=region] input').forEach(input => input.click())");
+  check('toolbar visibility round-trips through a page restart', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Toolbar' && [...document.querySelectorAll('[aria-label=Toolbar][role=region] input')].every(input => !input.checked)"));
+  await editor.eval("document.querySelectorAll('[aria-label=Toolbar][role=region] input').forEach(input => input.click())");
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 3");
 
@@ -1449,14 +1452,16 @@ try {
   // ------------------------------------------------------------ explicit offline desktop execution (fake IPC only)
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.status-footer')");
-  check('native editor defaults Editing and never needs the phone service', await admin.eval("document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.footer-trigger').textContent === 'Editing' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
+  check('native editor defaults Editing and never needs the phone service', await admin.eval("document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.footer-mode-toggle').getAttribute('aria-pressed') === 'false' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
   await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
   check('Editor tile selection never invokes a desktop action', await admin.eval("window.__desktopCalls.length === 0"));
   await chooseDesktopMode(admin, 'Live');
-  check('arming shows a compact footer indicator without executing', await admin.waitFor("document.querySelector('.footer-trigger.is-armed')?.textContent === 'Controls armed'") && await admin.eval("window.__desktopCalls.length === 0 && !document.querySelector('.desktop-mode-note') && !document.querySelector('.is-reorderable') && !document.querySelector('.topbar [aria-label=\"Desktop control mode\"]')"));
-  await admin.eval(click('.status-footer .footer-trigger'));
-  await pressKey(admin, 'End', 'End', 35);
-  check('execution menu arrows reach the selected armed item', await admin.eval("document.activeElement?.textContent === 'Run controls' && document.activeElement.getAttribute('aria-checked') === 'true'"));
+  check('arming shows a compact footer indicator without executing', await admin.waitFor("document.querySelector('.footer-mode-toggle.is-armed')?.getAttribute('aria-pressed') === 'true'") && await admin.eval("window.__desktopCalls.length === 0 && !document.querySelector('.desktop-mode-note') && !document.querySelector('.is-reorderable') && !document.querySelector('.topbar [aria-label=\"Desktop control mode\"]')"));
+  await admin.eval("document.querySelector('.footer-mode-toggle').focus()");
+  await pressKey(admin, ' ', 'Space', 32);
+  check('power toggle disarms from the keyboard', await admin.waitFor("document.querySelector('.footer-mode-toggle')?.getAttribute('aria-pressed') === 'false'"));
+  await pressKey(admin, ' ', 'Space', 32);
+  check('power toggle arms from the keyboard', await admin.waitFor("document.querySelector('.footer-mode-toggle')?.getAttribute('aria-pressed') === 'true'"));
   await admin.screenshot('/tmp/zdeck-footer-armed.png');
   await pressKey(admin, 'Escape', 'Escape', 27);
   await admin.eval(click('[aria-label="Collapse Inspector sidebar"]'));

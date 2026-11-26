@@ -141,7 +141,7 @@ export default function App() {
   const changeFooter = (key: keyof FooterPreferences, enabled: boolean) => {
     const value = { ...footer.value, [key]: enabled };
     const saved = saveFooter(getStorage(), value);
-    setFooter({ value, error: saved ? null : "Footer preferences were not saved. This choice may not survive a restart." });
+    setFooter({ value, error: saved ? null : "Toolbar preferences were not saved. This choice may not survive a restart." });
   };
   const toggleSidebar = () => {
     const collapsed = !sidebar.collapsed;
@@ -504,7 +504,7 @@ export default function App() {
           </div>
 
           <SettingsSections footer={<section className="settings-card" aria-labelledby="footer-heading">
-            <h2 id="footer-heading">Footer</h2>
+            <h2 id="footer-heading">Toolbar</h2>
             {([["service", "Show local service status"], ["plugins", "Show loaded plugin count"], ["dividers", "Show subtle dividers"]] as const).map(([key, label]) => (
               <label key={key} className="desktop-close-choice">
                 <input type="checkbox" checked={footer.value[key]} onChange={event => changeFooter(key, event.target.checked)} />
@@ -592,7 +592,7 @@ export default function App() {
           <details className="settings-card preview-scope">
             <summary className="disclosure">About this preview</summary>
             <p>
-              Desktop tiles default to Editing. Choose Run controls in the footer to arm saved controls on this computer without a phone or phone service.
+              Desktop tiles default to Editing. Turn on the toolbar power toggle to arm saved controls on this computer without a phone or phone service.
               Editing or leaving the editor disarms controls. The phone preview is always simulated. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
               connected. Microphone mute, output volume, and system play/pause

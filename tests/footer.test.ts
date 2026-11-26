@@ -48,8 +48,19 @@ describe("footer", () => {
     expect(html).toContain("Editing");
     expect(html).not.toContain("Controls armed");
     expect(html).toContain('aria-haspopup="menu"');
-    expect(html).toContain('href="#/settings/footer"');
+    expect(html).toContain('href="#/settings"');
+    expect(html).not.toContain('href="#/settings/footer"');
     expect(render({ live: true })).toContain("Controls armed");
+  });
+
+  it("uses one labelled toggle and keeps disarming available when arming is blocked", () => {
+    const toggle = (patch: Partial<ComponentProps<typeof StatusFooter>>) => render(patch).match(/<button[^>]*aria-label="Run controls on this computer"[^>]*>/)?.[0];
+    expect(toggle({})).toContain('aria-pressed="false"');
+    expect(toggle({ canRun: false })).toContain('disabled=""');
+    expect(toggle({ native: false })).toContain('disabled=""');
+    expect(toggle({ live: true, canRun: false })).toContain('aria-pressed="true"');
+    expect(toggle({ live: true, canRun: false })).not.toContain("disabled");
+    expect(toggle({})).not.toContain("aria-haspopup");
   });
 
   it("does not confuse unknown or browser-only state with a running service", () => {
@@ -67,6 +78,8 @@ describe("footer", () => {
     const html = render({ preferences: { service: false, plugins: false, dividers: false } });
     expect(html).not.toMatch(/Service running|plugins loaded|has-dividers/);
     expect(html).toContain("Editing");
-    expect(html).toContain("Configure footer");
+    expect(html).toContain("Open settings");
+    expect(html).not.toContain('aria-label="Controls on/off help"');
+    expect(html).toMatch(/aria-pressed="false" aria-describedby="[^"]+"/);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-const sections = [["general", "General"], ["phone", "Phone connection"], ["integrations", "Integrations"], ["footer", "Footer"]] as const;
+const sections = [["general", "General"], ["phone", "Phone connection"], ["integrations", "Integrations"], ["footer", "Toolbar"]] as const;
 type SettingsSection = typeof sections[number][0];
 
 function currentSection(): SettingsSection {

@@ -8,7 +8,7 @@ function SettingsExample({ width = 960 }: { width?: number }) {
   return <main className="settings-view" style={{ width, maxWidth: "100%" }}>
     <div className="settings-header"><h1>Settings</h1><p>Navigation fixture with local-only cards; no phone service or integrations are started.</p></div>
     <SettingsSections general={<DesktopPreferencesCard />}
-      footer={<section className="settings-card"><h2>Footer</h2><p>Footer visibility preferences live here.</p></section>}
+      footer={<section className="settings-card"><h2>Toolbar</h2><p>Toolbar visibility preferences live here.</p></section>}
       phone={<section className="settings-card"><h2>Phone connection</h2><label className="field">Device name<input defaultValue="Studio phone" /></label></section>}
       integrations={<section className="settings-card"><h2>Integrations</h2><p>OBS and external plugin settings live here.</p></section>} />
   </main>;

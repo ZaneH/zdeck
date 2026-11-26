@@ -9,7 +9,7 @@ it.each([
   ["#/settings/general", "General"],
   ["#/settings/phone", "Phone connection"],
   ["#/settings/integrations", "Integrations"],
-  ["#/settings/footer", "Footer"],
+  ["#/settings/footer", "Toolbar"],
   ["#/settings/unknown", "General"],
 ])("selects the accessible section for %s and keeps every card mounted", (hash, label) => {
   vi.stubGlobal("window", { location: { hash } });

@@ -1,13 +1,15 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement } from "react";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), native: true, setters: [vi.fn(), vi.fn(), vi.fn(), vi.fn()], index: 0, effect: () => {} }));
 vi.mock("react", () => ({
+  useId: () => "help-id",
   useState: (initial: unknown) => [initial, mocks.setters[mocks.index++]],
   useEffect: (effect: () => void) => { mocks.effect = effect; },
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("../src/lib/native", () => ({ nativeAvailable: () => mocks.native }));
 import { DesktopPreferencesCard } from "../src/components/DesktopPreferencesCard";
+import { HelpTooltip } from "../src/components/HelpTooltip";
 const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 beforeEach(() => {
   mocks.index = 0; mocks.native = true;
@@ -36,9 +38,10 @@ it("aligns inline help with the checkbox row and opens on hover or focus without
   const label = row.children[0].props as { children: ReactElement[] };
   expect(label.children[0].type).toBe("input");
   expect(label.children[1].type).toBe("span");
-  const help = row.children[1].props as {
+  expect(row.children[1].type).toBe(HelpTooltip);
+  const help = HelpTooltip(row.children[1].props as ComponentProps<typeof HelpTooltip>).props as {
     onMouseEnter: () => void; onMouseLeave: () => void; onFocus: () => void;
-    onKeyDown: (event: { key: string }) => void; children: ReactElement[];
+    onKeyDown: (event: { key: string; stopPropagation: () => void }) => void; children: ReactElement[];
   };
   const trigger = help.children[0].props as { title?: string };
   const tooltip = help.children[1].props as { role: string; "aria-hidden": boolean };
@@ -51,7 +54,7 @@ it("aligns inline help with the checkbox row and opens on hover or focus without
   expect(mocks.setters[3]).toHaveBeenLastCalledWith(false);
   help.onFocus();
   expect(mocks.setters[3]).toHaveBeenLastCalledWith(true);
-  help.onKeyDown({ key: "Escape" });
+  help.onKeyDown({ key: "Escape", stopPropagation() {} });
   expect(mocks.setters[3]).toHaveBeenLastCalledWith(false);
 });
 it("loads the authoritative native preference", async () => {
