@@ -5,6 +5,10 @@
 Build zDeck as a self-contained application that can control a user's computer and its applications using dashboard
 created by the user.
 
+## Workflow
+
+`dev` is the default: iterate and preview there; short-lived branches target `dev`. Promote `dev` to `production` by PR for releases and the live landing page; no direct production edits. No `main`. Report checks and gaps; never infer native parity from browser tests. See [release workflow](docs/releasing.md).
+
 ## Feature Map
 
 ## Invariants
