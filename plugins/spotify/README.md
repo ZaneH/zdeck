@@ -33,6 +33,17 @@ The generated folder contains `manifest.json`, `main.js`, `spotify.js`, ESM pack
 
 Only one plugin is active at a time. Disconnect before switching. Enabling is session-local, with no startup persistence, automatic polling, reconnect or action replay. Folder discovery and Refresh never execute the plugin; runtime discovery only probes Node's version.
 
+## Provided control icons and attribution
+
+After enabling the plugin, open a control's **Icon** picker and search **Spotify**. **spotify / Media** provides **Spotify (monochrome)** and **Spotify (original)** for any control, independently of its action. The existing Settings thumbnail and action defaults are unchanged. Both images are embedded in `manifest.json`; packaged installations need no asset files or network access. Picked images are copied into the deck and remain available after disabling the plugin.
+
+- **Monochrome:** path from [Simple Icons' Spotify SVG](https://github.com/simple-icons/simple-icons/blob/develop/icons/spotify.svg), under [CC0 1.0 Universal](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md) ([legal text](https://creativecommons.org/publicdomain/zero/1.0/legalcode)). Source geometry is unchanged; presentation metadata was removed and a neutral `#80868e` fill added for visibility on both light and dark app surfaces. SVG image documents cannot inherit the app's `currentColor`, so this is intentionally a fixed neutral tone, not a theme-dependent color. Editable source: `assets/spotify-monochrome.svg` in the repository.
+- **Original:** user-supplied `spotify.webp` from Downloads; resized from 3840×3840 to 96×96 using Pillow's `thumbnail`, then saved as lossless WebP without recoloring. Repository asset: `assets/spotify-original.webp`. The supplied file's upstream provenance/license was not provided; it is not covered by this plugin's MIT license.
+
+Spotify and its logo are trademarks of Spotify. CC0 does not grant trademark rights, and neither logo is claimed under the plugin's MIT license. These icons identify the integration; no affiliation or endorsement is implied. Review Spotify's applicable brand terms before redistribution.
+
+To update an embedded icon, base64-encode its asset bytes and replace the corresponding `icons[].src` data URL in `manifest.json`; keep the existing per-image and total manifest limits. The focused icon test checks asset/manifest agreement.
+
 ## Spotify and macOS permissions
 
 Spotify must be installed at `/Applications/Spotify.app` and already open with a playable context. Play, pause, play-pause, next, previous and Spotify volume (integer 0–100) are supported. Volume is player volume, not system volume.
