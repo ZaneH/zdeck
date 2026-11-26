@@ -49,7 +49,7 @@ export const MINI_DECK_CONTROLS: Control[] = [
     pluginArgs: {},
   },
   { id: "mini-play", action: "media-play-pause", label: "Play / pause" },
-  { id: "mini-vol", action: "volume", label: "Speakers", volume: 72 },
+  { id: "mini-vol", action: "volume", label: "Speakers", volume: 72, columnSpan: 2 },
 ];
 
 export const TRACKS = [
