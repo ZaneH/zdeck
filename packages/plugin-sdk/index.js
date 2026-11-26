@@ -6,7 +6,7 @@ const errors = {
   invalid_request: ['Invalid protocol v1 request.', 'Check the request shape, version, ID and newline framing.'],
   request_too_large: ['Request exceeds 16384 bytes.', 'Send a smaller request.'],
   unknown_action: ['Action is not declared by this plugin.', 'Use describe to discover supported action IDs.'],
-  invalid_arguments: ['Action arguments do not match its configuration.', 'Use only declared fields within their integer bounds.'],
+  invalid_arguments: ['Action arguments do not match its configuration.', 'Use only declared fields with bounded, step-aligned integers or boolean values.'],
   internal_error: ['Plugin operation failed.', 'Check trusted local stderr diagnostics; do not automatically retry actions.'],
   response_too_large: ['Plugin response exceeds 65536 bytes.', 'Reduce the state returned by the plugin.'],
   timeout: ['Plugin operation timed out.', 'Restart the plugin; inspect state before manually retrying an action.'],
@@ -46,9 +46,20 @@ function pluginIcons(value) {
   });
 }
 
+function validField(field) {
+  if (!record(field)) return false;
+  const controlled = Object.hasOwn(field, 'control');
+  if (field.type === 'boolean') return exact(field, ['type', ...(controlled ? ['control'] : [])])
+    && (!controlled || exact(field.control, ['stateKey']) && identifier(field.control.stateKey));
+  return field.type === 'integer' && exact(field, ['type', 'minimum', 'maximum', ...(controlled ? ['control'] : [])])
+    && integer(field.minimum) && integer(field.maximum) && field.minimum <= field.maximum
+    && (!controlled || exact(field.control, ['step']) && integer(field.control.step) && field.control.step > 0
+      && Number.isSafeInteger(field.maximum - field.minimum) && field.control.step <= field.maximum - field.minimum && (field.maximum - field.minimum) % field.control.step === 0);
+}
+
 export function validateManifest(value) {
-  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : [])])
-    && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && identifier(value.id)
+  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : []), ...(Object.hasOwn(value, 'icon') ? ['icon'] : [])])
+    && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && (!Object.hasOwn(value, 'icon') || iconSource(value.icon)) && identifier(value.id)
     && typeof value.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     && value.protocolVersion === 1 && Array.isArray(value.actions) && value.actions.length > 0 && value.actions.length <= 32;
   const seen = new Set();
@@ -57,9 +68,9 @@ export function validateManifest(value) {
       || !record(action.config) || Object.keys(action.config).length > 8) { valid = false; break; }
     seen.add(action.id);
     for (const [key, field] of Object.entries(action.config)) {
-      if (!identifier(key) || !exact(field, ['type', 'minimum', 'maximum']) || field.type !== 'integer'
-        || !integer(field.minimum) || !integer(field.maximum) || field.minimum > field.maximum) valid = false;
+      if (!identifier(key) || !validField(field)) valid = false;
     }
+    if (Object.values(action.config).filter((field) => field.control).length > 1) valid = false;
   }
   if (!valid || Buffer.byteLength(JSON.stringify(value)) > LIMITS.manifestBytes) throw new TypeError('Invalid plugin manifest.');
   return value;
@@ -68,7 +79,9 @@ export function validateManifest(value) {
 export function validateArguments(action, args) {
   if (!record(args) || Object.keys(args).length !== Object.keys(action.config).length
     || !Object.entries(action.config).every(([key, field]) => Object.hasOwn(args, key)
-      && integer(args[key]) && args[key] >= field.minimum && args[key] <= field.maximum)) {
+      && (field.type === 'boolean' ? typeof args[key] === 'boolean'
+        : integer(args[key]) && args[key] >= field.minimum && args[key] <= field.maximum
+          && (!field.control || (args[key] - field.minimum) % field.control.step === 0)))) {
     throw new PluginError('invalid_arguments');
   }
   return args;

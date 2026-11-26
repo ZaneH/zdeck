@@ -33,7 +33,7 @@ impl PluginIcon {
 fn icon_text(s: &str) -> bool {
     !s.trim().is_empty() && s.encode_utf16().count() <= 80 && !s.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
 }
-fn icon_source(s: &str) -> bool {
+pub fn icon_source(s: &str) -> bool {
     if s.len() > 8192 { return false; }
     let Some((mime, data)) = s.split_once(";base64,") else { return false; };
     if !["data:image/png", "data:image/jpeg", "data:image/webp", "data:image/gif", "data:image/svg+xml"].contains(&mime)

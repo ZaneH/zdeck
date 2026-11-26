@@ -87,13 +87,44 @@ pub struct Manifest {
     pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icons: Option<Vec<zdeck_schema::icons::PluginIcon>>,
+    /// Optional plugin-identity thumbnail (bounded local image data URL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, IntegerField> }
+pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, ConfigField> }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
+pub enum ConfigField {
+    Integer { minimum: Value, maximum: Value, #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<NumericControl> },
+    Boolean { #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<BooleanControl> },
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct IntegerField { #[serde(rename = "type")] pub field_type: String, pub minimum: Value, pub maximum: Value }
+pub struct NumericControl { pub step: Value }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BooleanControl { pub state_key: String }
+impl ConfigField {
+    fn controlled(&self) -> bool { matches!(self, Self::Integer { control: Some(_), .. } | Self::Boolean { control: Some(_) }) }
+    fn valid(&self) -> bool {
+        match self {
+            Self::Boolean { control } => control.as_ref().is_none_or(|c| identifier(&c.state_key)),
+            Self::Integer { minimum, maximum, control } => match (integer(minimum), integer(maximum)) {
+                (Some(min), Some(max)) if min <= max => control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|step| step > 0.0 && max - min <= 9_007_199_254_740_991.0 && step <= max - min && (max - min) % step == 0.0)),
+                _ => false,
+            }
+        }
+    }
+    fn accepts(&self, value: &Value) -> bool {
+        match self {
+            Self::Boolean { .. } => value.is_boolean(),
+            Self::Integer { minimum, maximum, control } => matches!((integer(value), integer(minimum), integer(maximum)),
+                (Some(n), Some(min), Some(max)) if n >= min && n <= max && control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|s| (n-min)%s == 0.0))),
+        }
+    }
+}
 
 pub(crate) use zdeck_schema::plugin::{identifier, integer};
 
@@ -113,7 +144,13 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         return Err(ErrorKind::InvalidManifest);
     }
     if value.get("icons").is_some_and(|icons| !icons.is_array()) { return Err(ErrorKind::InvalidManifest); }
+    if value["actions"].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null))))) {
+        return Err(ErrorKind::InvalidManifest);
+    }
     let m: Manifest = serde_json::from_value(value).map_err(|_| ErrorKind::InvalidManifest)?;
+    if m.icon.as_deref().is_some_and(|icon| !zdeck_schema::icons::icon_source(icon)) {
+        return Err(ErrorKind::InvalidManifest);
+    }
     if let Some(icons) = &m.icons {
         let mut ids = HashSet::new();
         if icons.len() > 32 || icons.iter().any(|icon| !icon.valid() || !ids.insert(&icon.id)) {
@@ -129,12 +166,9 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         if !identifier(&a.id) || !seen.insert(&a.id) || a.title.is_empty()
             || a.title.encode_utf16().count() > 80 || a.title.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             || a.config.len() > 8 { return Err(ErrorKind::InvalidManifest); }
+        if a.config.values().filter(|f| f.controlled()).count() > 1 { return Err(ErrorKind::InvalidManifest); }
         for (key, field) in &a.config {
-            if !identifier(key) || field.field_type != "integer" { return Err(ErrorKind::InvalidManifest); }
-            match (integer(&field.minimum), integer(&field.maximum)) {
-                (Some(min), Some(max)) if min <= max => (),
-                _ => return Err(ErrorKind::InvalidManifest),
-            }
+            if !identifier(key) || !field.valid() { return Err(ErrorKind::InvalidManifest); }
         }
     }
     Ok(m)
@@ -142,8 +176,7 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
 fn arguments(action: &Action, args: &Value) -> bool {
     let Some(args) = args.as_object() else { return false; };
     args.len() == action.config.len() && action.config.iter().all(|(key, f)| {
-        matches!((args.get(key).and_then(integer), integer(&f.minimum), integer(&f.maximum)),
-            (Some(n), Some(min), Some(max)) if n >= min && n <= max)
+        args.get(key).is_some_and(|value| f.accepts(value))
     })
 }
 fn exact(value: &Value, keys: &[&str]) -> bool {
@@ -442,6 +475,13 @@ impl PluginRegistry {
     pub async fn state(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
         self.manage(id, false, false, |state| async move { state.state().await }).await
     }
+    pub async fn execute_value(&self, id: String, action: String, args: Value, value: f64, toggle: bool) -> Result<PluginSnapshot, PluginError> {
+        if !identifier(&id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let plugin_id = id.clone();
+        self.manage(&id, false, false, move |state| async move {
+            state.run(SessionOperation::Execute(plugin_id, action, args, Some((value, toggle)))).await
+        }).await
+    }
     pub async fn execute(&self, id: String, action: String, args: Value) -> Result<PluginSnapshot, PluginError> {
         if !identifier(&id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
         let plugin_id = id.clone();
@@ -473,7 +513,25 @@ struct Session {
     status: ConnectionStatus,
     last_error: Option<PluginError>,
 }
-enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value) }
+enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value, Option<(f64, bool)>) }
+
+// The phone supplies a scalar only; the trusted manifest chooses the sole writable field.
+fn target_arguments(action: &Action, mut args: Value, value: f64, toggle: bool) -> Result<Value, PluginError> {
+    let invalid = || PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted);
+    if !value.is_finite() || !arguments(action, &args) { return Err(invalid()); }
+    let (key, field) = action.config.iter().find(|(_, f)| f.controlled()).ok_or_else(invalid)?;
+    if toggle != matches!(field, ConfigField::Boolean { .. }) { return Err(invalid()); }
+    let target = match field {
+        ConfigField::Boolean { .. } if value == 0.0 || value == 1.0 => Value::Bool(value == 1.0),
+        ConfigField::Integer { .. } => serde_json::json!(value),
+        _ => return Err(invalid()),
+    };
+    if !field.accepts(&target) { return Err(invalid()); }
+    let target = if matches!(field, ConfigField::Integer { .. }) { Value::from(value as i64) } else { target };
+    args.as_object_mut().ok_or_else(invalid)?.insert(key.clone(), target);
+    if !arguments(action, &args) { return Err(invalid()); }
+    Ok(args)
+}
 fn node_launch(program: String, entrypoint: String) -> Result<TrustedLaunch, PluginError> {
     let entrypoint = PathBuf::from(entrypoint);
     if !entrypoint.is_absolute() || entrypoint.file_name().is_none() {
@@ -501,7 +559,7 @@ impl PluginState {
     pub async fn snapshot(&self) -> PluginSnapshot { self.session.lock().await.snapshot() }
     pub async fn state(&self) -> Result<PluginSnapshot, PluginError> { self.run(SessionOperation::State).await }
     pub async fn execute(&self, plugin_id: String, action_id: String, args: Value) -> Result<PluginSnapshot, PluginError> {
-        self.run(SessionOperation::Execute(plugin_id, action_id, args)).await
+        self.run(SessionOperation::Execute(plugin_id, action_id, args, None)).await
     }
     async fn run(&self, op: SessionOperation) -> Result<PluginSnapshot, PluginError> {
         let mut session = self.session.clone().lock_owned().await;
@@ -563,11 +621,27 @@ impl Session {
         };
         let result = match op {
             SessionOperation::State => host.state().await,
-            SessionOperation::Execute(plugin_id, action_id, args) => {
+            SessionOperation::Execute(plugin_id, action_id, args, value) => {
                 if !identifier(&plugin_id) || !identifier(&action_id)
                     || self.manifest.as_ref().map(|m| m.id.as_str()) != Some(plugin_id.as_str()) {
                     Err(PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))
-                } else { host.execute(&action_id, args).await }
+                } else {
+                    let args = if let Some((value, toggle)) = value {
+                        let action = self.manifest.as_ref().and_then(|m| m.actions.iter().find(|a| a.id == action_id))
+                            .ok_or_else(|| PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))?;
+                        if toggle {
+                            let observed = action.config.values().find_map(|field| match field {
+                                ConfigField::Boolean { control: Some(control) } => self.state.as_ref().and_then(|s| s.get(&control.state_key)),
+                                _ => None,
+                            });
+                            if self.last_error.is_some() || !observed.is_some_and(Value::is_boolean) {
+                                return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+                            }
+                        }
+                        target_arguments(action, args, value, toggle)?
+                    } else { args };
+                    host.execute(&action_id, args).await
+                }
             }
             _ => unreachable!(),
         };
@@ -588,6 +662,31 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn sample() -> Value { json!({"id":"test","version":"0.0.1","protocolVersion":1,"actions":[{"id":"go","title":"Go","config":{"n":{"type":"integer","minimum":0,"maximum":100}}}]}) }
+    #[test]
+    fn presentation_contracts_validate_targets_and_preserve_other_saved_args() {
+        let mut value = sample();
+        value["actions"][0]["config"] = json!({"amount":{"type":"integer","minimum":-20,"maximum":200,"control":{"step":5}},"zone":{"type":"integer","minimum":1,"maximum":4}});
+        let m = manifest(value.clone()).unwrap(); let action = &m.actions[0];
+        assert_eq!(target_arguments(action, json!({"amount":50,"zone":2}), 75.0, false).unwrap(), json!({"amount":75,"zone":2}));
+        for target in [-25.0, 201.0, 2.0, 0.5, f64::NAN] { assert!(target_arguments(action, json!({"amount":50,"zone":2}), target, false).is_err()); }
+        assert!(target_arguments(action, json!({"amount":50,"zone":2}), 1.0, true).is_err());
+        assert!(target_arguments(action, json!({"amount":50,"zone":8}), 75.0, false).is_err());
+        assert!(target_arguments(action, json!({"amount":true,"zone":2}), 75.0, false).is_err());
+        value["actions"][0]["config"] = json!({"enabled":{"type":"boolean","control":{"stateKey":"enabled"}}});
+        let m = manifest(value.clone()).unwrap(); let action = &m.actions[0];
+        for (target, boolean) in [(0.0,false),(1.0,true)] {
+            assert_eq!(target_arguments(action, json!({"enabled":false}), target, true).unwrap(), json!({"enabled":boolean}));
+        }
+        for target in [-1.0, 2.0, 0.5] { assert!(target_arguments(action, json!({"enabled":false}), target, true).is_err()); }
+        assert!(target_arguments(action, json!({"enabled":false}), 1.0, false).is_err());
+        for field in [json!({"type":"boolean","control":null}), json!({"type":"boolean","minimum":0}), json!({"type":"boolean","control":{"stateKey":"../secret"}}),
+            json!({"type":"integer","minimum":-9007199254740991i64,"maximum":9007199254740991i64,"control":{"step":1}}),
+            json!({"type":"integer","minimum":0,"maximum":10,"control":{"step":0}}), json!({"type":"integer","minimum":0,"maximum":10,"control":{"step":3}})] {
+            value["actions"][0]["config"] = json!({"value":field}); assert!(manifest(value.clone()).is_err());
+        }
+        value["actions"][0]["config"] = json!({"a":{"type":"boolean","control":{"stateKey":"a"}},"b":{"type":"boolean","control":{"stateKey":"b"}}});
+        assert!(manifest(value).is_err());
+    }
     #[test]
     fn optional_icon_packs_match_sdk_bounds() {
         let icon = json!({"id":"play","title":"Play","category":"Media","src":"data:image/svg+xml;base64,PHN2Zy8+"});

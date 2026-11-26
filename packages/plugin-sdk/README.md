@@ -37,11 +37,34 @@ const icons: Icon[] = [{
 
 Any control can use these icons, not just this plugin's actions. The picker groups them by plugin ID and category. Use short titles and recognizable artwork; SVGs should have a `viewBox` and explicit colors (image SVGs do not inherit the app's `currentColor`). For PNG, JPEG, WebP or GIF, use the matching `data:image/png;base64,`, `data:image/jpeg;base64,`, `data:image/webp;base64,` or `data:image/gif;base64,` prefix.
 
+Separately, a manifest may declare one optional `icon` string as the plugin's own row thumbnail in Settings; it uses the same embedded-image validation and a generic fallback when absent. It is plugin identity, not part of the selectable action-icon pack.
+
 Each icon has exactly `id`, `title`, `category`, `src`. IDs use the same rules as action IDs and must be unique within the pack. Titles/categories are nonblank, at most 80 UTF-16 code units, without ASCII control characters. At most 32 icons are allowed. Each source is a nonempty base64 data URL of at most **8192 characters**, and the **entire manifest still must fit within 16384 UTF-8 bytes**. Optimize artwork; these are small control icons, not album artwork. Paths, remote URLs, HTML and raw SVG markup are rejected. SVG is rendered through an image element, never injected into the page. Invalid image content falls back to the control's action icon.
 
 When distributing a folder, `manifest.json` and the process's `describe` response must include identical icon metadata, just like actions. Keep any authoring assets available to the process if it reads them at startup, or pre-encode the data into both manifests during packaging. The selected image is copied into the deck for persistence and phone rendering without fetching assets or keeping the plugin enabled. The existing 256 KiB native deck-file budget still applies; many distinct large images can exhaust it. Resetting to the action default removes the saved override.
 
 See `examples/hello.ts` for a self-contained SVG example. No icon-specific action execution, extra host permissions or network requests are required.
+
+## Compatible control presentations (unreleased)
+
+The updated app/SDK support optional `control` metadata on **at most one config field per action**. Older apps/SDKs reject it; distribute a matching locally packaged SDK and app until released. Existing fields without metadata retain saved-button behavior.
+
+```ts
+const actions = [
+  { id: 'level', title: 'Level', config: {
+    amount: { type: 'integer', minimum: 0, maximum: 100, control: { step: 1 } },
+  } },
+  { id: 'power', title: 'Power', config: {
+    enabled: { type: 'boolean', control: { stateKey: 'enabled' } },
+  } },
+];
+```
+
+Numeric metadata offers slider/dial/button. Step and range width are positive safe integers; the range must have at least one step and both bounds must align (`maximum - minimum` is divisible by step). Values must be safe integers in bounds, aligned from minimum. Newly added numeric plugin controls default to slider; existing saved controls without `presentation` remain buttons. Numeric gestures preview locally and submit only on completed pointer/value-key adjustment, not movement, cancel or blur. While a request is busy, the latest deliberate numeric target replaces earlier queued targets; it sends with a new ID only after confirmation. Uncertain delivery, failure, navigation or a changed deck discards that queue rather than retrying.
+
+Boolean fields accept only JSON booleans. `true` explicitly means **On**, `false` means **Off**; implement an idempotent setter, not a one-shot toggle command. `stateKey` is a plugin identifier naming a top-level observed boolean in returned state. It enables toggle switch/toggle button/button. Unknown/missing/nonboolean state disables live toggles; never invent playback state. Buttons still send their saved arguments. No metadata is inferred from names. Other config fields remain saved, strictly validated configuration.
+
+Desktop and phone adjustment commands carry a scalar only (boolean targets use 0/1 on this transport). The server maps it into the sole declared field, converts boolean targets to JSON booleans, and validates presentation compatibility, bounds/step and the complete argument object before execution. Phone snapshots contain manifests and declared observed booleans only, not arbitrary plugin state. No new executable paths, arbitrary phone argument maps or automatic retries are introduced. Keep on-disk and describe manifests identical when packaging.
 
 ## Maintainer releases
 
