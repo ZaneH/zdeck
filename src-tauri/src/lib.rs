@@ -6,6 +6,7 @@ mod linux_display;
 #[cfg(feature = "native-smoke")]
 mod native_smoke;
 pub use zdeck_obs as obs;
+mod obs_preferences;
 pub use zdeck_plugin_host::{plugin, plugin_install};
 pub mod remote;
 pub use zdeck_system as system;
@@ -452,6 +453,9 @@ pub fn run() {
             tray::desktop_set_close_to_tray,
             tray::desktop_quit,
             obs_connect,
+            obs_preferences::obs_load_preferences,
+            obs_preferences::obs_save_preferences,
+            obs_preferences::obs_forget_preferences,
             obs_disconnect,
             obs_snapshot,
             obs_switch_scene,
