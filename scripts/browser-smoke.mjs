@@ -596,8 +596,13 @@ try {
   await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '0'));
 
   // Spans persist without forcing extra implicit columns on narrower grids.
-  await editor.eval(setValue('.span-fields label:first-child input', '2'));
-  await editor.eval(setValue('.span-fields label:nth-child(2) input', '4'));
+  check('action dropdown header has no action icon', await editor.eval("!document.querySelector('.action-picker > summary .lucide:not(.icon-picker-toggle)')"));
+  check('layout omits the redundant note', await editor.eval("!document.querySelector('.span-fields .field-note')"));
+  check('sizing uses Width and Height without renaming persisted spans', await editor.eval("[...document.querySelectorAll('.span-fields label > span')].map(n => n.textContent).join('|') === 'Width|Height'"));
+  await typeInput(editor, '.span-fields label:first-child input', '4');
+  check('width updates immediately without losing focus', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridColumnStart === 'span 4' && document.activeElement === document.querySelector('.span-fields label:first-child input')"));
+  await typeInput(editor, '.span-fields label:nth-child(2) input', '2');
+  check('height updates immediately without losing focus', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridRowStart === 'span 2' && document.activeElement === document.querySelector('.span-fields label:nth-child(2) input')"));
   check('editor honors configured row and column spans', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.control-tile.is-selected')).gridColumnStart === 'span 4'"));
   await designPhone.eval(clickText('.phone-page-tab', 'Stream'));
   check('phone renderer honors rows and clamps columns in portrait', await designPhone.waitFor("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 2'"));
@@ -605,7 +610,7 @@ try {
   check('phone renderer restores saved column span in landscape', await designPhone.eval("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 4' && document.documentElement.scrollWidth <= innerWidth"));
   await designPhone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await editor.eval(setValue('.span-fields label:first-child input', '0'));
-  check('invalid span restores the last valid integer', await editor.eval("document.querySelector('.span-fields input').value === '2'"));
+  check('invalid span restores the last valid integer', await editor.eval("document.querySelector('.span-fields input').value === '4'"));
   await editor.reload();
   await editor.waitFor("!!document.querySelector('.control-tile')");
   check('layout spans survive reload', await editor.eval("getComputedStyle(document.querySelector('.control-tile')).gridRowStart === 'span 2'"));

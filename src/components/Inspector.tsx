@@ -188,7 +188,7 @@ export function Inspector({
             </label>
 
             <details className="icon-picker action-picker">
-              <summary><ActionIcon kind={control.action} size={20} /><span>Action</span>
+              <summary><span>Action</span>
                 <span className="icon-picker-status">{control.action === "plugin" ? control.pluginId : ACTION_CATALOG.find((action) => action.kind === control.action)?.name}</span>
                 <ChevronDown className="icon-picker-toggle" size={16} aria-hidden="true" />
               </summary>
@@ -210,15 +210,16 @@ export function Inspector({
             <details className="inspector-section" open>
               <summary className="disclosure">Layout</summary>
               <div className="inspector-section-body span-fields">
-                {([['rowSpan', 'Rows', MAX_ROW_SPAN], ['columnSpan', 'Columns', MAX_COLUMN_SPAN]] as const).map(([key, label, maximum]) =>
+                {([['columnSpan', 'Width', MAX_COLUMN_SPAN], ['rowSpan', 'Height', MAX_ROW_SPAN]] as const).map(([key, label, maximum]) =>
                   <label className="field" key={key}><span>{label}</span><input type="number" min={1} max={maximum} step={1}
-                    key={`${control.id}-${key}-${control[key] ?? 1}`} defaultValue={control[key] ?? 1}
-                    onBlur={(event) => {
+                    key={`${control.id}-${key}`} defaultValue={control[key] ?? 1}
+                    onChange={(event) => {
                       const value = Number(event.currentTarget.value);
                       if (isSpan(value, maximum)) onPatch({ [key]: value });
-                      else event.currentTarget.value = String(control[key] ?? 1);
+                    }}
+                    onBlur={(event) => {
+                      event.currentTarget.value = String(control[key] ?? 1);
                     }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} /></label>)}
-                <p className="field-note">Columns fit the available grid (up to 4). Rows: 1–24.</p>
               </div>
             </details>
             <details className="inspector-section" open>
