@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampVolume } from "../src/lib/actions";
+import { clampVolume, createControl } from "../src/lib/actions";
 import {
   addControl,
   addPage,
@@ -143,6 +143,59 @@ describe("deck editing", () => {
     expect(clampVolume(140)).toBe(100);
     expect(clampVolume(49.6)).toBe(50);
     expect(clampVolume(Number.NaN)).toBe(50);
+  });
+});
+
+describe("OBS scene labels", () => {
+  function added(label?: string) {
+    return addControl(createDefaultDeck(), "page_stream", "obs-scene", { scene: "Camera", label })!;
+  }
+
+  it("uses the assigned scene unless a custom label was explicitly supplied", () => {
+    expect(added().control).toMatchObject({ scene: "Camera", label: "Camera", autoLabel: true });
+    expect(added("   ").control).toMatchObject({ label: "Camera", autoLabel: true });
+    expect(added("  Show camera  ").control).toMatchObject({ label: "Show camera" });
+    expect(added("Camera").control).not.toHaveProperty("autoLabel");
+  });
+
+  it("tracks scene edits, preserves explicit labels (even equal ones), and resets when cleared", () => {
+    const { deck: initial, control } = added();
+    let deck = updateControl(initial, "page_stream", control.id, { scene: "  Gameplay  " });
+    expect(findControl(deck, "page_stream", control.id)).toMatchObject({ label: "Gameplay", autoLabel: true });
+    deck = updateControl(deck, "page_stream", control.id, { label: "Gameplay" });
+    deck = updateControl(deck, "page_stream", control.id, { scene: "Break" });
+    expect(findControl(deck, "page_stream", control.id)).toMatchObject({ label: "Gameplay", scene: "Break" });
+    deck = updateControl(deck, "page_stream", control.id, { label: "  " });
+    expect(findControl(deck, "page_stream", control.id)).toMatchObject({ label: "Break", autoLabel: true });
+    deck = updateControl(deck, "page_stream", control.id, { scene: "Camera", label: "  My camera  " });
+    expect(findControl(deck, "page_stream", control.id)).toMatchObject({ label: "My camera", scene: "Camera" });
+  });
+
+  it("preserves legacy titles and resets automatic labeling when changing actions", () => {
+    let deck = updateControl(createDefaultDeck(), "page_stream", "ctl_live", { scene: "Camera" });
+    expect(findControl(deck, "page_stream", "ctl_live")?.label).toBe("Go live");
+    deck = updateControl(deck, "page_stream", "ctl_live", { action: "mic-mute" });
+    expect(findControl(deck, "page_stream", "ctl_live")).not.toHaveProperty("autoLabel");
+    deck = updateControl(deck, "page_stream", "ctl_live", { action: "obs-scene", scene: "Break" });
+    expect(findControl(deck, "page_stream", "ctl_live")).toMatchObject({ label: "Break", autoLabel: true });
+  });
+
+  it("preserves setup controls when recreating them for insertion", () => {
+    const automatic = createControl("obs-scene", { scene: "Camera" });
+    expect(createControl("obs-scene", automatic)).toMatchObject({ label: "Camera", autoLabel: true });
+    expect(createControl("obs-scene", { scene: "Camera", label: "Camera", autoLabel: false })).not.toHaveProperty("autoLabel");
+  });
+
+  it("strictly validates automatic-label metadata", () => {
+    const { deck } = added();
+    expect(isDeck(deck)).toBe(true);
+    const control = deck.pages[0].controls.at(-1)!;
+    for (const autoLabel of [null, "true", 1]) {
+      expect(isDeck({ ...deck, pages: [{ ...deck.pages[0], controls: [{ ...control, autoLabel }] }] })).toBe(false);
+    }
+    control.label = "Wrong label";
+    expect(isDeck(deck)).toBe(false);
+    expect(isDeck({ ...deck, pages: [{ ...deck.pages[0], controls: [{ id: "mic", label: "Mic", action: "mic-mute", autoLabel: true }] }] })).toBe(false);
   });
 });
 

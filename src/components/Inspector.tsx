@@ -158,15 +158,16 @@ export function Inspector({
               <summary className="disclosure">Appearance</summary>
               <div className="inspector-section-body">
             <label className="field">
-              <span>Label</span>
+              <span>{control.action === "obs-scene" ? "Custom label (optional)" : "Label"}</span>
               <input
                 key={`${control.id}-${control.action}-${control.label}-label`}
                 type="text"
-                defaultValue={control.label}
+                defaultValue={control.action === "obs-scene" && control.autoLabel ? "" : control.label}
+                placeholder={control.action === "obs-scene" ? control.scene : undefined}
                 maxLength={40}
                 onBlur={(event) => {
                   const label = event.currentTarget.value.trim();
-                  if (!label) {
+                  if (!label && control.action !== "obs-scene") {
                     event.currentTarget.value = control.label;
                     return;
                   }
@@ -179,7 +180,7 @@ export function Inspector({
                     event.currentTarget.blur();
                   }
                   if (event.key === "Escape") {
-                    event.currentTarget.value = control.label;
+                    event.currentTarget.value = control.action === "obs-scene" && control.autoLabel ? "" : control.label;
                     event.currentTarget.blur();
                   }
                 }}

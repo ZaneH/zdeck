@@ -103,7 +103,7 @@ impl ActionDispatcher {
         validate_action_value(control, value)?;
         let _effect = self.effect.lock().await;
         let result = match &control.action {
-            ControlAction::ObsScene { scene } => match self.obs.switch_scene(scene).await {
+            ControlAction::ObsScene { scene, .. } => match self.obs.switch_scene(scene).await {
                 Ok(outcome) => CommandResult {
                     id: id.to_string(),
                     state: if outcome.confirmed { CommandState::Confirmed } else { CommandState::NotApplied },

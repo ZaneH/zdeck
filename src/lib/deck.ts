@@ -149,10 +149,16 @@ function patchControl(control: Control, patch: ControlPatch): Control {
         action === control.action && control.action === "obs-scene"
           ? control.scene
           : "Scene 1";
+      const nextScene = patch.scene?.trim() || scene;
+      const autoLabel = patch.label !== undefined
+        ? !patch.label.trim()
+        : actionChanged || (control.action === "obs-scene" && control.autoLabel === true);
       return {
         ...base,
         action,
-        scene: patch.scene?.trim() || scene,
+        scene: nextScene,
+        label: autoLabel ? nextScene : base.label,
+        ...(autoLabel ? { autoLabel: true } : {}),
       };
     }
     case "mic-mute":
@@ -304,7 +310,10 @@ function isControl(value: unknown): value is Control {
       return onlyFields(value, [...fields, "pluginId", "pluginAction", "pluginArgs"])
         && pluginIdentifier(value.pluginId) && pluginIdentifier(value.pluginAction) && isPluginArgs(value.pluginArgs);
     case "obs-scene":
-      return onlyFields(value, [...fields, "scene"]) && typeof value.scene === "string" && value.scene.trim().length > 0;
+      return onlyFields(value, [...fields, "scene", ...(Object.hasOwn(value, "autoLabel") ? ["autoLabel"] : [])])
+        && typeof value.scene === "string" && value.scene.trim().length > 0
+        && (!Object.hasOwn(value, "autoLabel") || typeof value.autoLabel === "boolean")
+        && (value.autoLabel !== true || value.label === value.scene);
     case "mic-mute":
     case "media-play-pause":
       return onlyFields(value, fields);

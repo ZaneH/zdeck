@@ -36,6 +36,8 @@ interface ControlBase {
 export interface ObsSceneControl extends ControlBase {
   action: "obs-scene";
   scene: string;
+  /** Automatic labels track the assigned scene; absent on legacy/custom labels. */
+  autoLabel?: boolean;
 }
 
 export interface MicMuteControl extends ControlBase {
@@ -59,6 +61,7 @@ export interface PluginControl extends ControlBase {
 }
 
 export type ControlOptions = {
+  autoLabel?: boolean;
   label?: string;
   scene?: string;
   volume?: number;

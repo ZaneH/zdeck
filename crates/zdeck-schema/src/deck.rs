@@ -25,7 +25,11 @@ pub enum Theme {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum ControlAction {
     #[serde(rename = "obs-scene")]
-    ObsScene { scene: String },
+    ObsScene {
+        scene: String,
+        #[serde(rename = "autoLabel", default, skip_serializing_if = "std::ops::Not::not")]
+        auto_label: bool,
+    },
     #[serde(rename = "mic-mute")]
     MicMute,
     #[serde(rename = "media-play-pause")]
@@ -253,7 +257,10 @@ impl Deck {
                     return Err(DeckError::invalid_input("Control icons require a known built-in icon or a bounded image data URL."));
                 }
                 match &control.action {
-                    ControlAction::ObsScene { scene } => {
+                    ControlAction::ObsScene { scene, auto_label } => {
+                        if *auto_label && control.label != *scene {
+                            return Err(DeckError::invalid_input("Automatic OBS labels must match the scene name."));
+                        }
                         if scene.trim().is_empty() || scene.len() > MAX_SCENE_BYTES {
                             return Err(DeckError::invalid_input(
                                 "OBS scene names must be non-empty and bounded.",
@@ -295,6 +302,7 @@ pub fn default_deck() -> Deck {
             row_span: None, column_span: None, icon: None,
             action: ControlAction::ObsScene {
                 scene: scene.to_string(),
+                auto_label: false,
             },
         }
     }
@@ -379,6 +387,29 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/deck.sample.json");
+
+    #[test]
+    fn automatic_obs_labels_round_trip_and_validate_strictly() {
+        use serde_json::json;
+        let mut deck = serde_json::to_value(default_deck()).unwrap();
+        deck["pages"][0]["controls"][0] = json!({
+            "id":"camera", "label":"Camera", "action":"obs-scene", "scene":"Camera", "autoLabel":true
+        });
+        let document = json!({"revision":7, "deck":deck});
+        let restored = decode_document(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), document);
+        for invalid in [json!(null), json!("true"), json!(1)] {
+            let mut value = document.clone();
+            value["deck"]["pages"][0]["controls"][0]["autoLabel"] = invalid;
+            assert!(decode_document(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+        let mut mismatch = document.clone();
+        mismatch["deck"]["pages"][0]["controls"][0]["label"] = json!("Custom");
+        assert!(decode_document(&serde_json::to_vec(&mismatch).unwrap()).is_err());
+        let mut wrong_action = document;
+        wrong_action["deck"]["pages"][0]["controls"][0] = json!({"id":"mic", "label":"Mic", "action":"mic-mute", "autoLabel":true});
+        assert!(decode_document(&serde_json::to_vec(&wrong_action).unwrap()).is_err());
+    }
 
     fn fixture_deck() -> Deck {
         let mut deck: Deck = serde_json::from_str(FIXTURE).expect("fixture is a valid legacy Deck");

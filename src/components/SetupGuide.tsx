@@ -131,8 +131,11 @@ export function SetupGuide({ pageName, canAdd, storageAlert, onFinish, onDismiss
               </fieldset>
               </details>
               <div className="setup-fields">
-                <label className="field"><span>Button label</span><input name="label" value={draft.label} maxLength={40} required onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
-                {draft.action === "obs-scene" ? <label className="field"><span>OBS scene name</span><input name="scene" value={draft.scene} maxLength={40} required onChange={(event) => setDraft({ ...draft, scene: event.target.value })} /></label> : null}
+                <label className="field"><span>{draft.action === "obs-scene" ? "Custom label (optional)" : "Button label"}</span><input name="label" value={draft.action === "obs-scene" && draft.autoLabel ? "" : draft.label} placeholder={draft.action === "obs-scene" ? draft.scene : undefined} maxLength={40} required={draft.action !== "obs-scene"} onChange={(event) => {
+                  const label = event.target.value;
+                  setDraft(draft.action === "obs-scene" ? { ...draft, label: label.trim() ? label : draft.scene, autoLabel: !label.trim() } : { ...draft, label });
+                }} /></label>
+                {draft.action === "obs-scene" ? <label className="field"><span>OBS scene name</span><input name="scene" value={draft.scene} maxLength={40} required onChange={(event) => setDraft({ ...draft, scene: event.target.value, ...(draft.autoLabel ? { label: event.target.value } : {}) })} /></label> : null}
               </div>
               <p className="setup-action-note">{draft.action === "obs-scene" ? "Use an existing scene name. Connect OBS later in Settings." : draft.action === "mic-mute" ? "Controls your default system microphone, not an OBS input. On macOS, devices without mute use saved input levels for reversible software mute." : draft.action === "media-play-pause" ? "System play/pause on macOS and Windows; default MPRIS player on Linux. Sent media keys report an unknown outcome; macOS requires Accessibility permission." : "Controls your default audio output on macOS, Windows, and Linux. Never goes above 100%."}</p>
               <div className="setup-actions"><button type="button" className="button quiet" onClick={() => changeStep("welcome")}><ArrowLeft size={15} aria-hidden="true" /> Back</button><button type="submit" className="button primary" disabled={!valid}>Try this control <ArrowRight size={15} aria-hidden="true" /></button></div>

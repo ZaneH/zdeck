@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultDeck } from "../src/lib/deck";
+import { addControl, createDefaultDeck, findControl, updateControl } from "../src/lib/deck";
 import {
   loadDeck,
   saveDeck,
@@ -66,6 +66,24 @@ describe("deck persistence", () => {
     const result = loadDeck(storage);
     expect(result.status).toBe("loaded");
     expect(result.deck).toEqual(deck);
+  });
+
+  it("remembers automatic and explicit OBS labels across reloads", () => {
+    const storage = new MemoryStorage();
+    const { deck, control } = addControl(createDefaultDeck(), "page_stream", "obs-scene", { scene: "Camera" })!;
+    expect(saveDeck(storage, deck)).toBe(true);
+    let restored = loadDeck(storage);
+    expect(restored.status).toBe("loaded");
+    let edited = updateControl(restored.deck, "page_stream", control.id, { scene: "Gameplay" });
+    expect(findControl(edited, "page_stream", control.id)?.label).toBe("Gameplay");
+    edited = updateControl(edited, "page_stream", control.id, { label: "Gameplay" });
+    expect(saveDeck(storage, edited)).toBe(true);
+    restored = loadDeck(storage);
+    edited = updateControl(restored.deck, "page_stream", control.id, { scene: "Break" });
+    expect(findControl(edited, "page_stream", control.id)?.label).toBe("Gameplay");
+    edited = updateControl(edited, "page_stream", control.id, { label: "" });
+    expect(saveDeck(storage, edited)).toBe(true);
+    expect(findControl(loadDeck(storage).deck, "page_stream", control.id)).toMatchObject({ label: "Break", autoLabel: true });
   });
 
   it("rejects malformed JSON and old versions", () => {

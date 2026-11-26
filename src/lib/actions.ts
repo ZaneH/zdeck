@@ -78,13 +78,17 @@ export function createControl(
         throw new Error("Invalid plugin control configuration.");
       }
       return { id, label, action: kind, pluginId: options.pluginId, pluginAction: options.pluginAction, pluginArgs: { ...options.pluginArgs } };
-    case "obs-scene":
+    case "obs-scene": {
+      const scene = options.scene?.trim() || "Scene 1";
+      const autoLabel = options.autoLabel === true || !options.label?.trim();
       return {
         id,
-        label,
+        label: autoLabel ? scene : label,
         action: kind,
-        scene: options.scene?.trim() || "Scene 1",
+        scene,
+        ...(autoLabel ? { autoLabel: true } : {}),
       };
+    }
     case "mic-mute":
       return { id, label, action: kind };
     case "media-play-pause":
