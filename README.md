@@ -10,7 +10,8 @@ zDeck is a free, MIT-licensed desktop app for arranging buttons and sliders into
 
 ## What you can do
 
-- **Make your own deck.** Add, label, configure and reorder controls; organize them into pages. Use dark or light appearance and choose an accent color.
+- **Make your own deck.** Add, label, configure and reorder controls; organize them into pages and ordered sections. Insert, rename, reorder or remove sections, with optional theme and accent overrides that otherwise follow the deck.
+- **Navigate your sections.** On the phone, swipe left/right between pages and scroll vertically through snapping sections, or use the page tabs and section buttons. Taller sections scroll naturally. On desktop, scroll through sections and use left/right arrow keys between pages when not operating another control. Existing decks migrate automatically; reload an older companion client after upgrading.
 - **Try it safely.** Setup rehearsals and the phone preview simulate presses. Desktop tiles start in **Preview** each session.
 - **Run saved controls.** Explicit desktop **Live** mode needs no phone service. Switch OBS program scenes, or use built-in microphone, volume and media controls on macOS, Windows and Linux.
 - **Use a phone as the deck.** Pair and approve it on the desktop, receive saved deck updates, and run controls from the authenticated phone surface. Revoke access from Settings.

@@ -41,7 +41,7 @@ Keep zDeck available in the background                 // desktop.tray
 
 ## Pages and sections
 
-Status: planned; implementation pending. Existing pages currently contain controls directly.
+Status: implemented with automated migration, persistence, editor and phone-navigation coverage. Version 3 migrates existing pages into one section without changing their controls. Physical-phone gesture verification and native runtime verification on Windows, macOS and Linux remain open; browser checks do not establish native parity.
 
 ```text
 Organize controls into pages and sections              // deck.sections
@@ -71,7 +71,8 @@ Organize controls into pages and sections              // deck.sections
     ├── Migrate each existing page to one section containing its original controls
     ├── Preserve page and control identities, ordering, actions and appearance
     ├── Persist section order, names and appearance when applied, not only on quit
-    ├── Keep sections intact through restart, export / import and companion synchronization
+    ├── Keep sections intact through restart and companion synchronization
+    ├── Future export / import must preserve sections; export / import itself is not part of this feature
     └── Validate section data at import and synchronization boundaries; report failures visibly
 ```
 
