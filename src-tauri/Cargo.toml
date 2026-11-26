@@ -3,7 +3,7 @@ members = ["../crates/zdeck-obs", "../crates/zdeck-schema", "../crates/zdeck-sys
 resolver = "2"
 
 [package]
-name = "deck"
+name = "zDeck"
 version = "0.1.0"
 description = "Deck local editor and phone preview"
 authors = ["Zane Helton"]

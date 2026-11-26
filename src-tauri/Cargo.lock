@@ -836,35 +836,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deck"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "embed-resource",
- "futures-util",
- "getrandom 0.3.4",
- "gtk",
- "http",
- "hyper",
- "hyper-util",
- "keyring",
- "serde",
- "serde_json",
- "sha1_smol",
- "sha2 0.10.9",
- "tauri",
- "tauri-build",
- "tokio",
- "tokio-websockets",
- "url",
- "zdeck-obs",
- "zdeck-plugin-host",
- "zdeck-schema",
- "zdeck-system",
-]
-
-[[package]]
 name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5592,6 +5563,35 @@ dependencies = [
  "quote",
  "syn 3.0.10",
  "synstructure",
+]
+
+[[package]]
+name = "zDeck"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "embed-resource",
+ "futures-util",
+ "getrandom 0.3.4",
+ "gtk",
+ "http",
+ "hyper",
+ "hyper-util",
+ "keyring",
+ "serde",
+ "serde_json",
+ "sha1_smol",
+ "sha2 0.10.9",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tokio-websockets",
+ "url",
+ "zdeck-obs",
+ "zdeck-plugin-host",
+ "zdeck-schema",
+ "zdeck-system",
 ]
 
 [[package]]
