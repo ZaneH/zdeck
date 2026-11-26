@@ -102,6 +102,26 @@ Routine action outcomes live in a collapsed **Activity** disclosure with the las
 
 Both screenshots use the real service with fake action adapters. Settings navigation/grouping, Spotify-specific player targeting, and QR artwork are separate future work.
 
+## Home Assistant refinement
+
+The design plan intentionally reuses zDeck rather than adding a new integration aesthetic: background `#18191b`, surface `#212326`, secondary `#b2b6bc`, primary `#f1f2f3`, configurable focus/accent (fixture `#4cc9f0`), and the existing Geist scale. Left-aligned Inspector fields remain in the existing compact disclosure grid; the deck keeps its shallow keys and established toggle switch/button. The meaningful addition is the reading itself, not extra explanation or status decoration.
+
+New Power controls use observed-state toggles. Existing saved fixed buttons remain fixed; **Presentation → Button (fixed on/off)** exposes the explicit On press selector. The default toggle path has no extra behavior dropdown. Routine explanations moved to shared hover/focus/touch help, identity to optional **Entity details**, and transient success/default/reset/preview-action clutter was removed from plugin settings. Genuine failures remain visible.
+
+The root fix gives Inspector grid/flex descendants a zero minimum width, rather than hiding document overflow. Shared dropdown triggers truncate selected values; options use a three-line friendly-name block, a quieter one-line entity ID, and a reserved first-line checkmark column. Full names/IDs remain accessible through accessible names/descriptions and selected Entity details. Menus constrain themselves to the nearest scrolling/viewport bounds and flip above the trigger when needed. The first screenshot critique caught oversized single-option rows and footer clipping; those were corrected before the final capture.
+
+![Long entity names with aligned wrapped rows, constrained to the Inspector](design/ha-entities.png)
+
+Separate read-only Light / switch state and Temperature controls show observed On/Off or sensor/thermostat current temperature with its unit. Unknown/unavailable is never zero, Off, or an executable read action. Readings carry a checked date/time so yesterday's snapshot cannot look like a new reading. Explicit dashboard Refresh is an observation, works without arming desktop actions, and uses a separate authenticated GET-only phone route; no automatic polling or replay is added. The phone preview only renders the cached snapshot and keeps its local-preview warning.
+
+![Read-only values and established toggle on the phone preview](design/ha-values-phone.png)
+
+![Unbroken long entity identity wraps within the narrow Inspector](design/ha-entity-details-narrow.png)
+
+Owned fake fixtures cover 250+ character friendly names and unbroken IDs, selected/open/wrapped dropdowns, a 260px Inspector, 960/760/390px app widths, known/unknown toggles, fixed On/Off, Celsius/Fahrenheit, unavailable values, and phone rendering. `scripts/ha-ui-smoke.mjs` uses Brave with a fake native adapter: 18 layout cases measure scrollWidth/clientWidth and horizontal/menu viewport bounds, plus Escape/focus return, explicit refresh without action IPC, alternating On→Off targets, and actual Add control defaults. Screenshots and detailed measurements are also written to `/tmp/zdeck-ha-refinement/` by default. Run Vite on 1420 and Storybook on 6007 first; URLs/artifact directory are configurable for the script.
+
+This checkpoint passes 349 frontend unit tests, 479 general browser smoke checks, 75 Storybook browser tests, 21 HA fake-fetch tests, 19 JS SDK tests (including its packed-artifact suite), 16 Python SDK tests, 67 Rust plugin-host tests, 18 schema tests, 36 native-core unit tests, and 41 real-loopback remote-service fixture tests (the HTTPS browser smoke remains ignored). Typecheck, production build and static Storybook build passed; `dist/plugins/home-assistant` was rebuilt after the frontend build. No installed plugin was enabled, real token read, HA/device contacted, dependency installed, registry project changed, or publication performed. These are browser/fake-process results, **not** live HA, physical-phone, signed-native, or Windows/macOS/Linux webview parity verification.
+
 ## Verification and limits
 
 The earlier UI checkpoint passed **54 frontend tests**, **202 browser checks**, TypeScript, production build, and the Tauri debug no-bundle build. The browser suite covers all four rehearsal actions, repeated scene presses, draft validation/back navigation, required practice, save-on-Add, skip/replay persistence, a full page, keyboard activation and focus, radio arrows, reduced motion, light mode, short/narrow layouts, welcome-to-configuration continuity, optional action disclosure, category filtering/keyboard access, backdrop pointer interaction, Settings toggling, brand identity, preview orientation/scrolling, and the existing editing/dialog/slider/offline/update behavior. The coordinator reviewed the DeepSeek worker’s diff/screenshots and independently reran checks; an earlier read-only review’s minor documentation, length-limit, and dead-style findings were also addressed.
