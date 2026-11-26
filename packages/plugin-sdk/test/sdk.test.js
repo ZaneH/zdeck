@@ -32,6 +32,17 @@ test('optional icon packs are bounded and accept only embedded image sources', a
   }
 });
 
+test('a singular plugin identity icon is optional and bounded', async () => {
+  const icon = 'data:image/svg+xml;base64,PHN2Zy8+';
+  const withIcon = { ...manifest, icon };
+  assert.equal(validateManifest(withIcon), withIcon);
+  const { responses } = await session([request('describe')], { manifest: withIcon });
+  assert.equal(responses[0].manifest.icon, icon);
+  for (const bad of [null, 42, 'https://example.com/icon.svg', 'data:text/html;base64,PHN2Zy8+', 'data:image/png;base64,']) {
+    assert.throws(() => validateManifest({ ...manifest, icon: bad }), /Invalid plugin manifest/);
+  }
+});
+
 test('public constants and strict manifest validation', () => {
   assert.equal(validateManifest(manifest), manifest);
   for (const bad of [null, {}, { ...manifest, protocolVersion: 2 }, { ...manifest, executable: '/bin/sh' },

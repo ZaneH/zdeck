@@ -56,6 +56,7 @@ import { enabledPluginManifests } from "./lib/plugin";
 import { PluginSettingsCard } from "./components/PluginSettingsCard";
 import { ActionLibrary } from "./components/ActionLibrary";
 import { BrandMark } from "./components/BrandMark";
+import { effectivePresentation } from "./lib/presentations";
 import { ControlTile } from "./components/ControlTile";
 import { Inspector } from "./components/Inspector";
 import { ObsSettingsCard } from "./components/ObsSettingsCard";
@@ -148,7 +149,7 @@ export default function App() {
   const obs = useObsConsole();
   const system = useSystemConsole();
   const plugin = usePluginConsole();
-  const desktop = useDesktopActions({ native: nativeMode, deck,
+  const desktop = useDesktopActions({ native: nativeMode, deck, plugins: plugin.snapshots,
     editor: route === "editor" && !setupOpen && !nativeLoading && !nativeBlocked,
     savedRevision: nativeSave.phase === "saved" ? nativeSave.revision : null,
   });
@@ -379,6 +380,7 @@ export default function App() {
     return (
       <PhoneDeck
         initialDeck={deck}
+        plugins={plugin.snapshots}
         initialStatus={loadStatus}
         mode={nativeMode ? "native" : "browser"}
       />
@@ -637,21 +639,29 @@ export default function App() {
                   <ControlTile
                     key={control.id}
                     control={control}
+                    plugins={plugin.snapshots}
                     variant="editor"
                     order={!desktop.live ? { index, total: page.controls.length, move: handleMoveControl } : undefined}
                     semantics={desktop.live ? "live" : "preview"}
-                    disabled={desktop.inflight || !!desktop.pending}
+                    disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}
+                    busy={desktop.inflight}
                     volume={previewVolumes[control.id] ?? controlVolume(control)}
                     selected={selectedControlId === control.id}
                     pressed={pressedId === control.id}
                     onPrimary={() => {
                       setSelectedControlId(control.id);
-                      if (desktop.live && control.action !== "volume") void desktop.press(control.id);
+                      if (desktop.live && effectivePresentation(control, plugin.snapshots) === "button") {
+                        void desktop.press(control.id).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
+                      }
                     }}
-                    onVolumeChange={(value) => desktop.live
-                      ? setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }))
-                      : previewVolume(control, value)}
-                    onVolumeCommit={(value) => { if (desktop.live && control.action === "volume") void desktop.press(control.id, value); }}
+                    onVolumeChange={(value) => {
+                      if (control.action !== "volume") return;
+                      if (desktop.live) setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }));
+                      else previewVolume(control, value);
+                    }}
+                    onVolumeCommit={(value) => {
+                      if (desktop.live) void desktop.press(control.id, value).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
+                    }}
                   />
                 ))}
                 {page.controls.length === 0 ? (
@@ -673,7 +683,7 @@ export default function App() {
               </p> : <p className="preview-feedback" title={desktop.live ? undefined : obsPill.title} role="status" aria-live="polite">
                 {desktop.live ? "Live is ready. Only saved control IDs are sent; nothing runs until you press." : previewNotice ?? obsPill.text}
               </p>}
-              {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check()}>Check result</button> : null}
+              {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check().then(() => plugin.refreshSnapshots())}>Check result</button> : null}
             </div>
           </section>
 

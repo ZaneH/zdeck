@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zdeck-plugin-sdk"
+version = "0.1.0"
+description = "Python SDK for trusted local zDeck stdio plugins"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "zDeck contributors"}]
+dependencies = []
+
+[tool.setuptools]
+packages = ["zdeck_plugin_sdk"]
+
+[tool.setuptools.package-data]
+zdeck_plugin_sdk = ["py.typed"]

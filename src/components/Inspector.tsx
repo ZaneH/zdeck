@@ -1,3 +1,5 @@
+import { compatiblePresentations, effectivePresentation } from "../lib/presentations";
+import type { Presentation } from "../lib/types";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronDown, Trash2 } from "lucide-react";
@@ -90,14 +92,22 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
   const busy = pluginEntry(plugin.busy, control.pluginId) === true;
   const action = pluginControlAction(snapshot, control);
   const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(control.pluginArgs).map(([key, n]) => [key, String(n)])));
-  const validDraft = action && Object.entries(action.config).every(([key, field]) => drafts[key]?.trim()
-    && Number.isSafeInteger(Number(drafts[key])) && Number(drafts[key]) >= field.minimum && Number(drafts[key]) <= field.maximum);
+  const validDraft = action && Object.entries(action.config).every(([key, field]) => field.type === "boolean"
+    ? ["true", "false"].includes(drafts[key]) : drafts[key]?.trim()
+      && Number.isSafeInteger(Number(drafts[key])) && Number(drafts[key]) >= field.minimum && Number(drafts[key]) <= field.maximum
+      && (!field.control || (Number(drafts[key]) - field.minimum) % field.control.step === 0));
   return <div className="native-control">
     <p>{control.pluginId} · {control.pluginAction}</p>
-    {action ? Object.entries(action.config).map(([key, field]) => <label className="field" key={key}>
+    {action ? Object.entries(action.config).map(([key, field]) => field.type === "boolean" ? <label className="field" key={key}>
+      <span>{key}</span><select value={drafts[key] ?? "false"} disabled={busy} onChange={(event) => {
+        const text = event.target.value; setDrafts((current) => ({ ...current, [key]: text }));
+        onPatch({ pluginArgs: { ...control.pluginArgs, [key]: text === "true" } });
+      }}><option value="false">Off</option><option value="true">On</option></select>
+    </label> : <label className="field" key={key}>
       <span>{key} ({field.minimum}–{field.maximum})</span>
-      <input type="number" step={1} min={field.minimum} max={field.maximum} value={drafts[key] ?? ""}
-        aria-invalid={!drafts[key]?.trim() || !Number.isSafeInteger(Number(drafts[key])) || Number(drafts[key]) < field.minimum || Number(drafts[key]) > field.maximum}
+      <input type="number" step={field.control?.step ?? 1} min={field.minimum} max={field.maximum} value={drafts[key] ?? ""}
+        aria-invalid={!drafts[key]?.trim() || !Number.isSafeInteger(Number(drafts[key])) || Number(drafts[key]) < field.minimum || Number(drafts[key]) > field.maximum
+          || !!field.control && (Number(drafts[key]) - field.minimum) % field.control.step !== 0}
         disabled={busy} onChange={(event) => {
           const text = event.target.value;
           setDrafts((current) => ({ ...current, [key]: text }));
@@ -112,9 +122,9 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
     <div className="native-actions"><button type="button" className="button primary"
       disabled={!plugin.native || busy || !validDraft || !canRunPlugin(snapshot, control)}
       onClick={() => void plugin.execute(control)}>{busy ? "Request pending…" : "Run plugin action"}</button></div>
-    <p className="field-note">Runs on this computer. Arguments are saved button configuration, not a phone slider. No automatic retry. Preview press never runs the plugin.</p>
+    <p className="field-note">Runs on this computer. Preview never runs the plugin. No automatic retry.</p>
     {plugin.completedIds[control.pluginId] === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
-    {action && (!validDraft || !canRunPlugin(snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required integer within its declared bounds.</p> : null}
+    {action && (!validDraft || !canRunPlugin(snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required value within its declared contract.</p> : null}
     <PluginErrorNotice error={pluginEntry(plugin.errors, control.pluginId) ?? snapshot.lastError} />
   </div>;
 }
@@ -188,7 +198,7 @@ export function Inspector({
             </label>
 
             <details className="icon-picker action-picker">
-              <summary><ActionIcon kind={control.action} size={20} /><span>Action</span>
+              <summary><span>Action</span>
                 <span className="icon-picker-status">{control.action === "plugin" ? control.pluginId : ACTION_CATALOG.find((action) => action.kind === control.action)?.name}</span>
                 <ChevronDown className="icon-picker-toggle" size={16} aria-hidden="true" />
               </summary>
@@ -203,6 +213,13 @@ export function Inspector({
               </div>
             </details>
 
+            <label className="field"><span>Presentation</span>
+              <select value={effectivePresentation(control, plugin.snapshots)} onChange={(event) => onPatch({ presentation: event.target.value as Presentation })}>
+                {compatiblePresentations(control, plugin.snapshots).map((value) => <option key={value} value={value}>
+                  {{ button: "Button", slider: "Slider", dial: "Dial", "toggle-switch": "Toggle switch", "toggle-button": "Toggle button" }[value]}
+                </option>)}
+              </select>
+            </label>
             <IconPicker key={control.id} control={control} manifests={enabledPluginManifests(plugin.snapshots)} onPatch={onPatch} />
 
               </div>
@@ -210,15 +227,16 @@ export function Inspector({
             <details className="inspector-section" open>
               <summary className="disclosure">Layout</summary>
               <div className="inspector-section-body span-fields">
-                {([['rowSpan', 'Rows', MAX_ROW_SPAN], ['columnSpan', 'Columns', MAX_COLUMN_SPAN]] as const).map(([key, label, maximum]) =>
+                {([['columnSpan', 'Width', MAX_COLUMN_SPAN], ['rowSpan', 'Height', MAX_ROW_SPAN]] as const).map(([key, label, maximum]) =>
                   <label className="field" key={key}><span>{label}</span><input type="number" min={1} max={maximum} step={1}
-                    key={`${control.id}-${key}-${control[key] ?? 1}`} defaultValue={control[key] ?? 1}
-                    onBlur={(event) => {
+                    key={`${control.id}-${key}`} defaultValue={control[key] ?? 1}
+                    onChange={(event) => {
                       const value = Number(event.currentTarget.value);
                       if (isSpan(value, maximum)) onPatch({ [key]: value });
-                      else event.currentTarget.value = String(control[key] ?? 1);
+                    }}
+                    onBlur={(event) => {
+                      event.currentTarget.value = String(control[key] ?? 1);
                     }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} /></label>)}
-                <p className="field-note">Columns fit the available grid (up to 4). Rows: 1–24.</p>
               </div>
             </details>
             <details className="inspector-section" open>

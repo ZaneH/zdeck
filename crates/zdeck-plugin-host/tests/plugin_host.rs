@@ -105,7 +105,7 @@ async fn registry_routes_two_plugins_and_isolates_failure_and_disabling() {
     assert_eq!(f.calls("alpha").len(),1);assert_eq!(f.calls("beta").len(),1);
     assert_eq!(registry.execute("alpha".into(),"go".into(),json!({"n":7})).await.unwrap().state.unwrap()["count"],1);
     let error=registry.execute("beta".into(),"go".into(),json!({"n":2})).await.unwrap_err();assert_eq!(error.outcome,Outcome::Unknown);
-    assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Stopped);
+    assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Disconnected,"a failed session is not retained");
     assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Connected);
     registry.disconnect("beta").await.unwrap();assert_eq!(registry.snapshots().await.len(),1);
     assert_eq!(registry.state("alpha").await.unwrap().state.unwrap()["count"],1);
@@ -134,16 +134,22 @@ async fn registry_independent_io_duplicate_enable_and_cancellation_do_not_leak_h
 }
 
 #[tokio::test]
-async fn registry_capacity_is_bounded_and_disabled_slots_are_reclaimed() {
+async fn running_capacity_is_bounded_while_failed_connections_do_not_linger() {
     use zdeck_plugin_host::plugin::PluginRegistry;
-    let registry=PluginRegistry::default();let missing=std::env::temp_dir().join("zdeck-no-such-runtime").to_str().unwrap().to_owned();
+    let f=RegistryFixture::new();
+    let registry=PluginRegistry::with_capacity(2);let missing=std::env::temp_dir().join("zdeck-no-such-runtime").to_str().unwrap().to_owned();
     let entry=std::env::temp_dir().join("zdeck-no-such-entry.js").to_str().unwrap().to_owned();
     for i in 0..16 {assert_eq!(registry.connect(&format!("p{i}"),missing.clone(),entry.clone()).await.unwrap_err().code,Some("runtime_missing"));}
-    assert_eq!(registry.snapshots().await.len(),16);
-    assert_eq!(registry.connect("overflow",missing.clone(),entry.clone()).await.unwrap_err().code,Some("capacity"));
-    for i in 0..32 {let id=format!("new{i}");registry.disconnect(if i==0 {"p0"} else {"unused"}).await.unwrap();registry.connect(&id,missing.clone(),entry.clone()).await.unwrap_err();registry.disconnect(&id).await.unwrap();}
-    assert_eq!(registry.snapshots().await.len(),15);
-    for i in 1..16 {registry.disconnect(&format!("p{i}")).await.unwrap();}assert!(registry.snapshots().await.is_empty());
+    assert!(registry.snapshots().await.is_empty(),"failed connections must not retain sessions");
+    registry.connect("one",f.node.clone(),f.entry("one","ok")).await.unwrap();
+    registry.connect("two",f.node.clone(),f.entry("two","ok")).await.unwrap();
+    let overflow=registry.connect("three",f.node.clone(),f.entry("three","ok")).await.unwrap_err();
+    assert_eq!(overflow.code,Some("capacity"));assert!(overflow.hint.contains("Disable"));
+    registry.disconnect("one").await.unwrap();
+    registry.connect("three",f.node.clone(),f.entry("three","ok")).await.unwrap();
+    registry.disconnect("two").await.unwrap();registry.disconnect("three").await.unwrap();
+    assert!(registry.snapshots().await.is_empty());
+    f.reaped("one");f.reaped("two");f.reaped("three");
 }
 
 #[tokio::test]

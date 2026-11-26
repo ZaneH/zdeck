@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { RefObject } from "react";
 import { Plus, Search, X } from "lucide-react";
 import { ACTION_CATALOG } from "../lib/actions";
-import { pluginDefaults } from "../lib/plugin";
+import { pluginControlField, pluginDefaults } from "../lib/plugin";
 import type { PluginManifest } from "../lib/plugin";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import type { ActionKind, ControlOptions } from "../lib/types";
@@ -41,7 +41,8 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifests
     ...ACTION_CATALOG.map((action) => ({ ...action, options: undefined as ControlOptions | undefined })),
     ...manifests.flatMap((manifest) => manifest.actions.map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
       description: `${manifest.id} · ${action.id}`, note: "Trusted local plugin", defaultLabel: action.title,
-      options: { label: action.title, pluginId: manifest.id, pluginAction: action.id, pluginArgs: pluginDefaults(action) },
+      options: { label: action.title, pluginId: manifest.id, pluginAction: action.id, pluginArgs: pluginDefaults(action),
+        ...(pluginControlField(action)?.[1].type === "integer" ? { presentation: "slider" as const } : {}) },
     }))),
   ];
   const filtered = catalog.filter(

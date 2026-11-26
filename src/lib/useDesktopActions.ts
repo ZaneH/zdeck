@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { effectivePresentation, presentationCompatible, validControlValue } from "./presentations";
+import type { PluginSnapshots } from "./plugin";
 import { isDeck } from "./deck";
 import { desktopRunControl, toDesktopActionError } from "./nativeActions";
 import type { DesktopCommand, DesktopResult } from "./nativeActions";
 import type { Deck } from "./types";
 
-export interface DesktopContext { native: boolean; editor: boolean; deck: Deck; savedRevision: number | null }
+export interface DesktopContext { native: boolean; editor: boolean; deck: Deck; savedRevision: number | null; plugins?: PluginSnapshots }
 export function desktopReady(context: DesktopContext): boolean {
   return context.native && context.editor && context.savedRevision !== null && Number.isSafeInteger(context.savedRevision)
     && context.savedRevision >= 0 && isDeck(context.deck);
@@ -23,6 +25,7 @@ interface ActionView {
 export class DesktopActions {
   private view: ActionView = { live: false, deck: null, revision: null, inflight: false, result: null, error: null, pending: null };
   private listeners = new Set<() => void>();
+  private queued: { controlId: string; value: number; deck: Deck; revision: number | null } | null = null;
   private invalidated: { deck: Deck; revision: number | null } | null = null;
   constructor(private context: () => DesktopContext, private dispatch = desktopRunControl,
     private newId = () => crypto.randomUUID() as string) {}
@@ -33,7 +36,7 @@ export class DesktopActions {
     const context = this.context();
     return this.view.live && desktopReady(context) && this.view.deck === context.deck && this.view.revision === context.savedRevision;
   }
-  preview = () => { if (this.view.live) this.update({ live: false }); };
+  preview = () => { this.queued = null; if (this.view.live) this.update({ live: false }); };
   invalidate = () => {
     const context = this.context();
     this.invalidated = { deck: context.deck, revision: context.savedRevision };
@@ -46,10 +49,18 @@ export class DesktopActions {
     this.update({ live: true, deck: context.deck, revision: context.savedRevision });
   };
   press = async (controlId: string, value?: number) => {
-    if (!this.isLive() || this.view.inflight || this.view.pending) return;
+    if (!this.isLive()) return;
     const context = this.context();
     const control = context.deck.pages.flatMap((page) => page.controls).find((item) => item.id === controlId);
-    if (!control || (value !== undefined && (control.action !== "volume" || !Number.isFinite(value) || value < 0 || value > 100))) return;
+    if (!control || !presentationCompatible(control, context.plugins)
+      || (value === undefined ? effectivePresentation(control, context.plugins) !== "button"
+        : !validControlValue(control, value, context.plugins))) return;
+    if (this.view.inflight || this.view.pending) {
+      if (value !== undefined && ["slider", "dial"].includes(effectivePresentation(control, context.plugins))) {
+        this.queued = { controlId, value, deck: context.deck, revision: context.savedRevision };
+      }
+      return;
+    }
     let command: DesktopCommand;
     try { command = { commandId: this.newId(), revision: context.savedRevision!, controlId, ...(value === undefined ? {} : { value }) }; }
     catch { this.update({ live: false, error: "Secure command IDs are unavailable. Live controls are disabled." }); return; }
@@ -72,6 +83,13 @@ export class DesktopActions {
       this.update({ live: false, pending: null, result: error.outcome === "unknown"
         ? { id: command.commandId, state: "unknown", message: error.message } : null, error: error.message });
     } finally { this.update({ inflight: false }); }
+    const queued = this.queued;
+    if (this.view.pending) return;
+    this.queued = null;
+    if (queued && this.view.result?.state === "confirmed" && !this.view.error && this.isLive()
+      && queued.deck === this.context().deck && queued.revision === this.context().savedRevision) {
+      await this.press(queued.controlId, queued.value);
+    }
   }
 }
 

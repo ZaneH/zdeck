@@ -22,6 +22,8 @@ function PluginExample({ initial = "ready", width = 720 }: { initial?: Fixture; 
   const [catalog, setCatalog] = useState<PluginCatalog>(() => ({ directory: "/example/zdeck/plugins", truncated: false,
     node: initial === "runtime-missing" ? { status: "not_found", version: null, path: null } : { status: "detected", version: "22.18.0", path: "/example/bin/node" },
     plugins: initial === "nothing-installed" || initial === "runtime-missing" ? [] : ["spotify", "notes"].map((id) => ({ id, name: id === "spotify" ? "Spotify" : "Notes", version: "0.1.0", protocolVersion: 1,
+      icon: id === "spotify" ? "data:image/svg+xml;base64,PHN2Zy8+" : null, trusted: initial === "two-enabled" && id === "notes",
+      identity: initial === "invalid-sdk" && id === "spotify" ? null : "0123456789abcdef".repeat(4),
       status: initial === "invalid-sdk" && id === "spotify" ? "invalid" : "ready", message: initial === "invalid-sdk" && id === "spotify" ? "SDK symlink/source layout. Copy the complete packaged folder, including node_modules; do not use npm install as distribution repair." : null })) }));
   const [snapshots, setSnapshots] = useState<PluginSnapshots>((): PluginSnapshots => initial === "two-enabled" || initial === "one-failed" || initial === "long-content" ? {
     spotify: initial === "one-failed" ? { status: "stopped", manifest: demoManifests.spotify, state: null, lastError: toPluginError({ kind: "timeout", outcome: "unknown" }) }
@@ -35,9 +37,11 @@ function PluginExample({ initial = "ready", width = 720 }: { initial?: Fixture; 
   const plugin: PluginConsole = {
     native: true, snapshots, catalog, catalogError: null, catalogBusy: false, loading: false, sessionsReady: true,
     busy: {}, errors: {}, diagnostics, completedIds: {}, trustEpoch, catalogEpoch,
+    refreshSnapshots: async () => {},
     refreshCatalog: async () => { setCatalogEpoch((n) => n + 1); setNote("Demo refresh: pending trust cleared; enabled sessions preserved."); },
     openDirectory: async () => { setCatalogEpoch((n) => n + 1); setNote("Demo only: no folder was opened."); },
-    enable: async (id, trusted) => { if (!trusted) return; reset(id); setSnapshots((current) => ({ ...current, [id]: { status: "connected", manifest: demoManifests[id], state: null, lastError: null } })); setNote(`Demo enabled ${id}; no process launched.`); },
+    trust: async (id, _identity) => { reset(id); setCatalog((current) => ({ ...current, plugins: current.plugins.map((entry) => entry.id === id ? { ...entry, trusted: true } : entry) })); setNote(`Demo trusted ${id}; no trust was persisted.`); return true; },
+    enable: async (id) => { reset(id); setSnapshots((current) => ({ ...current, [id]: { status: "connected", manifest: demoManifests[id], state: null, lastError: null } })); setNote(`Demo enabled ${id}; no process launched.`); },
     readState: async (id) => { reset(id); setSnapshots((current) => ({ ...current, [id]: { ...current[id], state: id === "spotify" ? demoObserved : null } })); },
     disconnect: async (id) => { reset(id); setSnapshots((current) => ({ ...current, [id]: EMPTY_PLUGIN })); setNote(`Demo disabled ${id}; other plugins unchanged.`); },
     execute: async () => { setNote("Demo only: no action executed."); },
@@ -71,3 +75,26 @@ const inspectState: Story["play"] = async ({ canvasElement }) => {
 export const LongActionsAndState: Story = { args: { initial: "long-content" }, play: inspectState };
 export const NarrowActionsAndState: Story = { args: { initial: "long-content", width: 320 }, play: inspectState };
 export const NarrowEmptyState: Story = { args: { initial: "two-enabled", width: 320 }, play: inspectState };
+export const TrustDialogAndThumbnail: Story = { args: { initial: "ready" }, play: async ({ canvasElement }) => {
+  const thumbnail = canvasElement.querySelector<HTMLImageElement>(`[data-plugin-id=spotify] .plugin-thumbnail img`);
+  if (thumbnail?.getAttribute("src")?.startsWith("data:image/svg+xml") !== true) {
+    throw new Error("A plugin-provided identity thumbnail must render as a bounded embedded image.");
+  }
+  const fallback = canvasElement.querySelector(`[data-plugin-id=notes] .plugin-thumbnail svg`);
+  if (!fallback) throw new Error("A plugin without an icon must render a generic fallback.");
+  canvasElement.querySelector<HTMLButtonElement>(`[data-plugin-id=spotify] .plugin-row-actions > button`)?.click();
+  const dialog = canvasElement.querySelector<HTMLDialogElement>(`[data-plugin-id=spotify] dialog`);
+  if (!dialog?.open) throw new Error("Enable must open a confirmation dialog rather than enabling directly.");
+  if (!dialog.textContent?.includes("Trust and enable") || !dialog.textContent.includes("not a sandbox")) {
+    throw new Error("The trust dialog must offer Trust and enable and explain local code risk.");
+  }
+  dialog.querySelector<HTMLButtonElement>("button.secondary")?.click();
+  if (dialog.open) throw new Error("Cancel must dismiss the trust dialog.");
+}};
+export const PluginErrorWithoutStripe: Story = { args: { initial: "one-failed" }, play: async ({ canvasElement }) => {
+  const alert = canvasElement.querySelector<HTMLElement>(`[data-plugin-id=spotify] .settings-error`);
+  if (!alert || alert.getAttribute("role") !== "alert") throw new Error("A plugin error must remain a visible alert.");
+  const style = getComputedStyle(alert);
+  if (style.borderLeftWidth !== "0px") throw new Error("Plugin errors must not carry a colored left stripe.");
+  if (parseFloat(style.paddingTop) < 10) throw new Error("Plugin errors need readable padding.");
+}};

@@ -54,7 +54,7 @@ export function validDesktopCommand(value: DesktopCommand): boolean {
   return record(value) && ["commandId", "revision", "controlId"].every((key) => Object.hasOwn(value, key))
     && Object.keys(value).every((key) => ["commandId", "revision", "controlId", "value"].includes(key))
     && id(value.commandId) && id(value.controlId) && Number.isSafeInteger(value.revision) && value.revision >= 0
-    && (!Object.hasOwn(value, "value") || (typeof value.value === "number" && Number.isFinite(value.value) && value.value >= 0 && value.value <= 100));
+    && (!Object.hasOwn(value, "value") || (typeof value.value === "number" && Number.isFinite(value.value) && Math.abs(value.value) <= Number.MAX_SAFE_INTEGER));
 }
 export async function desktopRunControl(command: DesktopCommand): Promise<DesktopResult> {
   if (!nativeAvailable()) throw { code: "unavailable", message: "Live controls require the desktop app.", outcome: "not_started" } satisfies DesktopActionError;

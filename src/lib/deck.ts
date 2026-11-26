@@ -8,6 +8,7 @@ import type {
   ControlOptions,
   Deck,
   Page,
+  Presentation,
   Theme,
 } from "./types";
 import { actionDefinition, clampVolume, createControl, newId } from "./actions";
@@ -122,7 +123,10 @@ function patchControl(control: Control, patch: ControlPatch): Control {
   const icon = patch.icon === undefined ? control.icon : patch.icon;
   if (patch.rowSpan !== undefined && !isSpan(patch.rowSpan, MAX_ROW_SPAN)) return control;
   if (patch.columnSpan !== undefined && !isSpan(patch.columnSpan, MAX_COLUMN_SPAN)) return control;
+  const presentation = actionChanged ? undefined : patch.presentation ?? control.presentation;
+  if (presentation !== undefined && !validPresentation(action, presentation)) return control;
   const base = {
+    ...(presentation ? { presentation } : {}),
     ...(patch.rowSpan !== undefined || control.rowSpan !== undefined ? { rowSpan: patch.rowSpan ?? control.rowSpan } : {}),
     ...(patch.columnSpan !== undefined || control.columnSpan !== undefined ? { columnSpan: patch.columnSpan ?? control.columnSpan } : {}),
     ...(icon ? { icon } : {}),
@@ -296,6 +300,11 @@ export function isAccent(value: unknown): value is Accent {
   return ACCENTS.some((accent) => accent.value === value);
 }
 
+function validPresentation(action: unknown, presentation: unknown): presentation is Presentation {
+  return presentation === "button" || (action === "volume" && (presentation === "slider" || presentation === "dial"))
+    || (action === "plugin" && ["slider", "dial", "toggle-switch", "toggle-button"].includes(presentation as string));
+}
+
 function isControl(value: unknown): value is Control {
   if (!isRecord(value)) return false;
   if (typeof value.id !== "string" || !value.id) return false;
@@ -304,7 +313,8 @@ function isControl(value: unknown): value is Control {
   if (Object.hasOwn(value, "icon") && !isControlIcon(value.icon)) return false;
   if (Object.hasOwn(value, "rowSpan") && !isSpan(value.rowSpan, MAX_ROW_SPAN)) return false;
   if (Object.hasOwn(value, "columnSpan") && !isSpan(value.columnSpan, MAX_COLUMN_SPAN)) return false;
-  const fields = ["id", "label", "action", ...["icon", "rowSpan", "columnSpan"].filter((key) => Object.hasOwn(value, key))];
+  if (Object.hasOwn(value, "presentation") && !validPresentation(value.action, value.presentation)) return false;
+  const fields = ["id", "label", "action", ...["icon", "rowSpan", "columnSpan", "presentation"].filter((key) => Object.hasOwn(value, key))];
   switch (value.action) {
     case "plugin":
       return onlyFields(value, [...fields, "pluginId", "pluginAction", "pluginArgs"])

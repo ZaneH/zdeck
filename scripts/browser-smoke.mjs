@@ -588,16 +588,34 @@ try {
   const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
   check('keyboard selection of a position reorders the control', keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
 
-  // Drag handlers expose source/target feedback and never invoke the tile action.
-  check('drag handle and drop target provide clear feedback', await editor.eval("(() => { const source = document.querySelectorAll('.control-tile')[0], target = document.querySelectorAll('.control-tile')[1]; window.__reorderData = new DataTransfer(); source.querySelector('.tile-order summary').dispatchEvent(new DragEvent('dragstart', { bubbles:true, dataTransfer:window.__reorderData })); target.dispatchEvent(new DragEvent('dragover', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); return window.__reorderData.getData('application/x-zdeck-control') !== ''; })()") && await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  // Real pointer input catches failures that synthetic native drag events miss.
+  await editor.eval("document.querySelector('.control-tile').scrollIntoView({block:'center'})");
+  await editor.send('Page.bringToFront');
+  const reorderGrip = await editor.eval(rectOf('.control-tile .tile-order summary'));
+  const reorderTarget = await editor.eval(rectOf('.control-tile:nth-child(2)'));
+  await editor.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: reorderGrip.cx, y: reorderGrip.cy, button: 'left', buttons: 1, clickCount: 1 });
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderGrip.cx + 10, y: reorderGrip.cy, button: 'left', buttons: 1 });
+  await editor.waitFor("!!document.querySelector('.is-dragging')");
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 1 });
+  check('drag handle and drop target provide clear feedback', await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  check('placement preview uses a solid translucent fill and grabbing cursor', await editor.eval("(() => { const target = document.querySelector('.is-drop-target'); const preview = getComputedStyle(target, '::after'); return preview.borderTopStyle === 'solid' && preview.borderTopWidth === '3px' && preview.backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(target).cursor === 'grabbing'; })()"));
   await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
-  await editor.eval("document.querySelector('.is-drop-target').dispatchEvent(new DragEvent('drop', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); document.querySelector('.is-dragging .tile-order summary').dispatchEvent(new DragEvent('dragend', { bubbles:true, dataTransfer:window.__reorderData }));");
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
   check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-footer').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
   await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '0'));
+  const clickGrip = await editor.eval(rectOf('.control-tile.is-selected .tile-order summary'));
+  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
+  check('clicking the grip without dragging opens the position menu', await editor.waitFor("document.querySelector('.control-tile.is-selected .tile-order').open"));
+  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
 
   // Spans persist without forcing extra implicit columns on narrower grids.
-  await editor.eval(setValue('.span-fields label:first-child input', '2'));
-  await editor.eval(setValue('.span-fields label:nth-child(2) input', '4'));
+  check('action dropdown header has no action icon', await editor.eval("!document.querySelector('.action-picker > summary .lucide:not(.icon-picker-toggle)')"));
+  check('layout omits the redundant note', await editor.eval("!document.querySelector('.span-fields .field-note')"));
+  check('sizing uses Width and Height without renaming persisted spans', await editor.eval("[...document.querySelectorAll('.span-fields label > span')].map(n => n.textContent).join('|') === 'Width|Height'"));
+  await typeInput(editor, '.span-fields label:first-child input', '4');
+  check('width updates immediately without losing focus', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridColumnStart === 'span 4' && document.activeElement === document.querySelector('.span-fields label:first-child input')"));
+  await typeInput(editor, '.span-fields label:nth-child(2) input', '2');
+  check('height updates immediately without losing focus', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridRowStart === 'span 2' && document.activeElement === document.querySelector('.span-fields label:nth-child(2) input')"));
   check('editor honors configured row and column spans', await editor.waitFor("getComputedStyle(document.querySelector('.control-tile.is-selected')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.control-tile.is-selected')).gridColumnStart === 'span 4'"));
   await designPhone.eval(clickText('.phone-page-tab', 'Stream'));
   check('phone renderer honors rows and clamps columns in portrait', await designPhone.waitFor("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridRowStart === 'span 2' && getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 2'"));
@@ -605,7 +623,7 @@ try {
   check('phone renderer restores saved column span in landscape', await designPhone.eval("getComputedStyle(document.querySelector('.phone-grid .control-tile')).gridColumnStart === 'span 4' && document.documentElement.scrollWidth <= innerWidth"));
   await designPhone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await editor.eval(setValue('.span-fields label:first-child input', '0'));
-  check('invalid span restores the last valid integer', await editor.eval("document.querySelector('.span-fields input').value === '2'"));
+  check('invalid span restores the last valid integer', await editor.eval("document.querySelector('.span-fields input').value === '4'"));
   await editor.reload();
   await editor.waitFor("!!document.querySelector('.control-tile')");
   check('layout spans survive reload', await editor.eval("getComputedStyle(document.querySelector('.control-tile')).gridRowStart === 'span 2'"));
@@ -707,7 +725,7 @@ try {
   check("welcome rehearsal choice carries into build", await firstRun.eval("document.querySelectorAll('.setup-choice input').length === 4 && document.querySelector('.setup-choice input:checked').value === 'volume' && document.querySelector('input[name=\"label\"]').value === 'Volume' && !document.querySelector('input[name=\"scene\"]')"));
   check("configuration shows the chosen action without asking for a second selection", await firstRun.eval("!document.querySelector('.setup-action-change').open && document.querySelector('.setup-action-change summary').textContent.includes('Volume slider')"));
   await chooseSetupAction(firstRun, 'obs-scene');
-  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Scene 1' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === '' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
   await firstRun.eval("[...document.querySelectorAll('.setup-choice input')].find((el) => el.value === 'obs-scene').focus()");
   await pressKey(firstRun, "ArrowRight", "ArrowRight", 39);
   check("arrow keys move through the action radios", await firstRun.waitFor("document.querySelector('.setup-choice input:checked').value === 'mic-mute' && document.querySelector('input[name=\"label\"]').value === 'Mic mute' && !document.querySelector('input[name=\"scene\"]')"));
@@ -732,7 +750,7 @@ try {
   await chooseSetupAction(firstRun, 'obs-scene');
 
   await firstRun.eval(setValue('input[name="label"]', ''));
-  check("blank label blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"label\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  check("blank OBS label allows the scene name to supply its title", await firstRun.eval("!document.querySelector('.setup-fields input[name=\"label\"]').required && !document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
   await firstRun.eval(setValue('input[name="label"]', 'Practice scene'));
   await firstRun.eval(setValue('input[name="scene"]', ''));
   check("blank scene blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"scene\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
@@ -855,9 +873,12 @@ try {
     window.__pluginCalls = [];
     window.__pluginArgs = null;
     window.__pluginsInstalled = false;
+    window.__trustedPlugins = [];
     window.__runtimeStatus = 'detected';
     const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
-      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}}
+      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}},
+      {id:'level', title:'Generic level', config:{amount:{type:'integer',minimum:-20,maximum:200,control:{step:5}}}},
+      {id:'power', title:'Generic power', config:{enabled:{type:'boolean',control:{stateKey:'powered'}}}}
     ], icons:[
       {id:'badge', title:'Media badge', category:'Media', src:${JSON.stringify(smokeSvgSource)}},
       {id:'logo', title:'Logo', category:'Brand', src:${JSON.stringify(smokePngSource)}},
@@ -887,6 +908,8 @@ try {
         if (Object.keys(args).some(k => !['commandId','revision','controlId','value'].includes(k)) || args.revision !== savedRevision) throw {code:'invalid_request',message:'wrong envelope'};
         if (window.__holdDesktop) await new Promise(resolve => { window.__finishDesktop = resolve; });
         if (window.__desktopError) throw {code:window.__desktopError,message:'raw secret diagnostic'};
+        const control = savedDeck.pages.flatMap(p => p.controls).find(c => c.id === args.controlId);
+        if (control?.pluginAction === 'power') cachedPlugins.spotify = {...cachedPlugins.spotify, state:{powered:args.value === 1}};
         return {id:args.commandId,state:window.__desktopResult || 'confirmed',message:'Safe backend result.'};
       }
       if (command.startsWith('plugin_')) window.__pluginCalls.push({command,args});
@@ -896,13 +919,14 @@ try {
         directory:'/Users/fixture/.config/zdeck/plugins',
         node:window.__runtimeStatus === 'not_found' ? {status:'not_found',version:null,path:null} : {status:'detected',version:'22.18.0',path:'/detected/node'},
         plugins:window.__pluginsInstalled ? [
-          {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
-          {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
-          {id:'broken',name:'broken',version:'0.1.0',protocolVersion:1,status:'invalid',message:'The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.'},
-          {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.'}
-        ].filter(entry => !window.__removedPlugins.includes(entry.id)) : [], truncated:false
+          {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null,icon:'data:image/svg+xml;base64,PHN2Zy8+',trusted:window.__trustedPlugins.includes('spotify'),identity:'0123456789abcdef'.repeat(4)},
+          {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null,icon:null,trusted:window.__trustedPlugins.includes('other'),identity:'0123456789abcdef'.repeat(4)},
+          {id:'broken',name:'broken',version:'0.1.0',protocolVersion:1,status:'invalid',message:'The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.',icon:null,trusted:false,identity:null},
+          {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.',icon:null,trusted:false,identity:null}
+        ].filter(entry => !window.__removedPlugins.includes(entry.id)) : []
       }; if (window.__holdCatalog) await new Promise(resolve => { window.__finishCatalog = resolve; }); return catalog; }
       if (command === 'plugin_open_directory') return null;
+      if (command === 'plugin_trust') { if (!/^[a-f0-9]{64}$/.test(args.expectedIdentity)) throw {kind:'unavailable',code:'stale_identity',outcome:'not_started'}; if (!window.__trustedPlugins.includes(args.pluginId)) window.__trustedPlugins.push(args.pluginId); return null; }
       if (command === 'plugin_enable') {
         if (!['spotify','other'].includes(args.pluginId) || Object.keys(args).length !== 1) throw new Error('Invalid enable arguments');
         if (window.__holdEnable === args.pluginId) await new Promise(resolve => { window.__finishEnable = resolve; });
@@ -916,7 +940,7 @@ try {
       if (command === 'plugin_execute') {
         window.__pluginArgs = args;
         if (window.__failPlugin && args.pluginId === 'spotify') throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
-        return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
+        return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.actionId === 'power' ? {powered:args.args.enabled} : args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
       }
       if (command === 'remote_status') return status();
       if (command === 'remote_list_devices') return [];
@@ -1095,7 +1119,7 @@ try {
   check('deliberate stop persists native desired off', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === false"));
   await admin.reload();
   check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   await admin.eval("location.hash = '#/settings/general'");
   await admin.waitFor("!document.querySelector('[aria-label=General][role=region]').hidden");
   check('close-to-tray defaults off', await admin.eval("!document.querySelector('[aria-describedby=close-to-tray-help]').checked"));
@@ -1122,10 +1146,9 @@ try {
   const row = (id) => `.plugin-row[data-plugin-id="${id}"]`;
   check('refresh discovers inset plugin rows without a selection dropdown', await admin.waitFor("document.querySelectorAll('.plugin-row').length === 4 && !document.querySelector('.plugin-settings select')"));
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  check('requesting Enable opens unchecked row consent without launching', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-confirm .button.primary').disabled && !window.__adminCalls.includes('plugin_enable')"));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
-  check('refresh clears pending trust without enabling any row', await admin.waitFor("!document.querySelector('.plugin-confirm')") && await admin.eval("!window.__adminCalls.includes('plugin_enable')"));
+  check('requesting Enable opens an accessible trust dialog without launching', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('Trust and enable') && document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('not a sandbox') && !window.__adminCalls.includes('plugin_enable')"));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Cancel'));
+  check('cancel dismisses trust without trusting or enabling', await admin.waitFor("!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("!window.__adminCalls.includes('plugin_enable') && !window.__adminCalls.includes('plugin_trust')"));
   await admin.eval("window.__runtimeStatus = 'not_found'");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Node not found')");
@@ -1135,12 +1158,10 @@ try {
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
   await admin.eval("window.__holdEnable = 'spotify'");
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Trust and enable'));
   check('one pending plugin does not disable another row', await admin.waitFor("!!window.__finishEnable") && await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').disabled && !document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').disabled"));
   await admin.eval(click(`${row('other')} .plugin-row-actions > button`));
-  await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('other')} button`, 'Enable plugin'));
+  await admin.eval(clickText(`${row('other')} dialog button`, 'Trust and enable'));
   await admin.waitFor("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent === 'Disable'");
   await admin.eval("window.__holdEnable = null; window.__finishEnable()");
   check('two plugins enable independently with no automatic state read or execute', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent === 'Disable'") && await admin.eval("!window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute') && window.__pluginCalls.filter(c=>c.command==='plugin_enable').map(c=>c.args.pluginId).sort().join(',')==='other,spotify'"));
@@ -1212,6 +1233,90 @@ try {
   await admin.eval(setValue('.inspector-form .native-control input', '75'));
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
+  // Declared controls: actual keyboard/pointer gestures, fake IPC only.
+  await admin.eval(click('.add-control'));
+  await admin.waitFor("!!document.querySelector('.action-row')");
+  await admin.eval(clickText('.action-row', 'Generic level'));
+  await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')");
+  check('new generic numeric actions default to sliders with declared bounds', await admin.eval("(() => { const input = document.querySelector('.control-tile.is-selected input'); return input.min === '-20' && input.max === '200' && input.step === '5'; })()"));
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected input').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  await admin.waitFor("window.__desktopCalls.length === 1");
+  await pressKey(admin, 'Home', 'Home', 36);
+  check('busy slider stays adjustable and queues the final deliberate target', await admin.eval("!document.querySelector('.control-tile.is-selected input').disabled && window.__desktopCalls.length === 1"));
+  await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
+  check('generic slider delivers latest target after confirmation with a new command ID', await admin.waitFor("window.__desktopCalls.length === 2 && window.__desktopCalls[1].value === -20") && await admin.eval("window.__desktopCalls[0].value === 200 && window.__desktopCalls[0].commandId !== window.__desktopCalls[1].commandId"));
+  await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
+  await admin.eval("document.querySelector('.control-tile.is-selected input').scrollIntoView({block:'center'}); window.__holdDesktop = true");
+  const liveSlider = await admin.eval(rectOf('.control-tile.is-selected input'));
+  await admin.send('Input.dispatchMouseEvent', {type:'mousePressed',x:liveSlider.left+10,y:liveSlider.cy,button:'left',clickCount:1});
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.cx,y:liveSlider.cy,button:'left',buttons:1});
+  check('live slider pointer movement sends before pointerup', await admin.waitFor('window.__desktopCalls.length === 3'));
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.right-10,y:liveSlider.cy,button:'left',buttons:1});
+  const pointerFinal = await admin.eval("Number(document.querySelector('.control-tile.is-selected input').value)");
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseReleased',x:liveSlider.right-10,y:liveSlider.cy,button:'left',clickCount:1});
+  await admin.eval('window.__holdDesktop = false; window.__finishDesktop()');
+  check('busy pointer slider coalesces movement and release into the final target', await admin.waitFor(`window.__desktopCalls.length === 4 && window.__desktopCalls.at(-1).value === ${pointerFinal}`));
+  await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("[...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').value = 'dial'; [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').dispatchEvent(new Event('change',{bubbles:true}))");
+  await admin.waitFor("!!document.querySelector('.control-tile.is-selected .dial-face')");
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  check('dial keyboard exposes the declared maximum and value', await admin.eval("document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow') === '200'"));
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
+  check('live dial keyboard sends before keyup', await admin.waitFor('window.__desktopCalls.length === 5 && window.__desktopCalls.at(-1).value === -20'));
+  await pressKey(admin, 'Escape', 'Escape', 27);
+  await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
+  check('Escape cancels a live dial gesture without an extra dispatch', await admin.eval("window.__desktopCalls.length === 5"));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').scrollIntoView({block:'center'})");
+  const liveDial = await admin.eval(rectOf('.control-tile.is-selected .dial-face'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:liveDial.cx,y:liveDial.cy}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:liveDial.cx,y:liveDial.cy-40}]});
+  check('live dial touch movement sends before release', await admin.waitFor('window.__desktopCalls.length === 6 && window.__desktopCalls.at(-1).value > -20'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchCancel',touchPoints:[]});
+  check('dial touch cancellation sends no extra target', await admin.eval('window.__desktopCalls.length === 6'));
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').scrollIntoView({block:'center'})");
+  const dial = await admin.eval(rectOf('.control-tile.is-selected .dial-face'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:dial.cx,y:dial.cy}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:dial.cx,y:dial.cy+50}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
+  check('dial supports touch without native execution in Preview', await admin.eval("Number(document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow')) < 200 && window.__desktopCalls.length === 6"));
+  await admin.eval(click('.add-control')); await admin.waitFor("!!document.querySelector('.action-row')");
+  await admin.eval(clickText('.action-row', 'Generic power'));
+  await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
+  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-switch'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  check('live unknown toggle is disabled without claiming Off', await admin.eval("document.querySelector('.control-tile.is-selected .tile-toggle').disabled && !document.querySelector('.control-tile.is-selected .tile-toggle').hasAttribute('aria-checked') && document.querySelector('.control-tile.is-selected .tile-toggle').textContent.includes('State unknown')"));
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval(clickText('.native-control button', 'Run plugin action'));
+  await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-checked') === 'false'");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected [role=switch]').focus()");
+  await pressKey(admin, ' ', 'Space', 32, ' ');
+  check('busy switch preserves focus and blocks a second activation', await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-disabled') === 'true'") && await admin.eval("(() => { const toggle = document.querySelector('.control-tile.is-selected [role=switch]'); toggle.click(); return document.activeElement === toggle && window.__desktopCalls.length === 7; })()"));
+  await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
+  check('switch keyboard sends explicit On and reads observed state', await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-checked') === 'true'") && await admin.eval("window.__desktopCalls.at(-1).value === 1"));
+  check('switch keeps a visible keyboard focus indicator', await admin.eval("getComputedStyle(document.querySelector('.control-tile.is-selected [role=switch]')).outlineStyle !== 'none'"));
+  await admin.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  check('switch respects reduced motion', await admin.eval("parseFloat(getComputedStyle(document.querySelector('.control-tile.is-selected .toggle-track span')).transitionDuration) <= .001"));
+  await admin.send('Emulation.setEmulatedMedia', {features:[]});
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-button'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  check('toggle button exposes observed pressed state', await admin.waitFor("document.querySelector('.control-tile.is-selected .tile-toggle')?.getAttribute('aria-pressed') === 'true'"));
+  check('all presentations stay within their configured key height', await admin.eval("[...document.querySelectorAll('.control-tile')].every(tile => [...tile.children].filter(child => !child.matches('.tile-order')).every(child => child.getBoundingClientRect().bottom <= tile.getBoundingClientRect().bottom + 1))"));
+  await admin.screenshot('/tmp/zdeck-control-presentations.png');
+  await admin.eval("window.__desktopCalls = []");
+  await admin.eval(clickText('.control-tile .tile-primary', 'Spotify <volume>'));
   const executions = await admin.eval("window.__adminCalls.filter(c => c === 'plugin_execute').length");
   await admin.eval(click('[aria-label="Open phone preview"]'));
   await admin.waitFor("!!document.querySelector('.phone-shell .control-tile[data-action=plugin]')");
@@ -1225,14 +1330,18 @@ try {
   check('unknown outcome is sanitized, warns, disables Run and requires explicit reconnect', await admin.waitFor("document.querySelector('.inspector-form').textContent.includes('Outcome unknown')") && await admin.eval("document.querySelector('.native-control .button.primary').disabled && !document.querySelector('.inspector-form').textContent.includes('raw secret')"));
   await admin.eval("location.hash = '#/settings/integrations'");
   await admin.waitFor("!!document.querySelector('.plugin-settings')");
-  check('one failed plugin does not overwrite its healthy neighbor or retain trust', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
+  check('one failed plugin does not overwrite its healthy neighbor or expose raw trust fields', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-settings input[type=checkbox]') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
+  await admin.eval("window.__trustCallsBefore = window.__pluginCalls.filter(c=>c.command==='plugin_trust').length");
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  check('re-enabling failed row requires fresh unchecked consent', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('[data-plugin-id=spotify] .plugin-trust input').checked"));
-  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
-  await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Disable'");
+  check('re-enabling a trusted, unchanged package does not repeat confirmation', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Disable'") && await admin.eval("!document.querySelector('[data-plugin-id=spotify] dialog')?.open && window.__pluginCalls.filter(c=>c.command==='plugin_trust').length === window.__trustCallsBefore"));
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
   check('disabling one row leaves the other plugin enabled', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Enable'") && await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && window.__pluginCalls.filter(c=>c.command==='plugin_disconnect').at(-1).args.pluginId==='spotify'"));
+  await admin.eval("window.__trustedPlugins = []; window.__runtimeStatus = 'detected'");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  check('changed package identity revokes remembered trust and asks again', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('Trust and enable')"));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Cancel'));
   await admin.eval("location.hash='#/'"); await admin.waitFor("!!document.querySelector('.add-control')");
   check('saved plugin image survives disabling its source plugin', await admin.waitFor("document.querySelector('.control-tile[data-action=mic-mute] img')?.naturalWidth > 0"));
   await admin.eval(click('.add-control')); await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el=>el.textContent==='Other action')");
@@ -1261,7 +1370,7 @@ try {
   await admin.eval("document.querySelector('.control-tile[data-action=volume] input').focus()");
   await admin.send('Page.bringToFront');
   await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
-  check('Live slider movement does not invoke until release', await admin.eval("window.__desktopCalls.length === 1"));
+  check('Live slider keyboard movement invokes before keyup', await admin.waitFor("window.__desktopCalls.length === 2"));
   await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
   await admin.waitFor("window.__desktopCalls.length === 2");
   await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
@@ -1518,7 +1627,7 @@ try {
   check('full editor with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
   check('narrow editor stacks the inspector below the grid', await narrow.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom - 1"));
   check('full page does not offer an extra control slot', await narrow.eval("!document.querySelector('.empty-key')"));
-  check('narrow editor reorder targets are touch-sized', await narrow.eval("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
+  check('narrow editor reorder targets are touch-sized', await narrow.waitFor("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
   await narrow.eval("document.querySelector('.tile-order > summary').scrollIntoView({block:'center'})");
   const touchOrderHandle = await narrow.eval(rectOf('.tile-order > summary'));
   await narrow.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x:touchOrderHandle.cx,y:touchOrderHandle.cy}] });

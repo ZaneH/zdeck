@@ -92,12 +92,23 @@ done
 impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.temp); } }
 fn manifest(id: &str) -> Value { json!({"id":id,"version":"0.1.0","protocolVersion":1,"actions":[{"id":"play","title":"Play","config":{}}]}) }
 
+impl Fixture {
+    /// Ready identity from a probe-free catalog; never runs a fake runtime in `node` mode.
+    async fn identity(&self, id: &str) -> String {
+        self.install(vec![]).catalog().await.unwrap().plugins.into_iter()
+            .find(|plugin| plugin.id == id).expect("catalog entry").identity.expect("ready identity")
+    }
+}
+async fn trust_current(f: &Fixture, install: &PluginInstall, id: &str) {
+    install.trust(id, &f.identity(id).await).await.unwrap();
+}
+
 #[tokio::test]
 async fn missing_root_stays_missing_and_catalog_has_frozen_shape() {
     let f = Fixture::new();
     let catalog = f.install(vec![]).catalog().await.unwrap();
-    assert!(catalog.plugins.is_empty()); assert!(!catalog.truncated); assert!(!f.root.exists());
-    assert_eq!(serde_json::to_value(&catalog).unwrap(), json!({"directory":f.root.to_str().unwrap(),"node":{"status":"not_found","version":null,"path":null},"plugins":[],"truncated":false}));
+    assert!(catalog.plugins.is_empty()); assert!(!f.root.exists());
+    assert_eq!(serde_json::to_value(&catalog).unwrap(), json!({"directory":f.root.to_str().unwrap(),"node":{"status":"not_found","version":null,"path":null},"python":{"status":"not_found","version":null,"path":null},"plugins":[]}));
 }
 
 #[tokio::test]
@@ -220,13 +231,151 @@ async fn symlink_escape_aliases_and_traversal_are_rejected() {
 }
 
 #[tokio::test]
-async fn directory_entry_cap_is_explicit_and_enable_fails_closed_on_truncation() {
+async fn discovery_lists_more_than_sixteen_plugins_without_truncation() {
     let f = Fixture::new();
-    for i in 0..65 { f.plugin(&format!("p{i}"), &manifest(&format!("p{i}"))); }
+    for i in 0..40 { f.plugin(&format!("p{i:02}"), &manifest(&format!("p{i:02}"))); }
     let install = f.install(vec![]);
     let c = install.catalog().await.unwrap();
-    assert!(c.truncated); assert!(c.plugins.len() <= 64);
-    assert!(install.enable(&PluginRegistry::default(), "p0").await.unwrap_err().hint.contains("64"));
+    assert_eq!(c.plugins.len(), 40);
+    assert_eq!(c.plugins.iter().filter(|p| p.status == InstallStatus::Ready).count(), 40);
+    assert_eq!(serde_json::to_value(&c).unwrap()["plugins"].as_array().unwrap().len(), 40);
+}
+
+#[tokio::test]
+async fn trust_is_bound_to_package_identity_and_revokes_on_any_file_change() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![f.protocol_runtime(&m)]);
+    assert!(install.catalog().await.unwrap().plugins[0].trusted == false);
+    trust_current(&f, &install, "fake").await;
+    assert!(install.catalog().await.unwrap().plugins[0].trusted);
+    // Same id and version, changed entrypoint bytes: trust must be revoked.
+    fs::write(f.root.join("fake/main.js"), "console.log('changed package');").unwrap();
+    assert!(!install.catalog().await.unwrap().plugins[0].trusted, "changed same-version code must revoke trust");
+    assert_eq!(install.enable(&PluginRegistry::default(), "fake").await.unwrap_err().code, Some("not_trusted"));
+    let trust_path = f.root.parent().unwrap().join("plugin-trust.v1.json");
+    let persisted: Value = serde_json::from_slice(&fs::read(&trust_path).unwrap()).unwrap();
+    assert_eq!(persisted["version"], 1); assert!(persisted["plugins"]["fake"].as_str().unwrap().len() == 64);
+    trust_current(&f, &install, "fake").await;
+    assert!(install.catalog().await.unwrap().plugins[0].trusted);
+}
+
+#[tokio::test]
+async fn stale_confirmation_identity_cannot_authorize_changed_package() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![]);
+    let identity_a = f.identity("fake").await;
+    // Same id and version, different files: the reviewed identity is now stale.
+    fs::write(f.root.join("fake/main.js"), "console.log('package B');").unwrap();
+    let error = install.trust("fake", &identity_a).await.unwrap_err();
+    assert_eq!(error.code, Some("stale_identity")); assert_eq!(error.outcome, Outcome::NotStarted);
+    assert!(error.hint.contains("Refresh the catalog"));
+    // B stays untrusted and cannot be enabled through the stale confirmation.
+    assert!(!install.catalog().await.unwrap().plugins[0].trusted);
+    assert_eq!(install.enable(&PluginRegistry::default(), "fake").await.unwrap_err().code, Some("not_trusted"));
+    // A malformed identity is refused before any disk comparison.
+    assert_eq!(install.trust("fake", "not-an-identity").await.unwrap_err().code, Some("stale_identity"));
+    // A fresh catalog exposes B's identity, which can be explicitly trusted and enabled.
+    let identity_b = f.identity("fake").await;
+    assert_ne!(identity_a, identity_b);
+    install.trust("fake", &identity_b).await.unwrap();
+    assert!(install.catalog().await.unwrap().plugins[0].trusted);
+}
+
+#[tokio::test]
+async fn fingerprint_rejects_deeply_nested_and_oversized_packages() {
+    let f = Fixture::new();
+    let deep = f.plugin("deep", &manifest("deep"));
+    let mut nested = deep.clone();
+    for _ in 0..30 { nested.push("d"); fs::create_dir(&nested).unwrap(); }
+    let big = f.plugin("big", &manifest("big"));
+    // Sparse 64 MiB+1 file: over the declared-byte bound, no large write needed.
+    fs::File::create(big.join("blob.bin")).unwrap().set_len(64 * 1024 * 1024 + 1).unwrap();
+    let catalog = f.install(vec![]).catalog().await.unwrap();
+    for id in ["deep", "big"] {
+        let row = catalog.plugins.iter().find(|plugin| plugin.id == id).unwrap();
+        assert_eq!(row.status, InstallStatus::Invalid, "{id}");
+        assert!(row.identity.is_none(), "{id}");
+    }
+}
+
+#[tokio::test]
+async fn corrupt_missing_or_symlinked_trust_never_blocks_catalog_or_launch_validation() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![f.protocol_runtime(&m)]);
+    let trust_path = f.root.parent().unwrap().join("plugin-trust.v1.json");
+    for bytes in [b"{not json".to_vec(), vec![b'x'; 65_537]] {
+        fs::write(&trust_path, bytes).unwrap();
+        let catalog = install.catalog().await.unwrap();
+        assert_eq!(catalog.plugins.len(), 1); assert!(!catalog.plugins[0].trusted);
+    }
+    let real = f.temp.join("real-trust.json"); fs::write(&real, "{}").unwrap();
+    fs::remove_file(&trust_path).unwrap(); symlink(&real, &trust_path).unwrap();
+    assert!(!install.catalog().await.unwrap().plugins[0].trusted);
+    assert_eq!(install.trust("unused", &"0".repeat(64)).await.unwrap_err().outcome, Outcome::NotStarted);
+}
+
+#[tokio::test]
+async fn enabled_preference_restores_exact_identity_and_disable_persists_off() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![f.protocol_runtime(&m)]);
+    trust_current(&f, &install, "fake").await;
+    let first = PluginRegistry::default();
+    install.enable(&first, "fake").await.unwrap();
+    first.disconnect("fake").await.unwrap();
+    let restarted = PluginRegistry::default();
+    let prefs = f.root.parent().unwrap().join("plugin-trust.v1.json");
+    let modified = fs::metadata(&prefs).unwrap().modified().unwrap();
+    f.install(vec![f.protocol_runtime(&m)]).restore(&restarted).await.unwrap();
+    assert_eq!(fs::metadata(&prefs).unwrap().modified().unwrap(), modified, "restoring must not rewrite unchanged preferences");
+    assert_eq!(restarted.snapshot("fake").await.unwrap().status, ConnectionStatus::Connected);
+    assert!(restarted.snapshot("fake").await.unwrap().state.is_none());
+    assert_eq!(f.calls().len(), 4, "restore must only launch and describe");
+    install.disable(&restarted, "fake").await.unwrap();
+    install.restore(&PluginRegistry::default()).await.unwrap();
+    assert_eq!(f.calls().len(), 4, "disabled intent survives restart");
+}
+
+#[tokio::test]
+async fn disable_stops_process_even_when_saving_off_fails() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![f.protocol_runtime(&m)]);
+    trust_current(&f, &install, "fake").await;
+    let registry = PluginRegistry::default(); install.enable(&registry, "fake").await.unwrap();
+    let prefs = f.root.parent().unwrap().join("plugin-trust.v1.json");
+    fs::remove_file(&prefs).unwrap(); fs::create_dir(&prefs).unwrap();
+    let error = install.disable(&registry, "fake").await.unwrap_err();
+    assert!(error.hint.contains("may start again after relaunch"));
+    assert_eq!(registry.snapshot("fake").await.unwrap().status, ConnectionStatus::Disconnected);
+}
+
+#[tokio::test]
+async fn changed_retrusted_package_does_not_inherit_enabled_intent_and_corrupt_prefs_are_safe() {
+    let f = Fixture::new(); let m = manifest("fake"); f.plugin("fake", &m);
+    let install = f.install(vec![f.protocol_runtime(&m)]);
+    trust_current(&f, &install, "fake").await;
+    let first = PluginRegistry::default(); install.enable(&first, "fake").await.unwrap();
+    first.disconnect("fake").await.unwrap();
+    fs::write(f.root.join("fake/main.js"), "// changed").unwrap();
+    assert!(install.restore(&PluginRegistry::default()).await.is_err());
+    trust_current(&f, &install, "fake").await;
+    assert!(install.restore(&PluginRegistry::default()).await.is_err());
+    assert_eq!(f.calls().len(), 2, "even newly trusted bytes need explicit enabled intent");
+    fs::write(f.root.parent().unwrap().join("plugin-trust.v1.json"), "broken").unwrap();
+    install.restore(&PluginRegistry::default()).await.unwrap();
+    assert_eq!(f.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn oversized_enabled_set_is_reported_without_launching_any_plugin() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.root.parent().unwrap()).unwrap();
+    let enabled: serde_json::Map<String, Value> = (0..17)
+        .map(|index| (format!("fake{index}"), json!("a".repeat(64)))).collect();
+    fs::write(f.root.parent().unwrap().join("plugin-trust.v1.json"),
+        serde_json::to_vec(&json!({"version":1,"plugins":{},"enabled":enabled})).unwrap()).unwrap();
+    let error = f.install(vec![]).restore(&PluginRegistry::default()).await.unwrap_err();
+    assert!(error.hint.contains("at most 16"));
+    assert!(f.calls().is_empty());
 }
 
 #[tokio::test]
@@ -236,6 +385,9 @@ async fn enabling_revalidates_and_only_describes_never_reads_state_or_plays() {
     let install = f.install(vec![f.protocol_runtime(&m)]);
     assert_eq!(install.catalog().await.unwrap().plugins[0].status, InstallStatus::Ready);
     assert!(f.calls().is_empty(), "catalog must never launch main.js");
+    let raw_install = f.install(vec![f.protocol_runtime(&m)]);
+    assert_eq!(raw_install.enable(&PluginRegistry::default(), "fake").await.unwrap_err().code, Some("not_trusted"), "untrusted packages must not enable");
+    trust_current(&f, &install, "fake").await;
     let state = PluginRegistry::default();
     let connected = install.enable(&state, "fake").await.unwrap();
     assert_eq!(connected.status, ConnectionStatus::Connected); assert!(connected.state.is_none());
@@ -254,7 +406,9 @@ async fn runtime_probe_mutation_is_caught_by_final_revalidation() {
         fs::write(f.root.join("fake/manifest.json"), serde_json::to_vec(&manifest("fake")).unwrap()).unwrap();
         let runtime = f.executable("mutating-node", &format!("if [ \"$1\" = '--version' ]; then printf '%s' '{}' > '{}'; printf 'v22.18.0\\n'; else printf 'launch\\n' >> '{}'; fi",
             replacement, f.root.join("fake/manifest.json").display(), f.temp.join("calls").display()));
-        assert!(f.install(vec![runtime]).enable(&PluginRegistry::default(), "fake").await.is_err());
+        let install = f.install(vec![runtime]);
+        trust_current(&f, &install, "fake").await;
+        assert!(install.enable(&PluginRegistry::default(), "fake").await.is_err());
         assert!(f.calls().is_empty());
     }
 }
@@ -272,10 +426,12 @@ async fn describe_must_match_entire_disk_contract_and_mismatch_stops_session() {
             _ => unreachable!(),
         }
         let state = PluginRegistry::default();
-        let error = f.install(vec![f.protocol_runtime(&actual)]).enable(&state, "fake").await.unwrap_err();
+        let install = f.install(vec![f.protocol_runtime(&actual)]);
+        trust_current(&f, &install, "fake").await;
+        let error = install.enable(&state, "fake").await.unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidManifest); assert_eq!(error.outcome, Outcome::NotStarted);
         let stopped = state.snapshot("fake").await.unwrap();
-        assert_eq!(stopped.status, ConnectionStatus::Stopped); assert!(stopped.manifest.is_none()); assert!(stopped.state.is_none());
+        assert_eq!(stopped.status, ConnectionStatus::Disconnected); assert!(stopped.manifest.is_none()); assert!(stopped.state.is_none());
         assert_eq!(f.calls().len(), 2);
     }
 }
@@ -293,6 +449,7 @@ async fn copied_source_snapshot_is_invalid_before_execution_until_bundled_sdk_ex
     assert!(error.hint.contains("complete packaged"));assert!(f.calls().is_empty());
     f.bundle_sdk(&folder);
     assert_eq!(install.catalog().await.unwrap().plugins[0].status,InstallStatus::Ready);
+    trust_current(&f, &install, "spotify").await;
     let state=PluginRegistry::default();let result=install.enable(&state,"spotify").await.unwrap();
     assert!(result.state.is_none());assert_eq!(f.calls().len(),2);
     let request:Value=serde_json::from_str(&f.calls()[1]).unwrap();assert_eq!(request["type"],"describe");
@@ -312,10 +469,11 @@ async fn real_node_describe_reproduces_source_failure_and_accepts_complete_snaps
     let state=PluginRegistry::default();
     let error=state.connect("spotify",canonical.to_str().unwrap().into(),folder.join("main.js").to_str().unwrap().into()).await.unwrap_err();
     assert_eq!(error.code,Some("missing_dependency"));assert_eq!(error.outcome,Outcome::NotStarted);
-    assert_eq!(state.snapshot("spotify").await.unwrap().status,ConnectionStatus::Stopped);
+    assert_eq!(state.snapshot("spotify").await.unwrap().status,ConnectionStatus::Disconnected);
     assert!(!serde_json::to_string(&error).unwrap().contains(f.temp.to_str().unwrap()));
     f.bundle_sdk(&folder);
-    let result=f.install(vec![alias]).enable(&state,"spotify").await.unwrap();
+    let install=f.install(vec![alias]);trust_current(&f, &install, "spotify").await;
+    let result=install.enable(&state,"spotify").await.unwrap();
     assert_eq!(result.status,ConnectionStatus::Connected);assert_eq!(result.manifest.unwrap().id,"spotify");assert!(result.state.is_none());
     state.disconnect("spotify").await.unwrap();
 }
@@ -346,7 +504,8 @@ async fn nested_sdk_symlinks_missing_files_and_invalid_metadata_fail_closed_with
 async fn launch_runtime_errors_are_actionable_fixed_and_not_started() {
     let f=Fixture::new();f.plugin("fake",&manifest("fake"));
     for (candidates,code) in [(vec![],"runtime_missing"),(vec![f.runtime("old","v20.0.0")],"runtime_incompatible"),(vec![f.executable("startup-exit","if [ \"$1\" = '--version' ]; then printf 'v22.18.0\\n'; fi")],"startup_exit")] {
-        let error=f.install(candidates).enable(&PluginRegistry::default(),"fake").await.unwrap_err();
+        let install=f.install(candidates);trust_current(&f, &install, "fake").await;
+        let error=install.enable(&PluginRegistry::default(),"fake").await.unwrap_err();
         assert_eq!(error.code,Some(code));assert_eq!(error.outcome,Outcome::NotStarted);
         assert!(error.hint.contains("22.18.0"));assert!(!serde_json::to_string(&error).unwrap().contains(f.temp.to_str().unwrap()));
     }
@@ -375,15 +534,20 @@ fn sdk_path(folder:&std::path::Path)->PathBuf{folder.join("node_modules/@zdeck/p
 async fn uninstall_preserves_bytes_in_unique_reversible_backups_and_leaves_other_plugin_running() {
     let f=Fixture::new();let alpha=f.fake_plugin("alpha",false);f.fake_plugin("beta",false);
     let original=fs::read(alpha.join("main.js")).unwrap();let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    trust_current(&f, &install, "alpha").await;trust_current(&f, &install, "beta").await;
     install.enable(&registry,"alpha").await.unwrap();install.enable(&registry,"beta").await.unwrap();
     assert_eq!(f.calls(),vec!["alpha:describe","beta:describe"]);
     install.uninstall(&registry,"alpha").await.unwrap();assert!(!alpha.exists());
+    let prefs: Value = serde_json::from_slice(&fs::read(f.root.parent().unwrap().join("plugin-trust.v1.json")).unwrap()).unwrap();
+    assert!(prefs["enabled"].get("alpha").is_none());
+    assert!(prefs["plugins"].get("alpha").is_none());
+    assert!(prefs["enabled"].get("beta").is_some());
     assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Disconnected);
     assert_eq!(registry.snapshot("beta").await.unwrap().status,ConnectionStatus::Connected);
     assert_eq!(registry.execute("beta".into(),"play".into(),json!({})).await.unwrap().state.unwrap()["plugin"],"beta");
     let backups=f.root.parent().unwrap().join("plugin-backups");let first=fs::read_dir(&backups).unwrap().next().unwrap().unwrap().path();
     assert!(first.file_name().unwrap().to_str().unwrap().starts_with("alpha-"));assert_eq!(fs::read(first.join("main.js")).unwrap(),original);
-    fs::rename(&first,&alpha).unwrap();install.enable(&registry,"alpha").await.unwrap();
+    fs::rename(&first,&alpha).unwrap();trust_current(&f, &install, "alpha").await;install.enable(&registry,"alpha").await.unwrap();
     fs::create_dir(&first).unwrap();fs::write(first.join("keep"),"existing backup").unwrap();
     install.uninstall(&registry,"alpha").await.unwrap();let second=fs::read_dir(&backups).unwrap().map(Result::unwrap).find(|e|e.path()!=first).unwrap().path();assert_ne!(first,second);
     assert_eq!(fs::read_to_string(first.join("keep")).unwrap(),"existing backup");
@@ -401,6 +565,7 @@ async fn uninstall_preserves_bytes_in_unique_reversible_backups_and_leaves_other
 async fn uninstall_rejects_traversal_aliases_and_unsafe_backups_without_touching_other_sessions() {
     let f=Fixture::new();let alpha=f.fake_plugin("alpha",false);f.fake_plugin("beta",false);
     let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    trust_current(&f, &install, "alpha").await;trust_current(&f, &install, "beta").await;
     install.enable(&registry,"alpha").await.unwrap();install.enable(&registry,"beta").await.unwrap();
     let outside=f.temp.join("outside");fs::create_dir(&outside).unwrap();fs::write(outside.join("keep"),"private-secret").unwrap();symlink(&outside,f.root.join("alias")).unwrap();
     for id in ["../outside","/outside","alias","missing"] {let error=install.uninstall(&registry,id).await.unwrap_err();assert!(!serde_json::to_string(&error).unwrap().contains("private-secret"));}
@@ -415,18 +580,22 @@ async fn uninstall_rejects_traversal_aliases_and_unsafe_backups_without_touching
 #[tokio::test]
 async fn duplicate_enable_and_uninstall_are_serialized_for_the_same_plugin() {
     let f=Fixture::new();let folder=f.fake_plugin("alpha",false);let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
+    trust_current(&f, &install, "alpha").await;
     let (one,two,removed)=tokio::join!(install.enable(&registry,"alpha"),install.enable(&registry,"alpha"),install.uninstall(&registry,"alpha"));
     one.unwrap();two.unwrap();removed.unwrap();assert!(!folder.exists());assert!(registry.snapshots().await.is_empty());assert_eq!(f.calls(),vec!["alpha:describe","alpha:describe"]);
     assert!(install.enable(&registry,"alpha").await.is_err());assert!(registry.snapshots().await.is_empty());
 }
 
 #[tokio::test]
-async fn uninstall_disabled_folder_works_when_all_session_slots_are_occupied() {
-    let f=Fixture::new();let folder=f.plugin("unused",&manifest("unused"));let registry=PluginRegistry::default();
+async fn uninstall_disabled_folder_works_while_running_capacity_is_full() {
+    let f=Fixture::new();let folder=f.plugin("unused",&manifest("unused"));f.fake_plugin("alpha",false);
+    let registry=PluginRegistry::with_capacity(1);
+    let install=f.install(vec![f.node()]);trust_current(&f, &install, "alpha").await;install.enable(&registry,"alpha").await.unwrap();
     let missing=f.temp.join("missing-runtime").to_str().unwrap().to_owned();let entry=f.temp.join("missing.js").to_str().unwrap().to_owned();
-    for i in 0..16 {assert_eq!(registry.connect(&format!("p{i}"),missing.clone(),entry.clone()).await.unwrap_err().code,Some("runtime_missing"));}
-    f.install(vec![]).uninstall(&registry,"unused").await.unwrap();assert!(!folder.exists());assert_eq!(registry.snapshots().await.len(),16);assert!(f.calls().is_empty());
-    for i in 0..16 {registry.disconnect(&format!("p{i}")).await.unwrap();}
+    assert_eq!(registry.connect("overflow",missing,entry).await.unwrap_err().code,Some("capacity"));
+    f.install(vec![]).uninstall(&registry,"unused").await.unwrap();assert!(!folder.exists());
+    assert_eq!(registry.snapshots().await.len(),1);assert_eq!(f.calls(),vec!["alpha:describe"]);
+    registry.disconnect("alpha").await.unwrap();
 }
 
 #[test]

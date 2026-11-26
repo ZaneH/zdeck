@@ -20,6 +20,11 @@ pub enum Theme {
     Light,
 }
 
+fn presentation_valid(action: &str, p: &str) -> bool {
+    p == "button" || (action == "volume" && matches!(p, "slider" | "dial"))
+        || (action == "plugin" && matches!(p, "slider" | "dial" | "toggle-switch" | "toggle-button"))
+}
+
 /// Mirrors the TypeScript `Control` union, tagged by `action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", deny_unknown_fields)]
@@ -51,6 +56,8 @@ pub enum ControlAction {
 pub struct Control {
     pub id: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<String>,
     #[serde(rename = "rowSpan", skip_serializing_if = "Option::is_none")]
     pub row_span: Option<u32>,
     #[serde(rename = "columnSpan", skip_serializing_if = "Option::is_none")]
@@ -81,12 +88,17 @@ impl<'de> Deserialize<'de> for Control {
         if icon.as_ref().is_some_and(|icon| !icon.valid()) { return Err(D::Error::custom("Invalid control icon.")); }
         // Serde ignores extra fields on internally tagged unit variants even
         // with deny_unknown_fields. Do not silently drop data during migration.
-        if matches!(fields.get("action").and_then(serde_json::Value::as_str), Some("mic-mute" | "media-play-pause")) && fields.len() != 1 {
+        if matches!(fields.get("action").and_then(serde_json::Value::as_str), Some("mic-mute" | "media-play-pause")) && fields.len() != 1 + usize::from(fields.contains_key("presentation")) {
             return Err(D::Error::custom("Unknown control fields."));
+        }
+        let presentation = fields.remove("presentation").map(serde_json::from_value::<String>).transpose()
+            .map_err(|_| D::Error::custom("Invalid control presentation."))?;
+        if presentation.as_deref().is_some_and(|p| !presentation_valid(fields.get("action").and_then(serde_json::Value::as_str).unwrap_or(""), p)) {
+            return Err(D::Error::custom("Incompatible control presentation."));
         }
         let action = serde_json::from_value(serde_json::Value::Object(fields))
             .map_err(|_| D::Error::custom("Invalid control action fields."))?;
-        Ok(Self { id, label, row_span, column_span, icon, action })
+        Ok(Self { id, label, presentation, row_span, column_span, icon, action })
     }
 }
 
@@ -253,6 +265,10 @@ impl Deck {
                 if control.row_span.is_some_and(|n| !(1..=24).contains(&n)) || control.column_span.is_some_and(|n| !(1..=4).contains(&n)) {
                     return Err(DeckError::invalid_input("Control spans are out of range."));
                 }
+                let action_name = match control.action { ControlAction::Volume { .. } => "volume", ControlAction::Plugin { .. } => "plugin", _ => "button" };
+                if control.presentation.as_deref().is_some_and(|p| !presentation_valid(action_name, p)) {
+                    return Err(DeckError::invalid_input("Incompatible control presentation."));
+                }
                 if control.icon.as_ref().is_some_and(|icon| !icon.valid()) {
                     return Err(DeckError::invalid_input("Control icons require a known built-in icon or a bounded image data URL."));
                 }
@@ -270,8 +286,8 @@ impl Deck {
                     ControlAction::Plugin { plugin_id, plugin_action, plugin_args } => {
                         if !crate::plugin::identifier(plugin_id) || !crate::plugin::identifier(plugin_action)
                             || plugin_args.len() > 8
-                            || !plugin_args.iter().all(|(k, v)| crate::plugin::identifier(k) && crate::plugin::integer(v).is_some()) {
-                            return Err(DeckError::invalid_input("Plugin controls require bounded IDs and at most eight safe integer arguments."));
+                            || !plugin_args.iter().all(|(k, v)| crate::plugin::identifier(k) && (crate::plugin::integer(v).is_some() || v.is_boolean())) {
+                            return Err(DeckError::invalid_input("Plugin controls require bounded IDs and at most eight safe integer or boolean arguments."));
                         }
                     }
                     ControlAction::MicMute | ControlAction::MediaPlayPause => {}
@@ -299,7 +315,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
-            row_span: None, column_span: None, icon: None,
+            row_span: None, column_span: None, icon: None, presentation: None,
             action: ControlAction::ObsScene {
                 scene: scene.to_string(),
                 auto_label: false,
@@ -310,7 +326,7 @@ pub fn default_deck() -> Deck {
         Control {
             id: id.to_string(),
             label: label.to_string(),
-            row_span: None, column_span: None, icon: None,
+            row_span: None, column_span: None, icon: None, presentation: None,
             action,
         }
     }
@@ -409,6 +425,23 @@ mod tests {
         let mut wrong_action = document;
         wrong_action["deck"]["pages"][0]["controls"][0] = json!({"id":"mic", "label":"Mic", "action":"mic-mute", "autoLabel":true});
         assert!(decode_document(&serde_json::to_vec(&wrong_action).unwrap()).is_err());
+    }
+
+    #[test]
+    fn optional_presentations_and_boolean_args_round_trip_strictly() {
+        use serde_json::json;
+        let original = serde_json::to_value(default_deck()).unwrap();
+        assert_eq!(serde_json::to_value(serde_json::from_value::<Deck>(original.clone()).unwrap()).unwrap(), original);
+        for presentation in ["button", "slider", "dial", "toggle-switch", "toggle-button"] {
+            let mut value = original.clone();
+            value["pages"][0]["controls"][0] = json!({"id":"power","label":"Power","action":"plugin","pluginId":"power","pluginAction":"set","pluginArgs":{"enabled":true},"presentation":presentation});
+            let deck: Deck = serde_json::from_value(value.clone()).unwrap(); deck.validate().unwrap();
+            assert_eq!(serde_json::to_value(deck).unwrap(), value);
+        }
+        for presentation in [json!(null), json!("knob"), json!("slider"), json!("toggle-switch")] {
+            let mut value = original.clone(); value["pages"][0]["controls"][0]["presentation"] = presentation;
+            assert!(serde_json::from_value::<Deck>(value).is_err());
+        }
     }
 
     fn fixture_deck() -> Deck {

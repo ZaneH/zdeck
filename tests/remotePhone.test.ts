@@ -86,7 +86,7 @@ class FakeSocket implements RemoteWebSocket {
   }
 }
 
-type Handler = (path: string, init: RequestInit) => RemoteResponse;
+type Handler = (path: string, init: RequestInit) => RemoteResponse | Promise<RemoteResponse>;
 
 function createHarness(handler: Handler) {
   const calls: Array<{ path: string; init: RequestInit }> = [];
@@ -115,6 +115,41 @@ function createHarness(handler: Handler) {
 }
 
 const sampleDeck = createDefaultDeck();
+
+it("routes remote numeric and boolean presentation targets using the authenticated registry, never phone args", async () => {
+  const deck = createDefaultDeck();
+  const numeric: PluginControl = { id: "level", label: "Level", action: "plugin", pluginId: "power", pluginAction: "level", pluginArgs: { amount: 50 }, presentation: "slider" };
+  const toggle: PluginControl = { id: "power", label: "Power", action: "plugin", pluginId: "power", pluginAction: "power", pluginArgs: { enabled: false }, presentation: "toggle-button" };
+  deck.pages[0].controls.push(numeric, toggle);
+  const plugins = { power: { status: "connected", lastError: null, state: { enabled: false }, manifest: {
+    id: "power", version: "1.0.0", protocolVersion: 1, actions: [
+      { id: "level", title: "Level", config: { amount: { type: "integer", minimum: -20, maximum: 200, control: { step: 5 } } } },
+      { id: "power", title: "Power", config: { enabled: { type: "boolean", control: { stateKey: "enabled" } } } },
+    ],
+  } } };
+  const payload = { ...snapshotBody(3, deck), plugins };
+  const harness = createHarness((path, init) => {
+    if (path === "/api/v1/pair/status") return jsonResponse(200, { requestId: "r1", status: "approved" });
+    if (path === "/api/v1/state") return jsonResponse(200, payload);
+    if (path === "/api/v1/commands") return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Confirmed" });
+    return jsonResponse(404, {});
+  });
+  const connection = new RemotePhoneConnection(harness.deps); connection.start();
+  for (let i = 0; i < 3; i++) await flush();
+  expect(connection.getSnapshot().phase).toBe("connecting");
+  harness.sockets[0].emit(payload); await flush();
+  expect(connection.getSnapshot().plugins).toEqual(plugins);
+  connection.pressControl(numeric); connection.commitVolume(numeric, 51); connection.commitVolume(toggle, 2); await flush();
+  expect(harness.calls.filter((c) => c.path === "/api/v1/commands")).toHaveLength(0);
+  connection.commitVolume(numeric, 175);
+  for (let i = 0; i < 3; i++) await flush();
+  harness.sockets.at(-1)!.emit(payload); await flush();
+  connection.commitVolume(toggle, 1);
+  for (let i = 0; i < 3; i++) await flush();
+  const commands = harness.calls.filter((c) => c.path === "/api/v1/commands").map((c) => JSON.parse(String(c.init.body)));
+  expect(commands).toEqual([{ id: "cmd_1", revision: 3, controlId: "level", value: 175 }, { id: "cmd_2", revision: 3, controlId: "power", value: 1 }]);
+  connection.stop();
+});
 
 function makeStandardHarness(command?: Handler) {
   let statusCalls = 0;
@@ -260,7 +295,7 @@ describe("protocol validation", () => {
 });
 
 describe("command payloads", () => {
-  it("sends only id, revision, controlId, and a bounded volume value", () => {
+  it("sends only id, revision, controlId, and a bounded scalar target", () => {
     expect(buildCommandPayload("cmd_1", 12, "ctl_live")).toEqual({
       id: "cmd_1",
       revision: 12,
@@ -268,7 +303,7 @@ describe("command payloads", () => {
     });
     const volume = buildCommandPayload("cmd_2", 12, "ctl_vol", 42.5);
     expect(volume).toEqual({ id: "cmd_2", revision: 12, controlId: "ctl_vol", value: 42.5 });
-    for (const value of [150, -1, NaN, Infinity]) {
+    for (const value of [Number.MAX_SAFE_INTEGER + 1, -Number.MAX_SAFE_INTEGER - 1, NaN, Infinity]) {
       expect(() => buildCommandPayload("cmd_3", 12, "ctl_vol", value)).toThrow();
     }
     for (const payload of [volume, buildCommandPayload("cmd_4", 1, "x")]) {
@@ -399,6 +434,30 @@ describe("connection lifecycle", () => {
     );
   });
 
+  it("coalesces busy numeric gestures but never replays after uncertainty", async () => {
+    for (const confirmed of [true, false]) {
+      let finish!: (response: RemoteResponse) => void;
+      let count = 0;
+      const { connection, calls } = await driveToActive((_path, init) => {
+        count++;
+        if (count === 1) return new Promise<RemoteResponse>((resolve) => { finish = resolve; });
+        return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Confirmed" });
+      });
+      const volume = sampleDeck.pages[1].controls.find((c) => c.action === "volume")!;
+      connection.commitVolume(volume, 20);
+      connection.commitVolume(volume, 60);
+      connection.commitVolume(volume, 90);
+      expect(calls.filter((c) => c.path === "/api/v1/commands")).toHaveLength(1);
+      const first = calls.find((c) => c.path === "/api/v1/commands")!;
+      finish(jsonResponse(200, { id: JSON.parse(String(first.init.body)).id, state: confirmed ? "confirmed" : "unknown", message: "Inspect before retrying" }));
+      await flush(); await flush();
+      const posted = calls.filter((c) => c.path === "/api/v1/commands").map((c) => JSON.parse(String(c.init.body)));
+      expect(posted.map((c) => c.value)).toEqual(confirmed ? [20, 90] : [20]);
+      if (confirmed) expect(posted[0].id).not.toBe(posted[1].id);
+      else expect(connection.getSnapshot().warning).toBeTruthy();
+      connection.stop();
+    }
+  });
   it("sends a volume target only through commitVolume", async () => {
     const { connection, calls } = await driveToActive((_path, init) => {
       return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Action confirmed." });

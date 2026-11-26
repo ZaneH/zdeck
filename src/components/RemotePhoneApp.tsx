@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
 import { activePage, findPage } from "../lib/deck";
 import { useRemotePhone } from "../lib/useRemotePhone";
@@ -273,9 +274,10 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
             <ControlTile
               key={control.id}
               control={control}
+              plugins={remote.plugins}
               variant="phone"
               semantics="remote"
-              disabled={controlsDisabled}
+              disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
               volume={targets[control.id] ?? controlVolume(control)}
               pressed={false}
               busy={remote.busyControlId === control.id}

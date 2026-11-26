@@ -106,6 +106,23 @@ export function obsConnect(port: number, password: string): Promise<ObsSnapshot>
   });
 }
 
+export interface ObsPreferences {
+  port: number;
+  password: string;
+}
+
+export function obsLoadPreferences(): Promise<ObsPreferences | null> {
+  return invokeObs<ObsPreferences | null>("obs_load_preferences");
+}
+
+export function obsSavePreferences(port: number, password: string): Promise<void> {
+  return invokeObs<void>("obs_save_preferences", { port, password });
+}
+
+export function obsForgetPreferences(): Promise<void> {
+  return invokeObs<void>("obs_forget_preferences");
+}
+
 export function obsDisconnect(): Promise<void> {
   return invokeObs<void>("obs_disconnect");
 }

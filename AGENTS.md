@@ -9,11 +9,14 @@ created by the user.
 
 `dev` is the default: iterate and preview there; short-lived branches target `dev`. Promote `dev` to `production` by PR for releases and the live landing page; no direct production edits. No `main`. Report checks and gaps; never infer native parity from browser tests. See [release workflow](docs/releasing.md).
 
+Commit completed work incrementally: one coherent, independently reviewable/revertible change per commit, with its tests and relevant docs. Do not accumulate unrelated changes; report checks and never push unless asked.
+
 ## Feature Map
 
 ## Invariants
 
 - Settings errors never prevent launch.
+- Remember explicit user configuration across sessions by default (including integration enablement and connection details); save when applied, not only on quit. Keep secrets in the OS credential store, separate from decks, exports, logs and browser storage, and offer a way to forget them. Report persistence failures visibly without blocking launch or silently falling back to plaintext. Restore plugin enablement only for unchanged trusted packages; live execution mode, action requests/results and other transient safety state stay session-only. Add restart/round-trip coverage for new persistent settings.
 - Windows, macOS, and Linux must all be supported. Platform-specific features require supported implementations and verification on all three; silently unsupported behavior is not acceptable.
 
 ## Design invariant

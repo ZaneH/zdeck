@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshot, pluginSnapshots, pluginState, pluginUninstall } from "../src/lib/nativePlugin";
+import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshot, pluginSnapshots, pluginState, pluginTrust, pluginUninstall } from "../src/lib/nativePlugin";
 import { EMPTY_PLUGIN } from "../src/lib/plugin";
+const IDENTITY = "0123456789abcdef".repeat(4);
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), native: vi.fn(() => true) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("../src/lib/native", () => ({ nativeAvailable: mocks.native }));
@@ -10,9 +11,11 @@ describe("per-plugin native command bridge", () => {
   it("routes each operation by pluginId without paths or extra action data", async () => {
     await pluginDisconnect("spotify"); await pluginSnapshot("notes"); await pluginState("spotify");
     await pluginExecute("notes", "next", {}); await pluginEnable("spotify");
+    mocks.invoke.mockResolvedValue(null); await pluginTrust("spotify", IDENTITY);
     expect(mocks.invoke.mock.calls).toEqual([
       ["plugin_disconnect", { pluginId: "spotify" }], ["plugin_snapshot", { pluginId: "notes" }], ["plugin_state", { pluginId: "spotify" }],
       ["plugin_execute", { pluginId: "notes", actionId: "next", args: {} }], ["plugin_enable", { pluginId: "spotify" }],
+      ["plugin_trust", { pluginId: "spotify", expectedIdentity: IDENTITY }],
     ]);
   });
   it("reads cached aggregate snapshots and rejects cross-plugin identity", async () => {
@@ -33,14 +36,15 @@ describe("per-plugin native command bridge", () => {
     mocks.invoke.mockResolvedValue("secret"); await expect(pluginUninstall("spotify")).rejects.toMatchObject({ kind: "protocol" });
   });
   it("maps safe catalog and fixed opener commands", async () => {
-    const catalog = { directory: "/example/plugins", node: { status: "not_found", version: null, path: null }, plugins: [], truncated: false };
+    const catalog = { directory: "/example/plugins", node: { status: "not_found", version: null, path: null }, plugins: [] };
     mocks.invoke.mockImplementation(async (command: string) => command === "plugin_catalog" ? catalog : null);
     expect(await pluginCatalog()).toEqual(catalog); await pluginOpenDirectory();
     expect(mocks.invoke.mock.calls).toEqual([["plugin_catalog", {}], ["plugin_open_directory", {}]]);
   });
   it("rejects invalid IDs and browser operations before invoke", async () => {
-    for (const operation of [pluginEnable, pluginDisconnect, pluginSnapshot, pluginState, pluginDiagnostics, pluginUninstall])
+    for (const operation of [pluginEnable, (pluginId: string) => pluginTrust(pluginId, IDENTITY), pluginDisconnect, pluginSnapshot, pluginState, pluginDiagnostics, pluginUninstall])
       await expect(operation("../bad")).rejects.toMatchObject({ kind: "invalid_arguments" });
+    await expect(pluginTrust("spotify", "not-an-identity")).rejects.toMatchObject({ kind: "invalid_arguments" });
     await expect(pluginExecute("spotify", "set-volume", { volume: 1.5 })).rejects.toMatchObject({ kind: "invalid_arguments" });
     expect(mocks.invoke).not.toHaveBeenCalled(); mocks.native.mockReturnValue(false);
     for (const operation of [pluginCatalog, pluginSnapshots, pluginOpenDirectory, () => pluginEnable("spotify"), () => pluginState("spotify"), () => pluginUninstall("spotify")])

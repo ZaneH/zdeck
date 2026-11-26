@@ -20,10 +20,13 @@ test('packed artifact: clean public-path SDK + Spotify tests and documented Type
     await mkdir(installed, { recursive: true });
     execFileSync('tar', ['-xzf', join(temp, packed.filename), '--strip-components=1', '-C', installed]);
     await copyFile(join(sdk, 'test/sdk.test.js'), join(temp, 'sdk.test.js'));
-    await cp(join(root, 'plugins/spotify'), join(temp, 'spotify'), { recursive: true });
+    await copyFile(join(sdk, 'test/presentations.test.js'), join(temp, 'presentations.test.js'));
+    // Test the newly packed public SDK, not a stale source-development node_modules copy.
+    await cp(join(root, 'plugins/spotify'), join(temp, 'spotify'), { recursive: true,
+      filter: (path) => path !== join(root, 'plugins/spotify/node_modules') });
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    const tests = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'sdk.test.js', 'spotify/test/spotify.test.js'], {
+    const tests = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'sdk.test.js', 'presentations.test.js', 'spotify/test/spotify.test.js'], {
       cwd: temp, encoding: 'utf8', timeout: 20000, env,
     });
     assert.equal(tests.status, 0, tests.stdout + tests.stderr);

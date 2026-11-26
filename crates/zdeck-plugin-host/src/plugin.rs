@@ -8,7 +8,7 @@
 use std::{collections::{BTreeMap, HashSet}, path::PathBuf, process::Stdio, sync::{Arc, Mutex as MapMutex}, time::Duration};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}, sync::Mutex, time::timeout};
+use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}, sync::{Mutex, OwnedSemaphorePermit, Semaphore}, time::timeout};
 
 const REQUEST_BYTES: usize = 16_384;
 const RESPONSE_BYTES: usize = 65_536;
@@ -51,10 +51,10 @@ pub(crate) enum LaunchFailure { MissingDependency, RuntimeMissing, RuntimeIncomp
 impl PluginError {
     pub(crate) fn launch(failure: LaunchFailure) -> Self {
         let (code, message, hint) = match failure {
-            LaunchFailure::MissingDependency => ("missing_dependency", "Plugin could not load a required runtime dependency.", "Copy the complete packaged plugin folder, including node_modules. Do not copy the source folder alone; refresh the catalog and enable explicitly."),
-            LaunchFailure::RuntimeMissing => ("runtime_missing", "The selected plugin runtime could not be started.", "Install or select a readable executable Node.js 22.18.0 or newer, then refresh the catalog and enable explicitly."),
-            LaunchFailure::RuntimeIncompatible => ("runtime_incompatible", "The detected Node.js runtime is too old.", "Use Node.js 22.18.0 or newer, refresh the catalog, and enable explicitly."),
-            LaunchFailure::StartupExit => ("startup_exit", "Plugin exited before describing its actions.", "Check Node.js 22.18.0 or newer and a complete packaged plugin folder. Refresh the catalog and enable explicitly; no action was sent."),
+            LaunchFailure::MissingDependency => ("missing_dependency", "Plugin could not load a required runtime dependency.", "Copy the complete packaged plugin folder, including node_modules or zdeck_plugin_sdk as appropriate. Do not copy the source folder alone; refresh the catalog and enable explicitly."),
+            LaunchFailure::RuntimeMissing => ("runtime_missing", "The selected plugin runtime could not be started.", "Install the plugin's runtime (Node.js 22.18.0+ or Python 3.10+), then refresh the catalog and enable explicitly."),
+            LaunchFailure::RuntimeIncompatible => ("runtime_incompatible", "The detected plugin runtime is too old.", "Use the plugin's runtime (Node.js 22.18.0+ or Python 3.10+), refresh the catalog, and enable explicitly."),
+            LaunchFailure::StartupExit => ("startup_exit", "Plugin exited before describing its actions.", "Check the plugin's runtime (Node.js 22.18.0+ or Python 3.10+) and complete packaged folder. Refresh the catalog and enable explicitly; no action was sent."),
         };
         Self { kind: ErrorKind::Unavailable, code: Some(code), outcome: Outcome::NotStarted, message, hint }
     }
@@ -87,13 +87,44 @@ pub struct Manifest {
     pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icons: Option<Vec<zdeck_schema::icons::PluginIcon>>,
+    /// Optional plugin-identity thumbnail (bounded local image data URL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, IntegerField> }
+pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, ConfigField> }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
+pub enum ConfigField {
+    Integer { minimum: Value, maximum: Value, #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<NumericControl> },
+    Boolean { #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<BooleanControl> },
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct IntegerField { #[serde(rename = "type")] pub field_type: String, pub minimum: Value, pub maximum: Value }
+pub struct NumericControl { pub step: Value }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BooleanControl { pub state_key: String }
+impl ConfigField {
+    fn controlled(&self) -> bool { matches!(self, Self::Integer { control: Some(_), .. } | Self::Boolean { control: Some(_) }) }
+    fn valid(&self) -> bool {
+        match self {
+            Self::Boolean { control } => control.as_ref().is_none_or(|c| identifier(&c.state_key)),
+            Self::Integer { minimum, maximum, control } => match (integer(minimum), integer(maximum)) {
+                (Some(min), Some(max)) if min <= max => control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|step| step > 0.0 && max - min <= 9_007_199_254_740_991.0 && step <= max - min && (max - min) % step == 0.0)),
+                _ => false,
+            }
+        }
+    }
+    fn accepts(&self, value: &Value) -> bool {
+        match self {
+            Self::Boolean { .. } => value.is_boolean(),
+            Self::Integer { minimum, maximum, control } => matches!((integer(value), integer(minimum), integer(maximum)),
+                (Some(n), Some(min), Some(max)) if n >= min && n <= max && control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|s| (n-min)%s == 0.0))),
+        }
+    }
+}
 
 pub(crate) use zdeck_schema::plugin::{identifier, integer};
 
@@ -113,7 +144,13 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         return Err(ErrorKind::InvalidManifest);
     }
     if value.get("icons").is_some_and(|icons| !icons.is_array()) { return Err(ErrorKind::InvalidManifest); }
+    if value["actions"].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null))))) {
+        return Err(ErrorKind::InvalidManifest);
+    }
     let m: Manifest = serde_json::from_value(value).map_err(|_| ErrorKind::InvalidManifest)?;
+    if m.icon.as_deref().is_some_and(|icon| !zdeck_schema::icons::icon_source(icon)) {
+        return Err(ErrorKind::InvalidManifest);
+    }
     if let Some(icons) = &m.icons {
         let mut ids = HashSet::new();
         if icons.len() > 32 || icons.iter().any(|icon| !icon.valid() || !ids.insert(&icon.id)) {
@@ -129,12 +166,9 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         if !identifier(&a.id) || !seen.insert(&a.id) || a.title.is_empty()
             || a.title.encode_utf16().count() > 80 || a.title.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             || a.config.len() > 8 { return Err(ErrorKind::InvalidManifest); }
+        if a.config.values().filter(|f| f.controlled()).count() > 1 { return Err(ErrorKind::InvalidManifest); }
         for (key, field) in &a.config {
-            if !identifier(key) || field.field_type != "integer" { return Err(ErrorKind::InvalidManifest); }
-            match (integer(&field.minimum), integer(&field.maximum)) {
-                (Some(min), Some(max)) if min <= max => (),
-                _ => return Err(ErrorKind::InvalidManifest),
-            }
+            if !identifier(key) || !field.valid() { return Err(ErrorKind::InvalidManifest); }
         }
     }
     Ok(m)
@@ -142,8 +176,7 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
 fn arguments(action: &Action, args: &Value) -> bool {
     let Some(args) = args.as_object() else { return false; };
     args.len() == action.config.len() && action.config.iter().all(|(key, f)| {
-        matches!((args.get(key).and_then(integer), integer(&f.minimum), integer(&f.maximum)),
-            (Some(n), Some(min), Some(max)) if n >= min && n <= max)
+        args.get(key).is_some_and(|value| f.accepts(value))
     })
 }
 fn exact(value: &Value, keys: &[&str]) -> bool {
@@ -240,7 +273,7 @@ async fn startup_diagnostic(mut stderr: tokio::process::ChildStderr) -> Option<L
     // Match only Node-owned codes. Raw text/paths/exception strings never leave
     // this task; even forged diagnostics can only select a fixed host message.
     let text = String::from_utf8_lossy(&prefix);
-    if text.contains("ERR_MODULE_NOT_FOUND") || text.contains("MODULE_NOT_FOUND") {
+    if text.contains("ERR_MODULE_NOT_FOUND") || text.contains("MODULE_NOT_FOUND") || text.contains("ModuleNotFoundError:") {
         Some(LaunchFailure::MissingDependency)
     } else { None }
 }
@@ -364,17 +397,26 @@ impl Inner {
     }
 }
 
-const MAX_PLUGINS: usize = 16;
+/// Concurrently running plugin processes are bounded; installed/stopped sessions are not.
+pub const MAX_RUNNING_PLUGINS: usize = 16;
 struct RegistryEntry { state: Arc<PluginState>, gate: Arc<Mutex<()>>, transient: bool }
 /// Independent session-local plugins. The map lock never spans plugin I/O.
-#[derive(Default, Clone)]
-pub struct PluginRegistry { entries: Arc<MapMutex<BTreeMap<String, Arc<RegistryEntry>>>> }
+#[derive(Clone)]
+pub struct PluginRegistry { entries: Arc<MapMutex<BTreeMap<String, Arc<RegistryEntry>>>>, running: Arc<Semaphore> }
+impl Default for PluginRegistry { fn default() -> Self { Self::with_capacity(MAX_RUNNING_PLUGINS) } }
 fn registry_error(code: &'static str, hint: &'static str) -> PluginError {
     let mut error = PluginError::new(ErrorKind::Unavailable, Outcome::NotStarted);
     error.code = Some(code); error.hint = hint; error
 }
+fn capacity_error() -> PluginError {
+    registry_error("capacity", "Runtime capacity is reached: too many plugins are running at once. Disable one plugin, then enable this one again.")
+}
 fn disconnected() -> PluginSnapshot { Session::default().snapshot() }
 impl PluginRegistry {
+    /// Bounded running-process capacity. Installed and stopped plugins do not count.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { entries: Arc::default(), running: Arc::new(Semaphore::new(capacity.max(1))) }
+    }
     pub(crate) async fn manage<F, Fut, T>(&self, id: &str, create: bool, remove: bool, operation: F) -> Result<T, PluginError>
     where F: FnOnce(Arc<PluginState>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
@@ -387,11 +429,7 @@ impl PluginRegistry {
                 if let Some(entry) = entries.get(id) { entry.clone() }
                 else {
                     if !create { return Err(registry_error("not_enabled", "Enable this trusted plugin explicitly from the catalog first.")); }
-                    // Removals get a bounded extra budget even when all enabled slots are occupied.
-                    if entries.len() >= MAX_PLUGINS * 2 || (!remove && entries.values().filter(|entry| !entry.transient).count() >= MAX_PLUGINS) {
-                        return Err(registry_error("capacity", "Disable a plugin or wait for pending removals; at most 16 enabled or stopped sessions are retained."));
-                    }
-                    let entry = Arc::new(RegistryEntry { state: Arc::new(PluginState::default()), gate: Arc::new(Mutex::new(())), transient: remove });
+                    let entry = Arc::new(RegistryEntry { state: Arc::new(PluginState::with_limit(self.running.clone())), gate: Arc::new(Mutex::new(())), transient: remove });
                     entries.insert(id.to_owned(), entry.clone()); entry
                 }
             };
@@ -403,8 +441,9 @@ impl PluginRegistry {
         tokio::spawn(async move {
             let _guard = guard;
             let result = operation(entry.state.clone()).await;
-            let empty = entry.state.snapshot().await.status == ConnectionStatus::Disconnected;
-            if (remove && result.is_ok()) || empty {
+            // Retain only live connections so installed/stopped entries cannot grow the map.
+            let live = entry.state.snapshot().await.status == ConnectionStatus::Connected;
+            if (remove && result.is_ok()) || !live {
                 let mut entries = entries.lock().expect("plugin registry lock");
                 if entries.get(&id).is_some_and(|current| Arc::ptr_eq(current, &entry)) { entries.remove(&id); }
             }
@@ -442,6 +481,13 @@ impl PluginRegistry {
     pub async fn state(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
         self.manage(id, false, false, |state| async move { state.state().await }).await
     }
+    pub async fn execute_value(&self, id: String, action: String, args: Value, value: f64, toggle: bool) -> Result<PluginSnapshot, PluginError> {
+        if !identifier(&id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
+        let plugin_id = id.clone();
+        self.manage(&id, false, false, move |state| async move {
+            state.run(SessionOperation::Execute(plugin_id, action, args, Some((value, toggle)))).await
+        }).await
+    }
     pub async fn execute(&self, id: String, action: String, args: Value) -> Result<PluginSnapshot, PluginError> {
         if !identifier(&id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
         let plugin_id = id.clone();
@@ -451,8 +497,13 @@ impl PluginRegistry {
 
 /// One explicitly trusted, session-local connection shared by desktop and phone.
 /// There is no persistence, automatic reconnect, or implicit state read.
-#[derive(Default)]
 pub struct PluginState { session: Arc<Mutex<Session>> }
+impl Default for PluginState { fn default() -> Self { Self { session: Arc::default() } } }
+impl PluginState {
+    fn with_limit(running: Arc<Semaphore>) -> Self {
+        Self { session: Arc::new(Mutex::new(Session { running: Some(running), ..Session::default() })) }
+    }
+}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionStatus { #[default] Disconnected, Connected, Stopped }
@@ -472,20 +523,45 @@ struct Session {
     state: Option<Map<String, Value>>,
     status: ConnectionStatus,
     last_error: Option<PluginError>,
+    running: Option<Arc<Semaphore>>,
+    permit: Option<OwnedSemaphorePermit>,
 }
-enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value) }
-fn node_launch(program: String, entrypoint: String) -> Result<TrustedLaunch, PluginError> {
+enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value, Option<(f64, bool)>) }
+
+// The phone supplies a scalar only; the trusted manifest chooses the sole writable field.
+fn target_arguments(action: &Action, mut args: Value, value: f64, toggle: bool) -> Result<Value, PluginError> {
+    let invalid = || PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted);
+    if !value.is_finite() || !arguments(action, &args) { return Err(invalid()); }
+    let (key, field) = action.config.iter().find(|(_, f)| f.controlled()).ok_or_else(invalid)?;
+    if toggle != matches!(field, ConfigField::Boolean { .. }) { return Err(invalid()); }
+    let target = match field {
+        ConfigField::Boolean { .. } if value == 0.0 || value == 1.0 => Value::Bool(value == 1.0),
+        ConfigField::Integer { .. } => serde_json::json!(value),
+        _ => return Err(invalid()),
+    };
+    if !field.accepts(&target) { return Err(invalid()); }
+    let target = if matches!(field, ConfigField::Integer { .. }) { Value::from(value as i64) } else { target };
+    args.as_object_mut().ok_or_else(invalid)?.insert(key.clone(), target);
+    if !arguments(action, &args) { return Err(invalid()); }
+    Ok(args)
+}
+fn plugin_launch(program: String, entrypoint: String) -> Result<TrustedLaunch, PluginError> {
     let entrypoint = PathBuf::from(entrypoint);
     if !entrypoint.is_absolute() || entrypoint.file_name().is_none() {
         return Err(PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted));
     }
     let cwd = entrypoint.parent().ok_or_else(|| PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted))?.to_path_buf();
     let entrypoint = entrypoint.into_os_string().into_string().map_err(|_| PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted))?;
-    TrustedLaunch::new(PathBuf::from(program), vec![entrypoint], cwd)
+    // The catalog selects one fixed filename, never flags from a manifest or IPC.
+    // -B prevents bytecode caches from changing a trusted Python package on launch.
+    let args = if PathBuf::from(&entrypoint).extension().is_some_and(|ext| ext == "py") {
+        vec!["-E".into(), "-s".into(), "-B".into(), entrypoint]
+    } else { vec![entrypoint] };
+    TrustedLaunch::new(PathBuf::from(program), args, cwd)
 }
 impl PluginState {
     /// Desktop trust boundary ONLY. The UI must explicitly confirm trust before
-    /// invoking this. Program is a locally selected Node runtime; no shell or
+    /// invoking this. Program is a locally selected Node or Python runtime; no shell or
     /// caller-supplied flags, and only an absolute entrypoint is passed to it.
     pub async fn connect(&self, program: String, entrypoint: String) -> Result<PluginSnapshot, PluginError> {
         self.run(SessionOperation::Connect(program, entrypoint, None)).await
@@ -501,7 +577,7 @@ impl PluginState {
     pub async fn snapshot(&self) -> PluginSnapshot { self.session.lock().await.snapshot() }
     pub async fn state(&self) -> Result<PluginSnapshot, PluginError> { self.run(SessionOperation::State).await }
     pub async fn execute(&self, plugin_id: String, action_id: String, args: Value) -> Result<PluginSnapshot, PluginError> {
-        self.run(SessionOperation::Execute(plugin_id, action_id, args)).await
+        self.run(SessionOperation::Execute(plugin_id, action_id, args, None)).await
     }
     async fn run(&self, op: SessionOperation) -> Result<PluginSnapshot, PluginError> {
         let mut session = self.session.clone().lock_owned().await;
@@ -516,6 +592,7 @@ impl Session {
         PluginSnapshot { status: self.status, manifest: self.manifest.clone(), state: self.state.clone(), last_error: self.last_error.clone() }
     }
     async fn close(&mut self) {
+        self.permit = None;
         if let Some(host) = self.host.take() { let _ = host.stop().await; }
         self.state = None;
     }
@@ -533,8 +610,13 @@ impl Session {
                 self.manifest = None;
                 self.last_error = None;
                 self.status = ConnectionStatus::Stopped;
+                let permit = match self.running.as_ref().map(|running| running.clone().try_acquire_owned()) {
+                    Some(Ok(permit)) => Some(permit),
+                    Some(Err(_)) => { let error = capacity_error(); self.last_error = Some(error.clone()); return Err(error); }
+                    None => None,
+                };
                 let result = async {
-                    let host = PluginHost::new(node_launch(program, entrypoint)?);
+                    let host = PluginHost::new(plugin_launch(program, entrypoint)?);
                     let manifest = host.describe().await?;
                     if expected.as_ref().is_some_and(|expected| expected != &manifest) {
                         let _ = host.stop().await;
@@ -546,6 +628,7 @@ impl Session {
                     Ok((host, manifest)) => {
                         self.manifest = Some(manifest);
                         self.host = Some(host);
+                        self.permit = permit;
                         self.status = ConnectionStatus::Connected;
                         return Ok(self.snapshot());
                     }
@@ -563,11 +646,27 @@ impl Session {
         };
         let result = match op {
             SessionOperation::State => host.state().await,
-            SessionOperation::Execute(plugin_id, action_id, args) => {
+            SessionOperation::Execute(plugin_id, action_id, args, value) => {
                 if !identifier(&plugin_id) || !identifier(&action_id)
                     || self.manifest.as_ref().map(|m| m.id.as_str()) != Some(plugin_id.as_str()) {
                     Err(PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))
-                } else { host.execute(&action_id, args).await }
+                } else {
+                    let args = if let Some((value, toggle)) = value {
+                        let action = self.manifest.as_ref().and_then(|m| m.actions.iter().find(|a| a.id == action_id))
+                            .ok_or_else(|| PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))?;
+                        if toggle {
+                            let observed = action.config.values().find_map(|field| match field {
+                                ConfigField::Boolean { control: Some(control) } => self.state.as_ref().and_then(|s| s.get(&control.state_key)),
+                                _ => None,
+                            });
+                            if self.last_error.is_some() || !observed.is_some_and(Value::is_boolean) {
+                                return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+                            }
+                        }
+                        target_arguments(action, args, value, toggle)?
+                    } else { args };
+                    host.execute(&action_id, args).await
+                }
             }
             _ => unreachable!(),
         };
@@ -588,6 +687,31 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn sample() -> Value { json!({"id":"test","version":"0.0.1","protocolVersion":1,"actions":[{"id":"go","title":"Go","config":{"n":{"type":"integer","minimum":0,"maximum":100}}}]}) }
+    #[test]
+    fn presentation_contracts_validate_targets_and_preserve_other_saved_args() {
+        let mut value = sample();
+        value["actions"][0]["config"] = json!({"amount":{"type":"integer","minimum":-20,"maximum":200,"control":{"step":5}},"zone":{"type":"integer","minimum":1,"maximum":4}});
+        let m = manifest(value.clone()).unwrap(); let action = &m.actions[0];
+        assert_eq!(target_arguments(action, json!({"amount":50,"zone":2}), 75.0, false).unwrap(), json!({"amount":75,"zone":2}));
+        for target in [-25.0, 201.0, 2.0, 0.5, f64::NAN] { assert!(target_arguments(action, json!({"amount":50,"zone":2}), target, false).is_err()); }
+        assert!(target_arguments(action, json!({"amount":50,"zone":2}), 1.0, true).is_err());
+        assert!(target_arguments(action, json!({"amount":50,"zone":8}), 75.0, false).is_err());
+        assert!(target_arguments(action, json!({"amount":true,"zone":2}), 75.0, false).is_err());
+        value["actions"][0]["config"] = json!({"enabled":{"type":"boolean","control":{"stateKey":"enabled"}}});
+        let m = manifest(value.clone()).unwrap(); let action = &m.actions[0];
+        for (target, boolean) in [(0.0,false),(1.0,true)] {
+            assert_eq!(target_arguments(action, json!({"enabled":false}), target, true).unwrap(), json!({"enabled":boolean}));
+        }
+        for target in [-1.0, 2.0, 0.5] { assert!(target_arguments(action, json!({"enabled":false}), target, true).is_err()); }
+        assert!(target_arguments(action, json!({"enabled":false}), 1.0, false).is_err());
+        for field in [json!({"type":"boolean","control":null}), json!({"type":"boolean","minimum":0}), json!({"type":"boolean","control":{"stateKey":"../secret"}}),
+            json!({"type":"integer","minimum":-9007199254740991i64,"maximum":9007199254740991i64,"control":{"step":1}}),
+            json!({"type":"integer","minimum":0,"maximum":10,"control":{"step":0}}), json!({"type":"integer","minimum":0,"maximum":10,"control":{"step":3}})] {
+            value["actions"][0]["config"] = json!({"value":field}); assert!(manifest(value.clone()).is_err());
+        }
+        value["actions"][0]["config"] = json!({"a":{"type":"boolean","control":{"stateKey":"a"}},"b":{"type":"boolean","control":{"stateKey":"b"}}});
+        assert!(manifest(value).is_err());
+    }
     #[test]
     fn optional_icon_packs_match_sdk_bounds() {
         let icon = json!({"id":"play","title":"Play","category":"Media","src":"data:image/svg+xml;base64,PHN2Zy8+"});

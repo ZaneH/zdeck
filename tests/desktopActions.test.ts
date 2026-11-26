@@ -48,17 +48,44 @@ describe("explicit desktop Live actions", () => {
     h.patch({ savedRevision: 8 }); h.actions.enter(); await h.actions.press("ctl_mic");
     expect(h.dispatch.mock.calls[0][0].revision).toBe(8);
   });
-  it("admits one gesture at a time and accepts values only for saved volume controls", async () => {
+  it("serializes numeric gestures and delivers the latest final value, not intermediate releases", async () => {
     const h = harness(); h.actions.enter();
     let resolve!: (result: DesktopResult) => void;
     h.dispatch.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     const first = h.actions.press("ctl_volume", 63);
     await h.actions.press("ctl_volume", 64);
+    await h.actions.press("ctl_volume", 85);
     expect(h.dispatch).toHaveBeenCalledTimes(1);
     resolve({ id: "command-1", state: "confirmed", message: "Confirmed." }); await first;
     await h.actions.press("ctl_mic", 50); await h.actions.press("missing"); await h.actions.press("ctl_volume", 101);
-    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
     expect(h.dispatch.mock.calls[0][0]).toEqual({ commandId: "command-1", revision: 7, controlId: "ctl_volume", value: 63 });
+    expect(h.dispatch.mock.calls[1][0].value).toBe(85);
+  });
+  it("does not replay queued targets after an uncertain delivery or deck change", async () => {
+    for (const changeDeck of [false, true]) {
+      const h = harness(); h.actions.enter();
+      let resolve!: (result: DesktopResult) => void;
+      h.dispatch.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+      const first = h.actions.press("ctl_volume", 20);
+      await h.actions.press("ctl_volume", 90);
+      if (changeDeck) h.patch({ savedRevision: 8 });
+      resolve({ id: "command-1", state: changeDeck ? "confirmed" : "unknown", message: "Inspect before retrying." });
+      await first;
+      expect(h.dispatch).toHaveBeenCalledTimes(1);
+    }
+  });
+  it("routes declared plugin scalar targets, not saved values, and rejects incompatible presentations", async () => {
+    const h = harness();
+    const deck = createDefaultDeck();
+    deck.pages[0].controls.push({ id: "level", action: "plugin", label: "Level", pluginId: "mixer", pluginAction: "level", pluginArgs: { amount: 50 }, presentation: "dial" });
+    h.patch({ deck, plugins: { mixer: { status: "connected", state: {}, lastError: null, manifest: { id: "mixer", version: "1.0.0", protocolVersion: 1,
+      actions: [{ id: "level", title: "Level", config: { amount: { type: "integer", minimum: -20, maximum: 200, control: { step: 5 } } } }] } } } });
+    h.actions.enter();
+    await h.actions.press("level", 75);
+    expect(h.dispatch.mock.calls[0][0].value).toBe(75);
+    await h.actions.press("level", 76); await h.actions.press("level");
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
   });
   it("only explicitly checks an acknowledged pending request using exactly the same ID and body", async () => {
     const h = harness(); h.actions.enter();
