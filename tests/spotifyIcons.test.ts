@@ -14,8 +14,8 @@ describe("Spotify provided icons", () => {
     expect(validateManifest(manifest)).toEqual(manifest);
     expect(parsePluginManifest(manifest)).toEqual(manifest);
     expect(manifest.icons.map(({ id, title, category }) => ({ id, title, category }))).toEqual([
-      { id: "spotify-monochrome", title: "Spotify (monochrome)", category: "Media" },
-      { id: "spotify-original", title: "Spotify (original)", category: "Media" },
+      { id: "spotify-monochrome", title: "Spotify 1", category: "Media" },
+      { id: "spotify-original", title: "Spotify 2", category: "Media" },
     ]);
     for (const [index, file, mime] of [[0, "spotify-monochrome.svg", "svg+xml"], [1, "spotify-original.webp", "webp"]] as const) {
       const bytes = readFileSync(new URL(`../plugins/spotify/assets/${file}`, import.meta.url));
