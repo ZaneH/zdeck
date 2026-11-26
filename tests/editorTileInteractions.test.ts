@@ -1,0 +1,52 @@
+import { describe, expect, it, vi } from "vitest";
+import type { Control } from "../src/lib/types";
+
+vi.mock("react", async (original) => ({
+  ...await original<typeof import("react")>(),
+  useState: (value: unknown) => [value, vi.fn()],
+  useRef: (value: unknown) => ({ current: value }),
+  useEffect: vi.fn(),
+}));
+import { ControlTile } from "../src/components/ControlTile";
+
+const control: Control = { id: "volume", label: "Volume", action: "volume", volume: 50, presentation: "dial" };
+const event = (extra = {}) => ({ preventDefault: vi.fn(), stopPropagation: vi.fn(), ...extra });
+
+describe("Editor tile interactions", () => {
+  it("captures Alt + arrows before nested sliders/dials can change their targets", () => {
+    const move = vi.fn();
+    const tile = ControlTile({ control, variant: "editor", volume: 50, order: { index: 1, total: 3, move } });
+    const key = event({ key: "ArrowDown", altKey: true, ctrlKey: false, metaKey: false });
+    tile.props.onKeyDownCapture(key);
+    expect(move).toHaveBeenCalledWith(control.id, 2);
+    expect(key.preventDefault).toHaveBeenCalledOnce();
+    expect(key.stopPropagation).toHaveBeenCalledOnce();
+  });
+
+  it("captures Editor tile clicks as selection, not a nested target/action gesture", () => {
+    const select = vi.fn(), commit = vi.fn();
+    const tile = ControlTile({ control, variant: "editor", volume: 50, onPrimary: select, onVolumeCommit: commit,
+      order: { index: 0, total: 2, move: vi.fn() } });
+    const click = event();
+    tile.props.onClickCapture(click);
+    expect(click.stopPropagation).toHaveBeenCalledOnce();
+    expect(select).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("does not intercept phone or Live gestures, or reorder disabled tiles", () => {
+    const move = vi.fn(), select = vi.fn();
+    for (const variant of ["phone", "editor"] as const) {
+      const tile = ControlTile({ control, variant, semantics: variant === "phone" ? "preview" : "live", volume: 50, onPrimary: select });
+      const click = event();
+      tile.props.onClickCapture(click);
+      expect(click.stopPropagation).not.toHaveBeenCalled();
+    }
+    const disabled = ControlTile({ control, variant: "editor", volume: 50, disabled: true, onPrimary: select,
+      order: { index: 0, total: 2, move } });
+    disabled.props.onClickCapture(event());
+    disabled.props.onKeyDownCapture(event({ key: "ArrowDown", altKey: true }));
+    expect(select).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+});

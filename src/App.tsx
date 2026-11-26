@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Moon, Plus, Settings, Smartphone, Sun } from "lucide-react";
+import { ArrowLeft, Moon, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone, Sun } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -35,6 +35,8 @@ import {
   STORAGE_KEY,
   setupDismissed,
   dismissSetup,
+  loadSidebar,
+  saveSidebar,
 } from "./lib/persistence";
 import type { LoadStatus } from "./lib/persistence";
 import { nativeAvailable } from "./lib/native";
@@ -129,6 +131,12 @@ export default function App() {
   const serviceRestore = useRestoreRemoteService();
   const [initial] = useState(() => loadDeck(getStorage()));
   const [route, setRoute] = useState<Route>(() => parseRoute());
+  const [sidebar, setSidebar] = useState(() => loadSidebar(getStorage()));
+  const toggleSidebar = () => {
+    const collapsed = !sidebar.collapsed;
+    const saved = saveSidebar(getStorage(), collapsed);
+    setSidebar({ collapsed, error: saved ? null : "Sidebar preference was not saved. Storage is unavailable or full; this choice may not survive a restart." });
+  };
   const [deck, setDeck] = useState<Deck>(initial.deck);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>(initial.status);
   const [saveError, setSaveError] = useState(initial.status === "unavailable");
@@ -387,28 +395,6 @@ export default function App() {
     );
   }
 
-  const obsPill = !obs.native
-    ? {
-        title: "This build has no desktop connection.",
-        text: "Local preview only. No desktop actions are sent.",
-      }
-    : obs.status === "connected"
-      ? {
-          title: `Connected to local OBS. Last checked ${new Date(
-            obs.snapshot?.observedAtMs ?? Date.now(),
-          ).toLocaleTimeString()}.`,
-          text: obs.currentScene ? `OBS connected to ${obs.currentScene}.` : "OBS connected. Current scene unknown.",
-        }
-      : obs.status === "connecting"
-        ? {
-            title: "Connecting to the local OBS Studio WebSocket server.",
-            text: "Connecting to OBS…",
-          }
-        : {
-            title: "The desktop app is running; OBS is not connected.",
-            text: "OBS is not connected.",
-          };
-
   const nativeWriteError =
     nativeSave.phase === "error" || nativeSave.phase === "conflict"
       ? nativeSave.error
@@ -450,6 +436,10 @@ export default function App() {
     <div
       className="app-shell"
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
+      onClick={(event) => {
+        if (route === "editor" && event.target instanceof Element &&
+          !event.target.closest(".control-tile, .inspector-dock, dialog")) setSelectedControlId(null);
+      }}
     >
       <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
         <a className="brand" href="#/" aria-label="zDeck editor"><BrandMark /></a>
@@ -462,7 +452,7 @@ export default function App() {
         ) : <a className="back-link" href="#/"><ArrowLeft size={15} aria-hidden="true" /> Back to deck</a>}
         <div className="topbar-spacer" />
         {nativeMode && route === "editor" ? <div className="segmented desktop-mode" role="group" aria-label="Desktop control mode">
-          <button type="button" className="button secondary" aria-pressed={!desktop.live} onClick={desktop.preview}>Preview</button>
+          <button type="button" className="button secondary" aria-pressed={!desktop.live} onClick={desktop.preview}>Editor</button>
           <button type="button" className="button secondary" aria-pressed={desktop.live}
             disabled={!desktop.ready || desktop.inflight || !!desktop.pending}
             onClick={() => { setPreviewNotice(null); desktop.enter(); }}>Live</button>
@@ -472,6 +462,12 @@ export default function App() {
             <Plus size={15} aria-hidden="true" /> Add control
           </button>
         ) : null}
+
+        {route === "editor" ? <button type="button" className="icon-button"
+          aria-label={sidebar.collapsed ? "Expand Inspector sidebar" : "Collapse Inspector sidebar"}
+          aria-expanded={!sidebar.collapsed} aria-controls="inspector-sidebar" onClick={toggleSidebar}>
+          {sidebar.collapsed ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />}
+        </button> : null}
 
         <a
           className="button secondary"
@@ -583,8 +579,8 @@ export default function App() {
           <details className="settings-card preview-scope">
             <summary className="disclosure">About this preview</summary>
             <p>
-              Desktop tiles default to Preview. Explicit Live mode runs saved controls on this computer without a phone or phone service.
-              Editing or leaving the editor returns to Preview. The phone preview is always simulated. In the
+              Desktop tiles default to Editor. Explicit Live mode runs saved controls on this computer without a phone or phone service.
+              Editing or leaving the editor returns to Editor. The phone preview is always simulated. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
               connected. Microphone mute, output volume, and system play/pause
               work on macOS, Windows, and Linux. Audio actions read their state
@@ -618,7 +614,7 @@ export default function App() {
           </>} />
         </main>
       ) : (
-        <main className="workspace" id="main">
+        <main className={`workspace${sidebar.collapsed ? " sidebar-collapsed" : ""}`} id="main">
           <section className="canvas-panel" aria-labelledby="page-title">
             <h1 id="page-title" className="sr-only" tabIndex={-1}>{page.name}</h1>
             {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error} <a className="button secondary small" href="#/settings/phone">Review service settings</a></p> : null}
@@ -628,11 +624,9 @@ export default function App() {
               </p>
             ) : null}
 
-            {nativeMode ? <p className={`desktop-mode-note${desktop.live ? " is-live" : ""}`} role="status">
-              {desktop.live ? "Live — presses run on this computer" : "Preview — tiles select controls; no desktop tile actions are sent."}
-              {!desktop.ready ? " Save a valid synchronized deck before entering Live." : ""}
-            </p> : null}
-            {!desktop.live ? <p className="reorder-note">Drag a key’s grip to reorder, or open it to choose a position.</p> : null}
+            {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
+            {nativeMode && !desktop.ready ? <p className="desktop-mode-note">Save a valid synchronized deck before entering Live.</p> : null}
+            {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys.</p> : null}
             <div className="deck-workbench">
               <div className="control-grid">
                 {page.controls.map((control, index) => (
@@ -676,18 +670,26 @@ export default function App() {
               </div>
             </div>
 
-            <div className="workspace-footer">
-              {desktop.inflight || (desktop.result && desktop.result.code !== "media_key_sent") || desktop.error ? <p className={`native-feedback is-${desktop.inflight ? "pending" : desktop.result?.state ?? (desktop.error ? "failed" : "pending")}`}
-                role={!desktop.inflight && desktop.result?.state === "unknown" ? "alert" : "status"} aria-live={!desktop.inflight && desktop.result?.state === "unknown" ? "assertive" : "polite"}>
-                {desktop.inflight ? "Running saved control on this computer…" : `Last desktop result: ${desktop.error ?? desktop.result?.message}`}
-              </p> : <p className="preview-feedback" title={desktop.live ? undefined : obsPill.title} role="status" aria-live="polite">
-                {desktop.live ? "Live is ready. Only saved control IDs are sent; nothing runs until you press." : previewNotice ?? obsPill.text}
-              </p>}
-              {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check().then(() => plugin.refreshSnapshots())}>Check result</button> : null}
-            </div>
           </section>
 
-          <section className="inspector-dock" aria-label="Control properties">
+          <section className="inspector-dock" id="inspector-sidebar" aria-label="Control properties" hidden={sidebar.collapsed}>
+            {selectedControl && !desktop.live ? <label className="field"><span>Position</span>
+              <select aria-label={`Position of ${selectedControl.label}`} value={page.controls.indexOf(selectedControl)}
+                disabled={desktop.inflight || !!desktop.pending}
+                onChange={(event) => handleMoveControl(selectedControl.id, Number(event.target.value))}
+                onKeyDown={(event) => {
+                  if (event.altKey || event.ctrlKey || event.metaKey) return;
+                  const index = page.controls.indexOf(selectedControl);
+                  const target = event.key === "Home" ? 0 : event.key === "End" ? page.controls.length - 1
+                    : event.key === "ArrowUp" ? Math.max(0, index - 1)
+                    : event.key === "ArrowDown" ? Math.min(page.controls.length - 1, index + 1) : null;
+                  if (target === null) return;
+                  event.preventDefault();
+                  handleMoveControl(selectedControl.id, target);
+                }}>
+                {page.controls.map((control, index) => <option key={control.id} value={index}>{index + 1} of {page.controls.length}</option>)}
+              </select>
+            </label> : null}
             <Inspector
               key={selectedControl?.id ?? "empty"}
               control={selectedControl}
@@ -704,6 +706,13 @@ export default function App() {
               }
             />
           </section>
+          <footer className="workspace-footer">
+            {desktop.live ? <span className="desktop-live-indicator" role="status" aria-label="Live: controls run on this computer">LIVE</span> : null}
+            {desktop.error || (desktop.result && desktop.result.state !== "confirmed" && desktop.result.code !== "media_key_sent") ? <p className={`native-feedback is-${desktop.result?.state ?? "failed"}`} role="alert">
+              {desktop.error ?? desktop.result?.message}
+            </p> : !desktop.live && previewNotice ? <p className="preview-feedback" role="status">{previewNotice}</p> : null}
+            {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check().then(() => plugin.refreshSnapshots())}>Check result</button> : null}
+          </footer>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
             manifests={enabledPluginManifests(plugin.snapshots)}

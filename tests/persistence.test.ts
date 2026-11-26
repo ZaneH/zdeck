@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { addControl, createDefaultDeck, findControl, updateControl } from "../src/lib/deck";
 import {
   loadDeck,
+  loadSidebar,
+  saveSidebar,
   saveDeck,
   STORAGE_KEY,
   setupDismissed,
@@ -48,6 +50,26 @@ describe("setup dismissal", () => {
     expect(setupDismissed(throwingStorage)).toBe(false);
     expect(() => dismissSetup(null)).not.toThrow();
     expect(() => dismissSetup(throwingStorage)).not.toThrow();
+  });
+});
+
+describe("sidebar preference", () => {
+  it("defaults expanded and round-trips both explicit choices independently of the deck", () => {
+    const storage = new MemoryStorage();
+    expect(loadSidebar(storage)).toEqual({ collapsed: false, error: null });
+    for (const collapsed of [true, false]) {
+      expect(saveSidebar(storage, collapsed)).toBe(true);
+      expect(loadSidebar(storage)).toEqual({ collapsed, error: null });
+    }
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("launches expanded with a visible error for absent, blocked or invalid storage", () => {
+    for (const storage of [null, throwingStorage, { getItem: () => "invalid", setItem() {} }]) {
+      expect(loadSidebar(storage)).toEqual({ collapsed: false, error: expect.any(String) });
+    }
+    expect(saveSidebar(null, true)).toBe(false);
+    expect(saveSidebar(throwingStorage, false)).toBe(false);
   });
 });
 

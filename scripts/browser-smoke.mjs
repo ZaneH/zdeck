@@ -290,6 +290,13 @@ async function typeInput(page, selector, text) {
   await page.eval(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.focus(); input.select(); })()`);
   await page.send('Input.insertText', { text });
 }
+// Mode toolbar clicks intentionally deselect. Select the same numeric/toggle tile again before testing its gestures.
+async function presentationMode(page, mode) {
+  const index = await page.eval("[...document.querySelectorAll('.control-tile')].findIndex(tile => tile.classList.contains('is-selected'))");
+  await page.eval(clickText('.desktop-mode button', mode));
+  await page.eval(click(`.control-tile:nth-child(${index + 1}) .tile-primary`));
+}
+
 async function pressKey(page, key, code, vk, text) {
   await page.send("Page.bringToFront").catch(() => {});
   const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
@@ -574,39 +581,58 @@ try {
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
   check('sidebar sections collapse with the keyboard', await editor.waitFor("(() => { const section = document.querySelector('.span-fields').parentElement; return !section.open && section.getBoundingClientRect().height <= section.querySelector('summary').getBoundingClientRect().height + 14; })()"));
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
-  await editor.eval("document.querySelector('.control-tile.is-selected .tile-order > summary').focus()");
-  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
-  check('keyboard opens a labelled position alternative to dragging', await editor.eval("document.querySelector('.control-tile.is-selected .tile-order').open && !!document.querySelector('.control-tile.is-selected .tile-order select[aria-label]')"));
+  check('Inspector offers a labelled position alternative without drag handles', await editor.eval("!document.querySelector('.tile-order') && !!document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]')"));
   const orderBefore = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
-  await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '3'));
+  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '3'));
   const orderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
   check('position menu moves a control without swapping intervening controls', orderAfter === 'Starting soon|Mic mute|Play / pause|Go live edited', `${orderBefore} -> ${orderAfter}`);
   const keyboardOrderBefore = orderAfter;
-  await editor.eval("document.querySelector('.control-tile.is-selected .tile-order select').focus()");
+  await editor.eval("document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]').focus()");
   await pressKey(editor, 'Home', 'Home', 36);
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
   const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
   check('keyboard selection of a position reorders the control', keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
 
+  await editor.eval("document.querySelector('.control-tile.is-selected .tile-primary').focus()");
+  await editor.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, modifiers: 1 });
+  await editor.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, modifiers: 1 });
+  check('Alt + arrow reorders a focused tile without pressing it', await editor.waitFor("document.querySelectorAll('.control-tile')[1].classList.contains('is-selected') && document.activeElement.matches('.control-tile.is-selected .tile-primary') && !document.querySelector('.is-pressed')"));
+  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '0'));
+
   // Real pointer input catches failures that synthetic native drag events miss.
   await editor.eval("document.querySelector('.control-tile').scrollIntoView({block:'center'})");
   await editor.send('Page.bringToFront');
-  const reorderGrip = await editor.eval(rectOf('.control-tile .tile-order summary'));
+  const reorderGrip = await editor.eval(rectOf('.control-tile .tile-primary'));
   const reorderTarget = await editor.eval(rectOf('.control-tile:nth-child(2)'));
   await editor.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: reorderGrip.cx, y: reorderGrip.cy, button: 'left', buttons: 1, clickCount: 1 });
   await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderGrip.cx + 10, y: reorderGrip.cy, button: 'left', buttons: 1 });
   await editor.waitFor("!!document.querySelector('.is-dragging')");
   await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 1 });
-  check('drag handle and drop target provide clear feedback', await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  check('whole tile dragging and drop target provide clear feedback', await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
   check('placement preview uses a solid translucent fill and grabbing cursor', await editor.eval("(() => { const target = document.querySelector('.is-drop-target'); const preview = getComputedStyle(target, '::after'); return preview.borderTopStyle === 'solid' && preview.borderTopWidth === '3px' && preview.backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(target).cursor === 'grabbing'; })()"));
   await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
   await editor.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
   check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-footer').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
-  await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '0'));
-  const clickGrip = await editor.eval(rectOf('.control-tile.is-selected .tile-order summary'));
-  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
-  check('clicking the grip without dragging opens the position menu', await editor.waitFor("document.querySelector('.control-tile.is-selected .tile-order').open"));
-  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
+  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '0'));
+  const clickTile = await editor.eval(rectOf('.control-tile.is-selected .tile-primary'));
+  await pointerClick(editor, clickTile.cx, clickTile.cy);
+  check('clicking a tile without dragging selects without pressing', await editor.waitFor("!!document.querySelector('.control-tile.is-selected') && !document.querySelector('.is-pressed')"));
+  await editor.eval(click('.deck-workbench'));
+  check('clicking elsewhere clears the selection', await editor.waitFor("!document.querySelector('.control-tile.is-selected') && !document.querySelector('.inspector-form')"));
+  await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
+  await editor.eval(click('[aria-label="Collapse Inspector sidebar"]'));
+  check('sidebar collapses with an always-reachable expand toggle', await editor.waitFor("document.querySelector('.inspector-dock').hidden && document.querySelector('[aria-label=\"Expand Inspector sidebar\"]').getAttribute('aria-expanded') === 'false'"));
+  await editor.reload();
+  check('explicit collapsed sidebar choice survives reload', await editor.waitFor("document.querySelector('.inspector-dock').hidden"));
+  await editor.eval(click('[aria-label="Expand Inspector sidebar"]'));
+  await editor.reload();
+  check('explicit expanded sidebar choice survives reload', await editor.waitFor("!document.querySelector('.inspector-dock').hidden"));
+  await editor.eval("window.__originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new Error('Storage full'); }");
+  await editor.eval(click('[aria-label="Collapse Inspector sidebar"]'));
+  check('sidebar persistence failure stays visible without blocking its toggle', await editor.waitFor("document.querySelector('.storage-alert[role=alert]')?.textContent.includes('Sidebar preference was not saved') && document.querySelector('.inspector-dock').hidden"));
+  await editor.eval("Storage.prototype.setItem = window.__originalSetItem");
+  await editor.eval(click('[aria-label="Expand Inspector sidebar"]'));
+  await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
 
   // Spans persist without forcing extra implicit columns on narrower grids.
   check('action dropdown header has no action icon', await editor.eval("!document.querySelector('.action-picker > summary .lucide:not(.icon-picker-toggle)')"));
@@ -1243,11 +1269,11 @@ try {
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await presentationMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile.is-selected input[type=range]').focus()");
   await pressKey(admin, 'End', 'End', 35);
   check('Spotify slider persists and dispatches a scalar desktop target', await admin.waitFor("window.__desktopCalls.length === 1") && await admin.eval("window.__desktopCalls[0].value === 100 && Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision,value' && window.__lastSavedDeck.pages.flatMap(p => p.controls).find(c => c.id === window.__desktopCalls[0].controlId)?.presentation === 'slider'"));
-  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await presentationMode(admin, 'Editor');
   await admin.eval("window.__desktopCalls = []");
   // Declared controls: actual keyboard/pointer gestures, fake IPC only.
   await admin.eval(click('.add-control'));
@@ -1256,7 +1282,7 @@ try {
   await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')");
   check('new generic numeric actions default to sliders with declared bounds', await admin.eval("(() => { const input = document.querySelector('.control-tile.is-selected input'); return input.min === '-20' && input.max === '200' && input.step === '5'; })()"));
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await presentationMode(admin, 'Live');
   await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected input').focus()");
   await pressKey(admin, 'End', 'End', 35);
   await admin.waitFor("window.__desktopCalls.length === 1");
@@ -1276,7 +1302,7 @@ try {
   await admin.eval('window.__holdDesktop = false; window.__finishDesktop()');
   check('busy pointer slider coalesces movement and release into the final target', await admin.waitFor(`window.__desktopCalls.length === 4 && window.__desktopCalls.at(-1).value === ${pointerFinal}`));
   await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
-  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await presentationMode(admin, 'Editor');
   await admin.eval(click('.presentation-picker summary'));
   await admin.eval(clickText('.presentation-picker button', 'Dial'));
   await admin.waitFor("!!document.querySelector('.control-tile.is-selected .dial-face')");
@@ -1284,7 +1310,7 @@ try {
   await pressKey(admin, 'End', 'End', 35);
   check('dial keyboard exposes the declared maximum and value', await admin.eval("document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow') === '200'"));
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await presentationMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
   await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
   check('live dial keyboard sends before keyup', await admin.waitFor('window.__desktopCalls.length === 5 && window.__desktopCalls.at(-1).value === -20'));
@@ -1298,7 +1324,7 @@ try {
   check('live dial touch movement sends before release', await admin.waitFor('window.__desktopCalls.length === 6 && window.__desktopCalls.at(-1).value > -20'));
   await admin.send('Input.dispatchTouchEvent', {type:'touchCancel',touchPoints:[]});
   check('dial touch cancellation sends no extra target', await admin.eval('window.__desktopCalls.length === 6'));
-  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await presentationMode(admin, 'Editor');
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
   await pressKey(admin, 'End', 'End', 35);
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').scrollIntoView({block:'center'})");
@@ -1306,19 +1332,19 @@ try {
   await admin.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:dial.cx,y:dial.cy}]});
   await admin.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:dial.cx,y:dial.cy+50}]});
   await admin.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
-  check('dial supports touch without native execution in Preview', await admin.eval("Number(document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow')) < 200 && window.__desktopCalls.length === 6"));
+  check('Editor dial surface drags the tile without changing its target or executing', await admin.eval("Number(document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow')) === 200 && window.__desktopCalls.length === 6 && !document.querySelector('.is-dragging')"));
   await admin.eval(click('.add-control')); await admin.waitFor("!!document.querySelector('.action-row')");
   await admin.eval(clickText('.action-row', 'Generic power'));
   await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
   await admin.eval(click('.presentation-picker summary'));
   await admin.eval(clickText('.presentation-picker button', 'Toggle switch'));
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await presentationMode(admin, 'Live');
   check('live unknown toggle is disabled without claiming Off', await admin.eval("document.querySelector('.control-tile.is-selected .tile-toggle').disabled && !document.querySelector('.control-tile.is-selected .tile-toggle').hasAttribute('aria-checked') && document.querySelector('.control-tile.is-selected .tile-toggle').textContent.includes('State unknown')"));
-  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await presentationMode(admin, 'Editor');
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-checked') === 'false'");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await presentationMode(admin, 'Live');
   await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected [role=switch]').focus()");
   await pressKey(admin, ' ', 'Space', 32, ' ');
   check('busy switch preserves focus and blocks a second activation', await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-disabled') === 'true'") && await admin.eval("(() => { const toggle = document.querySelector('.control-tile.is-selected [role=switch]'); toggle.click(); return document.activeElement === toggle && window.__desktopCalls.length === 7; })()"));
@@ -1328,7 +1354,7 @@ try {
   await admin.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   check('switch respects reduced motion', await admin.eval("parseFloat(getComputedStyle(document.querySelector('.control-tile.is-selected .toggle-track span')).transitionDuration) <= .001"));
   await admin.send('Emulation.setEmulatedMedia', {features:[]});
-  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await presentationMode(admin, 'Editor');
   await admin.eval(click('.presentation-picker summary'));
   await admin.eval(clickText('.presentation-picker button', 'Toggle button'));
   check('toggle button exposes observed pressed state', await admin.waitFor("document.querySelector('.control-tile.is-selected .tile-toggle')?.getAttribute('aria-pressed') === 'true'"));
@@ -1344,6 +1370,8 @@ try {
   check('phone preview renders the saved SVG', await admin.waitFor("document.querySelector('.phone-shell .control-tile[data-action=plugin] img')?.naturalWidth > 0"));
   check('phone preview simulates the plugin without native execution', await admin.eval(`window.__adminCalls.filter(c => c === 'plugin_execute').length === ${executions} && document.querySelector('.phone-shell').textContent.includes('Preview only')`));
   await admin.eval("location.hash = '#/'");
+  await admin.waitFor("!!document.querySelector('.control-tile[data-action=plugin]')");
+  await admin.eval(clickText('.control-tile .tile-primary', 'Spotify <volume>'));
   await admin.waitFor("!!document.querySelector('.inspector-form .native-control')");
   await admin.eval("window.__failPlugin = true");
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
@@ -1371,19 +1399,23 @@ try {
   // ------------------------------------------------------------ explicit offline desktop Live mode (fake IPC only)
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.desktop-mode')");
-  check('native editor defaults Preview and never needs the phone service', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
+  check('native editor defaults Editor and never needs the phone service', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
   await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
-  check('Preview tile selection never invokes a desktop action', await admin.eval("window.__desktopCalls.length === 0"));
+  check('Editor tile selection never invokes a desktop action', await admin.eval("window.__desktopCalls.length === 0"));
   await admin.eval(clickText('.desktop-mode button', 'Live'));
-  check('entering Live labels risk but does not execute anything', await admin.waitFor("document.querySelector('.desktop-mode-note').textContent.includes('Live — presses run on this computer')") && await admin.eval("window.__desktopCalls.length === 0"));
+  check('entering Live shows a compact accent indicator without executing', await admin.waitFor("document.querySelector('.desktop-live-indicator')?.textContent === 'LIVE'") && await admin.eval("window.__desktopCalls.length === 0 && !document.querySelector('.desktop-mode-note') && !document.querySelector('.is-reorderable')"));
+  await admin.eval(click('[aria-label="Collapse Inspector sidebar"]'));
+  check('Live keeps the expand toggle reachable while the sidebar is hidden', await admin.waitFor("document.querySelector('.inspector-dock').hidden && !!document.querySelector('[aria-label=\"Expand Inspector sidebar\"]') && !!document.querySelector('.desktop-live-indicator')"));
+  await admin.eval(click('[aria-label="Expand Inspector sidebar"]'));
+  check('Live footer fills the application height rather than following the controls', await admin.eval("(() => { const footer = document.querySelector('.workspace-footer'); const bounds = footer.getBoundingClientRect(); const workspace = document.querySelector('.workspace'); return footer.parentElement === workspace && Math.abs(bounds.bottom - (innerHeight - parseFloat(getComputedStyle(workspace).paddingBottom))) < 2 && document.documentElement.scrollHeight <= innerHeight; })()"));
   await admin.eval("window.__holdDesktop = true");
   await admin.eval("document.querySelector('.control-tile[data-action=mic-mute] button').click(); document.querySelector('.control-tile[data-action=mic-mute] button').click()");
   check('Live dispatches one saved control with flat revision envelope and disables doublepress', await admin.waitFor("window.__desktopCalls.length === 1 && document.querySelector('.control-tile button').disabled") && await admin.eval("Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision' && window.__desktopCalls[0].controlId === 'ctl_mic' && Number.isSafeInteger(window.__desktopCalls[0].revision)"));
   await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
-  await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('Action confirmed')");
+  check('confirmed actions keep the footer quiet', await admin.waitFor("!document.querySelector('.control-tile button').disabled && !document.querySelector('.native-feedback') && document.querySelector('.workspace-footer').textContent === 'LIVE'"));
   await admin.eval("window.__holdSave = true");
   await admin.eval(setSelect('#page-switcher', 'page_media'));
-  check('page edits immediately return Preview and block Live while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview' && document.querySelectorAll('.desktop-mode button')[1].disabled"));
+  check('page edits immediately return Editor and block Live while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor' && document.querySelectorAll('.desktop-mode button')[1].disabled"));
   await admin.eval("window.__holdSave = false; window.__finishSave()");
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
   await admin.eval(clickText('.desktop-mode button', 'Live'));
@@ -1401,11 +1433,11 @@ try {
   check('phone preview remains simulated after leaving Live', await admin.eval("window.__desktopCalls.length === 2 && document.querySelector('.phone-shell').textContent.includes('Preview only')"));
   await admin.eval("location.hash = '#/'");
   await admin.waitFor("!!document.querySelector('.desktop-mode')");
-  check('returning from phone preview requires explicit re-entry to Live', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'"));
+  check('returning from phone preview requires explicit re-entry to Live', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'"));
   await admin.eval("window.__desktopResult = 'unknown'");
   await admin.eval(clickText('.desktop-mode button', 'Live'));
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
-  check('unknown desktop result warns prominently and returns Preview without retry', await admin.waitFor("document.querySelector('.workspace-footer [role=alert]')?.textContent.includes('Outcome unknown') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'") && await admin.eval("window.__desktopCalls.length === 3 && !document.querySelector('.workspace-footer button')"));
+  check('unknown desktop result warns prominently and returns Editor without retry', await admin.waitFor("document.querySelector('.workspace-footer [role=alert]')?.textContent.includes('Outcome unknown') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'") && await admin.eval("window.__desktopCalls.length === 3 && !document.querySelector('.workspace-footer button')"));
   await admin.eval("window.__desktopResult = 'pending'");
   await admin.eval(clickText('.desktop-mode button', 'Live'));
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
@@ -1416,7 +1448,7 @@ try {
   check('explicit pending check reuses exactly the same ID and request', await admin.waitFor("window.__desktopCalls.length === 5 && !document.querySelector('.workspace-footer button')") && await admin.eval("JSON.stringify(window.__desktopCalls[3]) === JSON.stringify(window.__desktopCalls[4])"));
   await admin.eval("window.__desktopError = 'stale_revision'");
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
-  check('stale revision errors return Preview and never expose raw diagnostics', await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('saved deck changed') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Preview'") && await admin.eval("!document.querySelector('.workspace-footer').textContent.includes('raw secret')"));
+  check('stale revision errors return Editor and never expose raw diagnostics', await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('saved deck changed') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'") && await admin.eval("!document.querySelector('.workspace-footer').textContent.includes('raw secret')"));
   await admin.eval("window.__failSave = true");
   await admin.eval(setValue('.inspector-form input[type=text]', 'Edited after Live'));
   check('a failed save keeps Live disabled', await admin.waitFor("document.querySelectorAll('.desktop-mode button')[1].disabled && document.querySelector('.storage-alert')?.textContent.includes('could not be saved')"));
@@ -1647,12 +1679,12 @@ try {
   check('full editor with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
   check('narrow editor stacks the inspector below the grid', await narrow.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom - 1"));
   check('full page does not offer an extra control slot', await narrow.eval("!document.querySelector('.empty-key')"));
-  check('narrow editor reorder targets are touch-sized', await narrow.waitFor("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
-  await narrow.eval("document.querySelector('.tile-order > summary').scrollIntoView({block:'center'})");
-  const touchOrderHandle = await narrow.eval(rectOf('.tile-order > summary'));
+  check('narrow editor reorder targets are whole touch-sized tiles', await narrow.waitFor("[...document.querySelectorAll('.control-tile')].every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44 && getComputedStyle(el).cursor === 'grab'; })"));
+  await narrow.eval("document.querySelector('.control-tile').scrollIntoView({block:'center'})");
+  const touchOrderHandle = await narrow.eval(rectOf('.control-tile'));
   await narrow.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x:touchOrderHandle.cx,y:touchOrderHandle.cy}] });
   await narrow.send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] });
-  check('touch opens the labelled position alternative without pressing the key', await narrow.waitFor("document.querySelector('.tile-order').open && !!document.querySelector('.tile-order select[aria-label]') && !document.querySelector('.is-pressed')"));
+  check('touch selects with a labelled position alternative without pressing the key', await narrow.waitFor("!!document.querySelector('.control-tile.is-selected') && !!document.querySelector('.inspector-dock select[aria-label]') && !document.querySelector('.is-pressed')"));
   await narrow.eval("location.hash = '#/phone'");
   await narrow.waitFor("!!document.querySelector('.phone-shell')");
   check('full phone deck with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));

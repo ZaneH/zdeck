@@ -3,6 +3,26 @@ import type { Deck, StorageLike } from "./types";
 
 export const STORAGE_KEY = "deck.local.v1";
 const SETUP_KEY = "deck.setup.v1";
+const SIDEBAR_KEY = "deck.sidebar.v1";
+
+export function loadSidebar(storage: StorageLike | null): { collapsed: boolean; error: string | null } {
+  try {
+    if (!storage) throw new Error("Storage unavailable");
+    const value = storage.getItem(SIDEBAR_KEY);
+    if (value !== null && value !== "collapsed" && value !== "expanded") throw new Error("Invalid preference");
+    return { collapsed: value === "collapsed", error: null };
+  } catch {
+    return { collapsed: false, error: "Sidebar preference could not be loaded. Using the expanded sidebar for this session." };
+  }
+}
+
+export function saveSidebar(storage: StorageLike | null, collapsed: boolean): boolean {
+  try {
+    if (!storage) return false;
+    storage.setItem(SIDEBAR_KEY, collapsed ? "collapsed" : "expanded");
+    return true;
+  } catch { return false; }
+}
 
 export function setupDismissed(storage: StorageLike | null): boolean {
   try { return storage?.getItem(SETUP_KEY) === "dismissed"; }

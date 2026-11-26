@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { GripVertical } from "lucide-react";
 import { controlContract, effectivePresentation, presentationCompatible } from "../lib/presentations";
 import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
@@ -98,6 +97,21 @@ export function ControlTile({
       } as CSSProperties}
       data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
       data-order-index={order?.index}
+      onPointerDownCapture={(event) => {
+        if (!order || disabled || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.querySelector<HTMLButtonElement>(".tile-primary")?.focus();
+        suppressClick.current = false;
+        drag.current = { x: event.clientX, y: event.clientY, active: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onClickCapture={(event) => {
+        if (!order) return;
+        event.stopPropagation();
+        if (!disabled && !suppressClick.current) onPrimary?.();
+        suppressClick.current = false;
+      }}
       onPointerMove={(event) => {
         const gesture = drag.current;
         if (!gesture || disabled) return;
@@ -106,7 +120,6 @@ export function ControlTile({
           gesture.active = true;
           event.currentTarget.setPointerCapture(event.pointerId);
           suppressClick.current = true;
-          event.currentTarget.querySelector("details")!.open = false;
           setDragging(true);
         }
         const source = event.currentTarget;
@@ -125,49 +138,25 @@ export function ControlTile({
       }}
       onPointerCancel={clearDrag}
       onLostPointerCapture={(event) => { if (event.target === event.currentTarget) clearDrag(); }}
-      onKeyDown={(event) => { if (event.key === "Escape") clearDrag(); }}
+      onKeyDownCapture={(event) => {
+        if (event.key === "Escape") clearDrag();
+        if (!order || disabled || !event.altKey || event.ctrlKey || event.metaKey) return;
+        const target = event.key === "ArrowUp" || event.key === "ArrowLeft" ? order.index - 1
+          : event.key === "ArrowDown" || event.key === "ArrowRight" ? order.index + 1 : null;
+        if (target === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        order.move(control.id, Math.max(0, Math.min(order.total - 1, target)));
+      }}
     >
-      {order ? <details className="tile-order">
-        <summary aria-label={`Move ${control.label}`} title="Drag to reorder, or choose a position"
-          draggable={false} aria-disabled={disabled || undefined}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (disabled || suppressClick.current) event.preventDefault();
-            suppressClick.current = false;
-          }}
-          onDragStart={(event) => event.preventDefault()}
-          onPointerDown={(event) => {
-            if (disabled || event.button !== 0) return;
-            event.preventDefault();
-            event.currentTarget.focus();
-            suppressClick.current = false;
-            drag.current = { x: event.clientX, y: event.clientY, active: false };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}>
-          <GripVertical size={16} aria-hidden="true" />
-        </summary>
-        <label className="field"><span>Position</span><select aria-label={`Position of ${control.label}`} value={order.index} disabled={disabled}
-          onChange={(event) => order.move(control.id, Number(event.target.value))}
-          onKeyDown={(event) => {
-            if (event.altKey || event.ctrlKey || event.metaKey) return;
-            const target = event.key === "Home" ? 0 : event.key === "End" ? order.total - 1
-              : event.key === "ArrowUp" ? Math.max(0, order.index - 1)
-              : event.key === "ArrowDown" ? Math.min(order.total - 1, order.index + 1) : null;
-            if (target === null) return;
-            event.preventDefault();
-            const select = event.currentTarget;
-            order.move(control.id, target);
-            window.requestAnimationFrame(() => select.focus());
-          }}>
-          {Array.from({ length: order.total }, (_, index) => <option key={index} value={index}>{index + 1} of {order.total}</option>)}
-        </select></label>
-      </details> : null}
       {(numeric || toggle) && variant === "phone" ? (
         <div className="tile-primary tile-primary-static">{content}</div>
       ) : (
         <button
           type="button" className="tile-primary" onClick={onPrimary} disabled={disabled || (semantics !== "preview" && (!presentationCompatible(control, plugins) || busy))}
           aria-label={busy ? `${primaryLabel} — running` : primaryLabel}
+          aria-description={order ? "Drag to reorder, or use Alt + arrow keys. Position is also available in the Inspector." : undefined}
+          aria-keyshortcuts={order ? "Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight" : undefined}
           aria-pressed={variant === "editor" ? selected : undefined} title={controlSummary(control)}
         >
           {content}

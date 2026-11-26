@@ -126,7 +126,7 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
     <div className="native-actions"><button type="button" className="button primary"
       disabled={!plugin.native || busy || !validDraft || !canRunPlugin(snapshot, control)}
       onClick={() => void plugin.execute(control)}>{busy ? "Request pending…" : "Run plugin action"}</button></div>
-    <p className="field-note">Runs on this computer. Preview never runs the plugin. No automatic retry.</p>
+    <p className="field-note">Runs on this computer. Editor tiles never run the plugin. No automatic retry.</p>
     {plugin.completedIds[control.pluginId] === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
     {action && (!validDraft || !canRunPlugin(snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required value within its declared contract.</p> : null}
     <PluginErrorNotice error={pluginEntry(plugin.errors, control.pluginId) ?? snapshot.lastError} />
