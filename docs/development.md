@@ -185,6 +185,12 @@ The actual-service HTTPS browser fixture adds UI integration with fake actions. 
 
 Still open: Windows/macOS live native validation; live OBS/PipeWire/MPRIS validation; live Spotify/JXA and macOS Automation attribution; physical phone installs/actions and trusted LAN HTTPS; native desktop phone-admin lifecycle; packaged bundled-asset resolution; signed/distributed installers and deb/AppImage validation. A user-reported Tailscale Serve phone connection does not close those gates.
 
+### Settings restart verification (macOS, Windows and Linux)
+
+Use disposable configuration and test credentials, never a personal credential store in automated tests. On each platform, connect to a test OBS peer using a non-default port, leave/reopen Settings, then quit/relaunch: the saved inputs should return without automatically connecting. Disconnect must retain them; **Forget saved connection** must remove them across relaunch. With the credential store locked/unavailable, confirm a visible load/save error, no plaintext fallback, and that launch and explicit Connect still work. Linux additionally needs a running Secret Service provider. Mock-store tests do not establish real Keychain/Credential Manager/Secret Service behavior.
+
+Enable an unchanged trusted test plugin and relaunch: it should restore once without invoking any action. Disable/relaunch and uninstall/restore-folder/relaunch must not re-enable it. Change its package files and relaunch: old authorization must not launch the changed package. Check corrupt/unwritable settings leave the app usable and expose failures. Verify Live mode stays off and pending actions are not replayed. Live cross-platform restart checks remain manual verification gates.
+
 ### Physical-phone verification
 
 This is a manual validation plan, not a claim of success:

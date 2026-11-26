@@ -855,6 +855,7 @@ try {
     window.__pluginCalls = [];
     window.__pluginArgs = null;
     window.__pluginsInstalled = false;
+    window.__trustedPlugins = [];
     window.__runtimeStatus = 'detected';
     const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
       {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}}
@@ -896,13 +897,14 @@ try {
         directory:'/Users/fixture/.config/zdeck/plugins',
         node:window.__runtimeStatus === 'not_found' ? {status:'not_found',version:null,path:null} : {status:'detected',version:'22.18.0',path:'/detected/node'},
         plugins:window.__pluginsInstalled ? [
-          {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
-          {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null},
-          {id:'broken',name:'broken',version:'0.1.0',protocolVersion:1,status:'invalid',message:'The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.'},
-          {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.'}
-        ].filter(entry => !window.__removedPlugins.includes(entry.id)) : [], truncated:false
+          {id:'spotify',name:'spotify',version:'0.1.0',protocolVersion:1,status:'ready',message:null,icon:'data:image/svg+xml;base64,PHN2Zy8+',trusted:window.__trustedPlugins.includes('spotify'),identity:'0123456789abcdef'.repeat(4)},
+          {id:'other',name:'other',version:'0.1.0',protocolVersion:1,status:'ready',message:null,icon:null,trusted:window.__trustedPlugins.includes('other'),identity:'0123456789abcdef'.repeat(4)},
+          {id:'broken',name:'broken',version:'0.1.0',protocolVersion:1,status:'invalid',message:'The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.',icon:null,trusted:false,identity:null},
+          {id:'future',name:'future',version:'0.1.0',protocolVersion:2,status:'incompatible',message:'Unsupported protocol.',icon:null,trusted:false,identity:null}
+        ].filter(entry => !window.__removedPlugins.includes(entry.id)) : []
       }; if (window.__holdCatalog) await new Promise(resolve => { window.__finishCatalog = resolve; }); return catalog; }
       if (command === 'plugin_open_directory') return null;
+      if (command === 'plugin_trust') { if (!/^[a-f0-9]{64}$/.test(args.expectedIdentity)) throw {kind:'unavailable',code:'stale_identity',outcome:'not_started'}; if (!window.__trustedPlugins.includes(args.pluginId)) window.__trustedPlugins.push(args.pluginId); return null; }
       if (command === 'plugin_enable') {
         if (!['spotify','other'].includes(args.pluginId) || Object.keys(args).length !== 1) throw new Error('Invalid enable arguments');
         if (window.__holdEnable === args.pluginId) await new Promise(resolve => { window.__finishEnable = resolve; });
@@ -1122,10 +1124,9 @@ try {
   const row = (id) => `.plugin-row[data-plugin-id="${id}"]`;
   check('refresh discovers inset plugin rows without a selection dropdown', await admin.waitFor("document.querySelectorAll('.plugin-row').length === 4 && !document.querySelector('.plugin-settings select')"));
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  check('requesting Enable opens unchecked row consent without launching', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('.plugin-trust input').checked && document.querySelector('.plugin-confirm .button.primary').disabled && !window.__adminCalls.includes('plugin_enable')"));
-  await admin.eval("document.querySelector('.plugin-trust input').click()");
-  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
-  check('refresh clears pending trust without enabling any row', await admin.waitFor("!document.querySelector('.plugin-confirm')") && await admin.eval("!window.__adminCalls.includes('plugin_enable')"));
+  check('requesting Enable opens an accessible trust dialog without launching', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('Trust and enable') && document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('not a sandbox') && !window.__adminCalls.includes('plugin_enable')"));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Cancel'));
+  check('cancel dismisses trust without trusting or enabling', await admin.waitFor("!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("!window.__adminCalls.includes('plugin_enable') && !window.__adminCalls.includes('plugin_trust')"));
   await admin.eval("window.__runtimeStatus = 'not_found'");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Node not found')");
@@ -1135,12 +1136,10 @@ try {
   await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
   await admin.eval("window.__holdEnable = 'spotify'");
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Trust and enable'));
   check('one pending plugin does not disable another row', await admin.waitFor("!!window.__finishEnable") && await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').disabled && !document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').disabled"));
   await admin.eval(click(`${row('other')} .plugin-row-actions > button`));
-  await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('other')} button`, 'Enable plugin'));
+  await admin.eval(clickText(`${row('other')} dialog button`, 'Trust and enable'));
   await admin.waitFor("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent === 'Disable'");
   await admin.eval("window.__holdEnable = null; window.__finishEnable()");
   check('two plugins enable independently with no automatic state read or execute', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent === 'Disable'") && await admin.eval("!window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute') && window.__pluginCalls.filter(c=>c.command==='plugin_enable').map(c=>c.args.pluginId).sort().join(',')==='other,spotify'"));
@@ -1225,14 +1224,18 @@ try {
   check('unknown outcome is sanitized, warns, disables Run and requires explicit reconnect', await admin.waitFor("document.querySelector('.inspector-form').textContent.includes('Outcome unknown')") && await admin.eval("document.querySelector('.native-control .button.primary').disabled && !document.querySelector('.inspector-form').textContent.includes('raw secret')"));
   await admin.eval("location.hash = '#/settings/integrations'");
   await admin.waitFor("!!document.querySelector('.plugin-settings')");
-  check('one failed plugin does not overwrite its healthy neighbor or retain trust', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-trust input') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
+  check('one failed plugin does not overwrite its healthy neighbor or expose raw trust fields', await admin.eval("!document.querySelector('.plugin-settings input[type=text]') && !document.querySelector('.plugin-settings input[type=checkbox]') && document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && !document.querySelector('[data-plugin-id=other]').textContent.includes('Outcome unknown') && !JSON.stringify(localStorage).includes('/detected/node')"));
+  await admin.eval("window.__trustCallsBefore = window.__pluginCalls.filter(c=>c.command==='plugin_trust').length");
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
-  check('re-enabling failed row requires fresh unchecked consent', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] .plugin-trust input')") && await admin.eval("!document.querySelector('[data-plugin-id=spotify] .plugin-trust input').checked"));
-  await admin.eval("document.querySelector('[data-plugin-id=spotify] .plugin-trust input').click()");
-  await admin.eval(clickText(`${row('spotify')} button`, 'Enable plugin'));
-  await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Disable'");
+  check('re-enabling a trusted, unchanged package does not repeat confirmation', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Disable'") && await admin.eval("!document.querySelector('[data-plugin-id=spotify] dialog')?.open && window.__pluginCalls.filter(c=>c.command==='plugin_trust').length === window.__trustCallsBefore"));
   await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
   check('disabling one row leaves the other plugin enabled', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent==='Enable'") && await admin.eval("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent==='Disable' && window.__pluginCalls.filter(c=>c.command==='plugin_disconnect').at(-1).args.pluginId==='spotify'"));
+  await admin.eval("window.__trustedPlugins = []; window.__runtimeStatus = 'detected'");
+  await admin.eval(clickText('.plugin-settings button', 'Refresh'));
+  await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0')");
+  await admin.eval(click(`${row('spotify')} .plugin-row-actions > button`));
+  check('changed package identity revokes remembered trust and asks again', await admin.waitFor("!!document.querySelector('[data-plugin-id=spotify] dialog')?.open") && await admin.eval("document.querySelector('[data-plugin-id=spotify] dialog').textContent.includes('Trust and enable')"));
+  await admin.eval(clickText(`${row('spotify')} dialog button`, 'Cancel'));
   await admin.eval("location.hash='#/'"); await admin.waitFor("!!document.querySelector('.add-control')");
   check('saved plugin image survives disabling its source plugin', await admin.waitFor("document.querySelector('.control-tile[data-action=mic-mute] img')?.naturalWidth > 0"));
   await admin.eval(click('.add-control')); await admin.waitFor("[...document.querySelectorAll('.action-row-name')].some(el=>el.textContent==='Other action')");

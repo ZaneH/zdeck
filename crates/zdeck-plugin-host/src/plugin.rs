@@ -8,7 +8,7 @@
 use std::{collections::{BTreeMap, HashSet}, path::PathBuf, process::Stdio, sync::{Arc, Mutex as MapMutex}, time::Duration};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}, sync::Mutex, time::timeout};
+use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin, ChildStdout, Command}, sync::{Mutex, OwnedSemaphorePermit, Semaphore}, time::timeout};
 
 const REQUEST_BYTES: usize = 16_384;
 const RESPONSE_BYTES: usize = 65_536;
@@ -397,17 +397,26 @@ impl Inner {
     }
 }
 
-const MAX_PLUGINS: usize = 16;
+/// Concurrently running plugin processes are bounded; installed/stopped sessions are not.
+pub const MAX_RUNNING_PLUGINS: usize = 16;
 struct RegistryEntry { state: Arc<PluginState>, gate: Arc<Mutex<()>>, transient: bool }
 /// Independent session-local plugins. The map lock never spans plugin I/O.
-#[derive(Default, Clone)]
-pub struct PluginRegistry { entries: Arc<MapMutex<BTreeMap<String, Arc<RegistryEntry>>>> }
+#[derive(Clone)]
+pub struct PluginRegistry { entries: Arc<MapMutex<BTreeMap<String, Arc<RegistryEntry>>>>, running: Arc<Semaphore> }
+impl Default for PluginRegistry { fn default() -> Self { Self::with_capacity(MAX_RUNNING_PLUGINS) } }
 fn registry_error(code: &'static str, hint: &'static str) -> PluginError {
     let mut error = PluginError::new(ErrorKind::Unavailable, Outcome::NotStarted);
     error.code = Some(code); error.hint = hint; error
 }
+fn capacity_error() -> PluginError {
+    registry_error("capacity", "Runtime capacity is reached: too many plugins are running at once. Disable one plugin, then enable this one again.")
+}
 fn disconnected() -> PluginSnapshot { Session::default().snapshot() }
 impl PluginRegistry {
+    /// Bounded running-process capacity. Installed and stopped plugins do not count.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { entries: Arc::default(), running: Arc::new(Semaphore::new(capacity.max(1))) }
+    }
     pub(crate) async fn manage<F, Fut, T>(&self, id: &str, create: bool, remove: bool, operation: F) -> Result<T, PluginError>
     where F: FnOnce(Arc<PluginState>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
@@ -420,11 +429,7 @@ impl PluginRegistry {
                 if let Some(entry) = entries.get(id) { entry.clone() }
                 else {
                     if !create { return Err(registry_error("not_enabled", "Enable this trusted plugin explicitly from the catalog first.")); }
-                    // Removals get a bounded extra budget even when all enabled slots are occupied.
-                    if entries.len() >= MAX_PLUGINS * 2 || (!remove && entries.values().filter(|entry| !entry.transient).count() >= MAX_PLUGINS) {
-                        return Err(registry_error("capacity", "Disable a plugin or wait for pending removals; at most 16 enabled or stopped sessions are retained."));
-                    }
-                    let entry = Arc::new(RegistryEntry { state: Arc::new(PluginState::default()), gate: Arc::new(Mutex::new(())), transient: remove });
+                    let entry = Arc::new(RegistryEntry { state: Arc::new(PluginState::with_limit(self.running.clone())), gate: Arc::new(Mutex::new(())), transient: remove });
                     entries.insert(id.to_owned(), entry.clone()); entry
                 }
             };
@@ -436,8 +441,9 @@ impl PluginRegistry {
         tokio::spawn(async move {
             let _guard = guard;
             let result = operation(entry.state.clone()).await;
-            let empty = entry.state.snapshot().await.status == ConnectionStatus::Disconnected;
-            if (remove && result.is_ok()) || empty {
+            // Retain only live connections so installed/stopped entries cannot grow the map.
+            let live = entry.state.snapshot().await.status == ConnectionStatus::Connected;
+            if (remove && result.is_ok()) || !live {
                 let mut entries = entries.lock().expect("plugin registry lock");
                 if entries.get(&id).is_some_and(|current| Arc::ptr_eq(current, &entry)) { entries.remove(&id); }
             }
@@ -491,8 +497,13 @@ impl PluginRegistry {
 
 /// One explicitly trusted, session-local connection shared by desktop and phone.
 /// There is no persistence, automatic reconnect, or implicit state read.
-#[derive(Default)]
 pub struct PluginState { session: Arc<Mutex<Session>> }
+impl Default for PluginState { fn default() -> Self { Self { session: Arc::default() } } }
+impl PluginState {
+    fn with_limit(running: Arc<Semaphore>) -> Self {
+        Self { session: Arc::new(Mutex::new(Session { running: Some(running), ..Session::default() })) }
+    }
+}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionStatus { #[default] Disconnected, Connected, Stopped }
@@ -512,6 +523,8 @@ struct Session {
     state: Option<Map<String, Value>>,
     status: ConnectionStatus,
     last_error: Option<PluginError>,
+    running: Option<Arc<Semaphore>>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value, Option<(f64, bool)>) }
 
@@ -574,6 +587,7 @@ impl Session {
         PluginSnapshot { status: self.status, manifest: self.manifest.clone(), state: self.state.clone(), last_error: self.last_error.clone() }
     }
     async fn close(&mut self) {
+        self.permit = None;
         if let Some(host) = self.host.take() { let _ = host.stop().await; }
         self.state = None;
     }
@@ -591,6 +605,11 @@ impl Session {
                 self.manifest = None;
                 self.last_error = None;
                 self.status = ConnectionStatus::Stopped;
+                let permit = match self.running.as_ref().map(|running| running.clone().try_acquire_owned()) {
+                    Some(Ok(permit)) => Some(permit),
+                    Some(Err(_)) => { let error = capacity_error(); self.last_error = Some(error.clone()); return Err(error); }
+                    None => None,
+                };
                 let result = async {
                     let host = PluginHost::new(node_launch(program, entrypoint)?);
                     let manifest = host.describe().await?;
@@ -604,6 +623,7 @@ impl Session {
                     Ok((host, manifest)) => {
                         self.manifest = Some(manifest);
                         self.host = Some(host);
+                        self.permit = permit;
                         self.status = ConnectionStatus::Connected;
                         return Ok(self.snapshot());
                     }

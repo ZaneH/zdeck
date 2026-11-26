@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createControl, controlSummary, ACTION_CATALOG } from "../src/lib/actions";
 import { addControl, createDefaultDeck, isDeck, normalizeDeck, updateControl } from "../src/lib/deck";
 import { canEnablePlugin, canRunPlugin, EMPTY_PLUGIN, EMPTY_SELECTION, isPluginArgs, parsePluginCatalog, parsePluginManifest, parsePluginSnapshot, pluginArgumentsValid,
-  pluginDefaults, pluginLaunchAllowed, pluginSelectionReducer, spotifyState, toPluginError, parsePluginSnapshots, parsePluginDiagnostics, enabledPluginManifests, pluginEntry } from "../src/lib/plugin";
+  pluginDefaults, pluginLaunchAllowed, pluginSelectionReducer, spotifyState, toPluginError, parsePluginSnapshots, parsePluginDiagnostics, enabledPluginManifests, pluginEntry, trustAndEnablePlugin } from "../src/lib/plugin";
 import type { PluginCatalog, PluginManifest, PluginSnapshot } from "../src/lib/plugin";
 import { loadDeck, saveDeck, STORAGE_KEY } from "../src/lib/persistence";
 import { ControlTile } from "../src/components/ControlTile";
@@ -16,6 +16,7 @@ const manifest: PluginManifest = { id: "spotify", version: "0.1.0", protocolVers
 ] };
 const snapshot: PluginSnapshot = { status: "connected", manifest, state: null, lastError: null };
 const options = { pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
+const IDENTITY = "0123456789abcdef".repeat(4);
 
 describe("multiple plugin sessions and installation diagnostics", () => {
   it("validates map identity and retains independent healthy actions", () => {
@@ -26,9 +27,8 @@ describe("multiple plugin sessions and installation diagnostics", () => {
     const broken = { ...snapshot, status: "stopped" as const, lastError: toPluginError({ kind: "timeout", outcome: "unknown" }) };
     expect(enabledPluginManifests({ spotify: broken, notes }).map((item) => item.id)).toEqual(["notes"]);
     for (const value of [{ spotify: notes }, { "../bad": snapshot }, { spotify: {} }, []]) expect(parsePluginSnapshots(value)).toBeNull();
-    const capacity = Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`p${index}`, { ...snapshot, manifest: { ...manifest, id: `p${index}` } }]));
-    expect(parsePluginSnapshots(capacity)).not.toBeNull();
-    expect(parsePluginSnapshots({ ...capacity, spotify: snapshot })).toBeNull();
+    const many = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`p${index}`, { ...snapshot, manifest: { ...manifest, id: `p${index}` } }]));
+    expect(parsePluginSnapshots(many)).not.toBeNull();
     expect(pluginEntry({}, "constructor")).toBeUndefined();
     expect(parsePluginSnapshots({ constructor: { ...snapshot, manifest: { ...manifest, id: "constructor" } } })).not.toBeNull();
     const html = renderToStaticMarkup(createElement(ActionLibrary, { pageName: "Stream", dialogRef: { current: null }, manifests: [manifest, notes.manifest], onAdd: () => {} }));
@@ -103,30 +103,30 @@ describe("plugin boundary validation", () => {
 });
 
 describe("local plugin catalog and per-selection trust", () => {
-  const ready = { id: "spotify", name: "spotify", version: "0.1.0", protocolVersion: 1, status: "ready" as const, message: null };
-  const catalog: PluginCatalog = { directory: "/home/test/.config/zdeck/plugins", node: { status: "detected", version: "22.18.0", path: "/usr/local/bin/node" }, plugins: [ready], truncated: false };
+  const ready = { id: "spotify", name: "spotify", version: "0.1.0", protocolVersion: 1, status: "ready" as const, message: null, icon: null, trusted: false, identity: IDENTITY };
+  const catalog: PluginCatalog = { directory: "/home/test/.config/zdeck/plugins", node: { status: "detected", version: "22.18.0", path: "/usr/local/bin/node" }, plugins: [ready] };
   it("validates coherent bounded runtimes and catalog entries, including invalid folder placeholders", () => {
     expect(parsePluginCatalog(catalog)).toEqual(catalog);
     expect(parsePluginCatalog({ ...catalog, node: { status: "detected", version: "23.0.0", path: "/node" } })).not.toBeNull();
     expect(parsePluginCatalog({ ...catalog, node: { status: "unsupported", version: "22.17.9", path: "/node" } })).not.toBeNull();
     expect(parsePluginCatalog({ ...catalog, node: { status: "not_found", version: null, path: null }, plugins: [] })).not.toBeNull();
-    const invalid = { id: "", name: "Invalid plugin folder", version: "", protocolVersion: 0, status: "invalid", message: "private-path/raw diagnostic" };
-    const parsed = parsePluginCatalog({ ...catalog, plugins: [invalid, invalid, { ...ready, id: "future", protocolVersion: 2, status: "incompatible", message: "future protocol" }] });
+    const invalid = { id: "", name: "Invalid plugin folder", version: "", protocolVersion: 0, status: "invalid", message: "private-path/raw diagnostic", icon: null, trusted: false, identity: null };
+    const parsed = parsePluginCatalog({ ...catalog, plugins: [invalid, invalid, { ...ready, id: "future", protocolVersion: 2, status: "incompatible", message: "future protocol", identity: null }] });
     expect(parsed?.plugins).toHaveLength(3);
     expect(JSON.stringify(parsed)).not.toContain("private-path");
     expect(parsed?.plugins[2].message).toBe("Protocol version 1 is required.");
-    const incomplete = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", message: "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone." }] });
+    const incomplete = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", identity: null, message: "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone." }] });
     expect(incomplete?.plugins[0].message).toContain("including node_modules");
     expect(incomplete?.plugins[0].message).toContain("not the source folder");
-    const linked = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", message: "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead." }] });
+    const linked = parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "invalid", identity: null, message: "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead." }] });
     expect(linked?.plugins[0].message).toContain("SDK is symlinked");
     expect(linked?.plugins[0].message).toContain("Do not repair a distribution install with npm install");
   });
 
   it("fails closed on malformed catalogs, paths, counts, metadata, enums and duplicate IDs", () => {
-    for (const bad of [null, {}, { ...catalog, extra: true }, { ...catalog, truncated: "false" },
+    for (const bad of [null, {}, { ...catalog, extra: true }, { ...catalog, truncated: false },
       ...["relative", "/bad\npath", "/" + "x".repeat(4096)].map((directory) => ({ ...catalog, directory })),
-      { ...catalog, plugins: Array(65).fill(ready) }, { ...catalog, plugins: [ready, ready] },
+      { ...catalog, plugins: [ready, ready] }, { ...catalog, plugins: [{ ...ready, icon: "https://remote.example/icon.png" }] }, { ...catalog, plugins: [{ ...ready, trusted: "yes" }] },
       ...[{ status: "found", version: "22.18.0", path: "/node" }, { status: "not_found", version: "22.18.0", path: null },
         { status: "detected", version: "22.17.0", path: "/node" }, { status: "unsupported", version: "23.0.0", path: "/node" },
         { status: "detected", version: "22.18.0", path: "node" }].map((node) => ({ ...catalog, node })),
@@ -137,6 +137,30 @@ describe("local plugin catalog and per-selection trust", () => {
     ]) expect(parsePluginCatalog(bad)).toBeNull();
   });
 
+  it("lists more than sixty-four catalog entries without an arbitrary cap", () => {
+    const lots = Array.from({ length: 200 }, (_, index) => ({ ...ready, id: `p${index}`, name: `p${index}` }));
+    expect(parsePluginCatalog({ ...catalog, plugins: lots })?.plugins).toHaveLength(200);
+  });
+
+  it("requires a bounded package identity on ready entries and no identity on non-ready entries", () => {
+    for (const identity of [null, undefined, "", "abc", "A".repeat(64), "g".repeat(64), "0".repeat(63), "0".repeat(65)])
+      expect(parsePluginCatalog({ ...catalog, plugins: [{ ...ready, identity }] })).toBeNull();
+    for (const status of ["invalid", "incompatible"] as const)
+      expect(parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status, identity: IDENTITY, protocolVersion: status === "incompatible" ? 2 : 1 }] })).toBeNull();
+    expect(parsePluginCatalog({ ...catalog, plugins: [{ ...ready, status: "incompatible", identity: null, protocolVersion: 2, message: "future protocol" }] })).not.toBeNull();
+  });
+
+  it("trust must succeed before enable runs; a failed trust leaves its guidance visible", async () => {
+    const calls: string[] = [];
+    const failed = { trust: async () => { calls.push("trust"); return false; }, enable: async () => { calls.push("enable"); } };
+    expect(await trustAndEnablePlugin(failed, "spotify", IDENTITY)).toBe(false);
+    expect(calls).toEqual(["trust"]);
+    const passed = { trust: async () => { calls.push("trust-ok"); return true; }, enable: async () => { calls.push("enable-ok"); } };
+    expect(await trustAndEnablePlugin(passed, "spotify", IDENTITY)).toBe(true);
+    expect(calls).toEqual(["trust", "trust-ok", "enable-ok"]);
+    expect(toPluginError({ kind: "unavailable", code: "stale_identity", outcome: "not_started" }).hint).toContain("Refresh the catalog");
+  });
+
   it("requires selected ready plugin, supported runtime and fresh trust; resets for refresh/selection/disconnect/error", () => {
     expect(canEnablePlugin(catalog, EMPTY_SELECTION)).toBe(false);
     const selected = pluginSelectionReducer(EMPTY_SELECTION, { type: "select", pluginId: "spotify" });
@@ -145,7 +169,7 @@ describe("local plugin catalog and per-selection trust", () => {
     for (const event of [{ type: "refresh" as const }, { type: "reset" as const }, { type: "select" as const, pluginId: "spotify" },
       { type: "select" as const, pluginId: "other" }]) expect(pluginSelectionReducer(trusted, event).trusted).toBe(false);
     expect(pluginSelectionReducer(EMPTY_SELECTION, { type: "trust", checked: true }).trusted).toBe(false);
-    for (const next of [null, { ...catalog, truncated: true }, { ...catalog, plugins: [] },
+    for (const next of [null, { ...catalog, plugins: [] },
       { ...catalog, node: { status: "not_found" as const, path: null, version: null } },
       { ...catalog, node: { status: "unsupported" as const, path: "/node", version: "20.0.0" } }]) expect(canEnablePlugin(next, trusted)).toBe(false);
   });

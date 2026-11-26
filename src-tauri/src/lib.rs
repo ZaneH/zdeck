@@ -254,6 +254,49 @@ async fn desktop_run_control(
     state.desktop.run(store, command).await
 }
 
+struct PluginStartup {
+    task: Option<tauri::async_runtime::JoinHandle<Result<(), PluginError>>>,
+    error: Option<PluginError>,
+}
+struct PluginStartupState(tokio::sync::Mutex<PluginStartup>);
+impl PluginStartupState {
+    async fn wait(&self) -> tokio::sync::MutexGuard<'_, PluginStartup> {
+        let mut startup = self.0.lock().await;
+        if let Some(task) = startup.task.take() {
+            startup.error = match task.await {
+                Ok(result) => result.err(),
+                Err(_) => Some(PluginError {
+                    kind: plugin::ErrorKind::Unavailable, code: None, outcome: plugin::Outcome::NotStarted,
+                    message: "Plugin restoration failed.", hint: "Refresh the catalog and enable trusted plugins explicitly.",
+                }),
+            };
+        }
+        startup
+    }
+}
+
+#[cfg(test)]
+mod plugin_startup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn hydration_waits_for_restore_and_reports_its_error_once() {
+        let task = tauri::async_runtime::spawn(async {
+            Err(PluginError {
+                kind: plugin::ErrorKind::Unavailable, code: None, outcome: plugin::Outcome::NotStarted,
+                message: "Plugin restoration failed.", hint: "Enable explicitly.",
+            })
+        });
+        let state = PluginStartupState(tokio::sync::Mutex::new(PluginStartup { task: Some(task), error: None }));
+        let ((), ()) = tokio::join!(
+            async { drop(state.wait().await); },
+            async { drop(state.wait().await); },
+        );
+        assert!(state.wait().await.error.take().is_some());
+        assert!(state.wait().await.error.is_none());
+    }
+}
+
 fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::PluginInstall, PluginError> {
     use tauri::Manager;
     let home = app.path().home_dir().map_err(|_| PluginError {
@@ -269,13 +312,23 @@ fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::Plugin
 /// Discovery never runs plugin code; runtime detection executes only bounded --version probes.
 #[tauri::command]
 async fn plugin_catalog(app: tauri::AppHandle) -> Result<plugin_install::PluginCatalog, PluginError> {
+    use tauri::Manager;
+    if let Some(error) = app.state::<PluginStartupState>().wait().await.error.take() { return Err(error); }
     local_plugin_install(&app)?.catalog().await
 }
 
-/// Native desktop trust boundary only. UI must acknowledge local code trust before enabling.
+/// Native desktop trust boundary only. Enabling requires a persisted trust record that
+/// matches the current package fingerprint; a UI flag is never authorization.
 #[tauri::command]
 async fn plugin_enable(app: tauri::AppHandle, state: tauri::State<'_, AppState>, plugin_id: String) -> Result<PluginSnapshot, PluginError> {
     local_plugin_install(&app)?.enable(&state.plugin, &plugin_id).await
+}
+
+/// Persists trust bound to the reviewed package identity. A current fingerprint that differs
+/// from the identity the user confirmed is refused (`stale_identity`). Corrupt trust data never blocks launch.
+#[tauri::command]
+async fn plugin_trust(app: tauri::AppHandle, plugin_id: String, expected_identity: String) -> Result<(), PluginError> {
+    local_plugin_install(&app)?.trust(&plugin_id, &expected_identity).await
 }
 
 /// Creates/opens only the fixed app plugin directory, never a caller-supplied path.
@@ -286,9 +339,9 @@ async fn plugin_open_directory(app: tauri::AppHandle) -> Result<(), PluginError>
 
 #[tauri::command]
 async fn plugin_disconnect(
-    state: tauri::State<'_, AppState>, plugin_id: String,
+    app: tauri::AppHandle, state: tauri::State<'_, AppState>, plugin_id: String,
 ) -> Result<PluginSnapshot, PluginError> {
-    state.plugin.disconnect(&plugin_id).await
+    local_plugin_install(&app)?.disable(&state.plugin, &plugin_id).await
 }
 
 #[tauri::command]
@@ -297,7 +350,10 @@ async fn plugin_snapshot(state: tauri::State<'_, AppState>, plugin_id: String) -
 }
 
 #[tauri::command]
-async fn plugin_snapshots(state: tauri::State<'_, AppState>) -> Result<std::collections::BTreeMap<String, PluginSnapshot>, PluginError> {
+async fn plugin_snapshots(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<std::collections::BTreeMap<String, PluginSnapshot>, PluginError> {
+    use tauri::Manager;
+    // Hydrate once after restoration; slow plugins must not delay application launch.
+    drop(app.state::<PluginStartupState>().wait().await);
     Ok(state.plugin.snapshots().await)
 }
 
@@ -436,6 +492,13 @@ pub fn run() {
                 tauri::async_runtime::block_on(admin.restore(config));
             }
             app.manage(admin);
+            // Restore in the background so slow/broken plugins cannot hold up the window.
+            let install = local_plugin_install(app.handle());
+            let restoring = plugin.clone();
+            let task = tauri::async_runtime::spawn(async move {
+                install?.restore(&restoring).await
+            });
+            app.manage(PluginStartupState(tokio::sync::Mutex::new(PluginStartup { task: Some(task), error: None })));
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
             tray::setup(app.handle());
             Ok(())
@@ -472,6 +535,7 @@ pub fn run() {
             desktop_run_control,
             plugin_catalog,
             plugin_enable,
+            plugin_trust,
             plugin_open_directory,
             plugin_disconnect,
             plugin_snapshot,

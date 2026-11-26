@@ -28,6 +28,12 @@ export async function pluginSnapshots(): Promise<PluginSnapshots> {
   return snapshots;
 }
 export function pluginEnable(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_enable", pluginId); }
+/** Persists trust for the exact reviewed package identity; the backend refuses a stale/mismatched fingerprint. */
+export async function pluginTrust(pluginId: string, expectedIdentity: string): Promise<void> {
+  requireId(pluginId);
+  if (!/^[a-f0-9]{64}$/.test(expectedIdentity)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
+  if (await invokeNative("plugin_trust", { pluginId, expectedIdentity }) !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+}
 export function pluginDisconnect(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_disconnect", pluginId); }
 /** Cached metadata only; neither operation executes plugin code. */
 export function pluginSnapshot(pluginId: string): Promise<PluginSnapshot> { return invokePlugin("plugin_snapshot", pluginId); }

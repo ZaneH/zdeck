@@ -1,10 +1,10 @@
-import { isPluginIcons } from "./icons";
+import { isIconSource, isPluginIcons } from "./icons";
 import type { PluginIcon } from "./icons";
 import type { PluginControl } from "./types";
 
 export interface PluginField { type: "integer"; minimum: number; maximum: number }
 export interface PluginAction { id: string; title: string; config: Record<string, PluginField> }
-export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[] }
+export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[]; icon?: string }
 export interface PluginError {
   kind: string;
   code: string | null;
@@ -25,33 +25,34 @@ export interface PluginCatalogEntry {
   protocolVersion: number;
   status: "ready" | "invalid" | "incompatible";
   message: string | null;
+  icon: string | null;
+  trusted: boolean;
+  /** Opaque validated package identity for a ready plugin; null otherwise. */
+  identity: string | null;
 }
 export interface PluginCatalog {
   directory: string;
   node: { status: "detected" | "not_found" | "unsupported"; version: string | null; path: string | null };
   plugins: PluginCatalogEntry[];
-  truncated: boolean;
 }
 export type PluginSnapshots = Record<string, PluginSnapshot>;
 export function pluginEntry<T>(entries: Record<string, T>, id: string): T | undefined {
   return Object.hasOwn(entries, id) ? entries[id] : undefined;
 }
 export interface PluginDiagnostics { pluginId: string; checks: { name: string; status: "pass" | "fail" | "warning"; message: string }[] }
-export const MAX_ENABLED_PLUGINS = 16;
 const SDK_INSTALL_HINTS: Record<string, string> = {
   "Required bundled @zdeck/plugin-sdk files are missing. Copy the complete packaged plugin folder, including node_modules; do not copy the source folder alone.": "Bundled SDK files are missing. Copy the complete packaged folder including node_modules, not the source folder.",
   "Bundled SDK files must be readable regular local files, with valid package metadata and no symlinks. Copy the complete packaged plugin folder.": "Bundled SDK files or metadata are invalid. Copy the complete packaged folder with regular local SDK files and no symlinks.",
   "The SDK is symlinked, as created by npm source-development installs. Copy the complete generated distribution folder with regular bundled SDK files instead.": "The SDK is symlinked by a source/developer npm layout. Copy the complete generated distribution folder with regular bundled SDK files, not the source folder.",
 };
 export function parsePluginSnapshots(value: unknown): PluginSnapshots | null {
-  if (!record(value) || Object.keys(value).length > 64) return null;
+  if (!record(value)) return null;
   const entries: [string, PluginSnapshot][] = [];
   for (const [id, raw] of Object.entries(value)) {
     const snapshot = parsePluginSnapshot(raw);
     if (!pluginIdentifier(id) || !snapshot || (snapshot.manifest && snapshot.manifest.id !== id)) return null;
     entries.push([id, snapshot]);
   }
-  if (entries.filter(([, snapshot]) => snapshot.status === "connected").length > MAX_ENABLED_PLUGINS) return null;
   return Object.fromEntries(entries);
 }
 export function enabledPluginManifests(snapshots: PluginSnapshots): PluginManifest[] {
@@ -86,7 +87,7 @@ export function pluginSelectionReducer(previous: PluginSelection, event:
   }
 }
 export function canEnablePlugin(catalog: PluginCatalog | null, selection: PluginSelection): boolean {
-  return !!catalog && !catalog.truncated && catalog.node.status === "detected" && selection.trusted
+  return !!catalog && catalog.node.status === "detected" && selection.trusted
     && catalog.plugins.some((plugin) => plugin.id === selection.pluginId && plugin.status === "ready");
 }
 
@@ -97,12 +98,13 @@ export const pluginIdentifier = (x: unknown): x is string => typeof x === "strin
 const safeInteger = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x);
 const versionString = (x: unknown): x is string => typeof x === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(x);
 const boundedText = (x: unknown, max: number): x is string => typeof x === "string" && x.trim().length > 0 && x.length <= max && !/\p{Cc}/u.test(x);
+const packageIdentity = (x: unknown): x is string => typeof x === "string" && /^[a-f0-9]{64}$/.test(x);
 const absolutePath = (x: unknown): x is string => boundedText(x, 4096) && new TextEncoder().encode(x).length <= 4096 && /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(x);
 
 export function parsePluginCatalog(value: unknown): PluginCatalog | null {
-  if (!record(value) || !exact(value, ["directory", "node", "plugins", "truncated"]) || !absolutePath(value.directory)
-    || typeof value.truncated !== "boolean" || !record(value.node) || !exact(value.node, ["status", "version", "path"])
-    || !Array.isArray(value.plugins) || value.plugins.length > 64) return null;
+  if (!record(value) || !exact(value, ["directory", "node", "plugins"]) || !absolutePath(value.directory)
+    || !record(value.node) || !exact(value.node, ["status", "version", "path"])
+    || !Array.isArray(value.plugins)) return null;
   const node = value.node;
   if (node.status === "not_found") {
     if (node.version !== null || node.path !== null) return null;
@@ -113,21 +115,22 @@ export function parsePluginCatalog(value: unknown): PluginCatalog | null {
   } else return null;
   const seen = new Set<string>();
   for (const plugin of value.plugins) {
-    if (!record(plugin) || !exact(plugin, ["id", "name", "version", "protocolVersion", "status", "message"])
+    if (!record(plugin) || !exact(plugin, ["id", "name", "version", "protocolVersion", "status", "message", "icon", "trusted", "identity"])
       || !(plugin.id === "" || pluginIdentifier(plugin.id)) || !boundedText(plugin.name, 80)
       || !(plugin.version === "" || versionString(plugin.version))
       || !safeInteger(plugin.protocolVersion) || plugin.protocolVersion < 0 || plugin.protocolVersion > 255
-      || !(plugin.message === null || boundedText(plugin.message, 300))) return null;
+      || !(plugin.message === null || boundedText(plugin.message, 300))
+      || !(plugin.icon === null || isIconSource(plugin.icon)) || typeof plugin.trusted !== "boolean") return null;
     if (plugin.id) { if (seen.has(plugin.id)) return null; seen.add(plugin.id); }
     if (plugin.status === "ready") {
-      if (!pluginIdentifier(plugin.id) || !versionString(plugin.version) || plugin.protocolVersion !== 1 || plugin.message !== null) return null;
+      if (!pluginIdentifier(plugin.id) || !versionString(plugin.version) || plugin.protocolVersion !== 1 || plugin.message !== null || !packageIdentity(plugin.identity)) return null;
     } else if (plugin.status === "invalid") {
-      if (plugin.message === null) return null;
+      if (plugin.message === null || plugin.identity !== null) return null;
     } else if (plugin.status === "incompatible") {
-      if (!pluginIdentifier(plugin.id) || !versionString(plugin.version) || plugin.protocolVersion <= 1 || plugin.message === null) return null;
+      if (!pluginIdentifier(plugin.id) || !versionString(plugin.version) || plugin.protocolVersion <= 1 || plugin.message === null || plugin.identity !== null) return null;
     } else return null;
   }
-  try { if (new TextEncoder().encode(JSON.stringify(value)).length > 65536) return null; }
+  try { if (new TextEncoder().encode(JSON.stringify(value)).length > 1_048_576) return null; }
   catch { return null; }
   const catalog = value as unknown as PluginCatalog;
   return { ...catalog, plugins: catalog.plugins.map((plugin) => ({ ...plugin, message: plugin.status === "ready" ? null
@@ -141,8 +144,9 @@ export function isPluginArgs(value: unknown): value is Record<string, number> {
     && Object.entries(value).every(([key, n]) => pluginIdentifier(key) && safeInteger(n));
 }
 export function parsePluginManifest(value: unknown): PluginManifest | null {
-  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : [])])
+  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : []), ...(Object.hasOwn(value, "icon") ? ["icon"] : [])])
     || (Object.hasOwn(value, "icons") && !isPluginIcons(value.icons))
+    || (Object.hasOwn(value, "icon") && !isIconSource(value.icon))
     || !pluginIdentifier(value.id) || typeof value.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     || value.protocolVersion !== 1 || !Array.isArray(value.actions) || value.actions.length < 1 || value.actions.length > 32) return null;
   const seen = new Set<string>();
@@ -178,9 +182,12 @@ const CODE_HINTS: Record<string, string> = {
   invalid_state: "Spotify returned unreadable state. Check application compatibility.",
   command_failed: "Check Spotify is responsive and inspect state before manually retrying.",
   outcome_unknown: "The command may have applied but its state could not be read.",
+  not_trusted: "Confirm trust for this exact installed package, then enable it. If its files changed, review them again before enabling.",
+  stale_identity: "This plugin changed on disk after the confirmation was opened. Refresh the catalog, review the current files, and confirm trust again.",
+  capacity: "Runtime capacity is reached: too many plugins are running at once. Disable one plugin, then enable this one again.",
 };
 const ERROR_CODES = new Set([...Object.keys(CODE_HINTS), "invalid_request", "request_too_large", "unknown_action", "invalid_arguments",
-  "internal_error", "response_too_large", "timeout"]);
+  "internal_error", "response_too_large", "timeout", "not_trusted", "capacity", "stale_identity"]);
 
 /** Fixed local copy: even an exception shaped like a backend error cannot inject raw diagnostic text. */
 export function toPluginError(value: unknown): PluginError {
@@ -227,6 +234,16 @@ export function canRunPlugin(snapshot: PluginSnapshot, control: PluginControl): 
 }
 export function pluginLaunchAllowed(program: string, entrypoint: string, trusted: boolean): boolean {
   return trusted && absolutePath(program) && absolutePath(entrypoint);
+}
+/** Trust must succeed before enable runs; a failed trust never attempts enable. */
+export interface PluginTrustConsole {
+  trust(id: string, identity: string): Promise<boolean>;
+  enable(id: string): Promise<unknown>;
+}
+export async function trustAndEnablePlugin(plugin: PluginTrustConsole, id: string, identity: string): Promise<boolean> {
+  if (!(await plugin.trust(id, identity))) return false;
+  await plugin.enable(id);
+  return true;
 }
 
 /** Only this bounded Spotify view is displayed; arbitrary plugin state is never dumped. */

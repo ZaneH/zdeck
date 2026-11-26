@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nativeAvailable } from "./native";
-import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshots, pluginState, pluginUninstall } from "./nativePlugin";
-import { canRunPlugin, EMPTY_PLUGIN, MAX_ENABLED_PLUGINS, pluginEntry, pluginIdentifier, toPluginError } from "./plugin";
+import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshots, pluginState, pluginTrust, pluginUninstall } from "./nativePlugin";
+import { canRunPlugin, EMPTY_PLUGIN, pluginEntry, pluginIdentifier, toPluginError } from "./plugin";
 import type { PluginCatalog, PluginDiagnostics, PluginError, PluginSnapshots } from "./plugin";
 import type { PluginControl } from "./types";
 
@@ -54,12 +54,13 @@ export function usePluginConsole() {
     finally { catalogLock.current = false; if (mounted.current) setCatalogBusy(false); }
   }, [native]);
 
-  const rowOperation = async (id: string, operation: () => Promise<void>, mutation = false) => {
+  const rowOperation = async (id: string, operation: () => Promise<void>, mutation = false): Promise<boolean> => {
     if (!native || !ready.current || !pluginIdentifier(id) || locks.current.has(id)
-      || (!Object.hasOwn(snapshots, id) && !catalog?.plugins.some((entry) => entry.id === id))) return;
+      || (!Object.hasOwn(snapshots, id) && !catalog?.plugins.some((entry) => entry.id === id))) return false;
     locks.current.add(id); setBusy((current) => ({ ...current, [id]: true }));
     resetTrust(id); setErrors((current) => ({ ...current, [id]: null })); setCompletedIds((current) => ({ ...current, [id]: null }));
-    try { await operation(); }
+    let succeeded = false;
+    try { await operation(); succeeded = true; }
     catch (cause) {
       if (mounted.current) {
         const error = toPluginError(cause);
@@ -70,15 +71,21 @@ export function usePluginConsole() {
       locks.current.delete(id);
       if (mounted.current) setBusy((current) => ({ ...current, [id]: false }));
     }
+    return succeeded;
   };
-  const run = (id: string, operation: () => ReturnType<typeof pluginState>, completedId: string | null = null) => rowOperation(id, async () => {
+  const run = (id: string, operation: () => ReturnType<typeof pluginState>, completedId: string | null = null): Promise<void> => rowOperation(id, async () => {
     const snapshot = await operation();
     if (!mounted.current) return;
     setSnapshots((current) => ({ ...current, [id]: snapshot }));
     if (!snapshot.lastError && snapshot.status === "connected") setCompletedIds((current) => ({ ...current, [id]: completedId }));
-  }, true);
+  }, true).then(() => {});
 
   return {
+    refreshSnapshots: async () => {
+      if (!native) return;
+      try { const next = await pluginSnapshots(); if (mounted.current) setSnapshots(next); }
+      catch (cause) { if (mounted.current) setCatalogError(toPluginError(cause)); }
+    },
     native, snapshots, catalog, catalogError, catalogBusy, loading, sessionsReady: ready.current, busy, errors, diagnostics, completedIds, trustEpoch, catalogEpoch,
     refreshCatalog: () => localOperation(async () => {
       const version = ++catalogVersion.current;
@@ -86,15 +93,17 @@ export function usePluginConsole() {
       if (mounted.current && version === catalogVersion.current) { setCatalog(next); setCatalogEpoch((n) => n + 1); }
     }),
     openDirectory: () => localOperation(pluginOpenDirectory),
-    enable: (id: string, trusted: boolean) => {
-      const active = Object.values(snapshots).filter((snapshot) => snapshot.status === "connected").length;
-      if (!trusted || catalogLock.current || !catalog || catalog.truncated || catalog.node.status !== "detected"
+    enable: (id: string) => {
+      if (catalogLock.current || !catalog || catalog.node.status !== "detected"
         || !catalog.plugins.some((entry) => entry.id === id && entry.status === "ready")
-        || pluginEntry(snapshots, id)?.status === "connected" || locks.current.has(id) || enabling.current.has(id)
-        || active + enabling.current.size >= MAX_ENABLED_PLUGINS) return Promise.resolve();
+        || pluginEntry(snapshots, id)?.status === "connected" || locks.current.has(id) || enabling.current.has(id)) return Promise.resolve();
       enabling.current.add(id);
       return run(id, () => pluginEnable(id)).finally(() => { enabling.current.delete(id); });
     },
+    trust: (id: string, identity: string) => rowOperation(id, async () => {
+      await pluginTrust(id, identity);
+      if (mounted.current) setCatalog((current) => current ? { ...current, plugins: current.plugins.map((entry) => entry.id === id ? { ...entry, trusted: true } : entry) } : null);
+    }),
     disconnect: (id: string) => run(id, () => pluginDisconnect(id)),
     readState: (id: string) => pluginEntry(snapshots, id)?.status === "connected" && !pluginEntry(snapshots, id)?.lastError ? run(id, () => pluginState(id)) : Promise.resolve(),
     execute: (control: PluginControl) => canRunPlugin(pluginEntry(snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)
@@ -102,7 +111,7 @@ export function usePluginConsole() {
     diagnose: (id: string) => rowOperation(id, async () => {
       const result = await pluginDiagnostics(id);
       if (mounted.current) setDiagnostics((current) => ({ ...current, [id]: result }));
-    }),
+    }).then(() => {}),
     uninstall: (id: string) => rowOperation(id, async () => {
       await pluginUninstall(id);
       if (!mounted.current) return;
@@ -110,7 +119,7 @@ export function usePluginConsole() {
       setSnapshots((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
       setCatalog((current) => current ? { ...current, plugins: current.plugins.filter((entry) => entry.id !== id) } : null);
       setDiagnostics((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
-    }, true),
+    }, true).then(() => {}),
   };
 }
 export type PluginConsole = ReturnType<typeof usePluginConsole>;
