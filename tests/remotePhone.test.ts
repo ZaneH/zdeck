@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultDeck } from "../src/lib/deck";
+import { createDefaultDeck, updateControl } from "../src/lib/deck";
+import spotifyManifest from "../plugins/spotify/manifest.json";
 import {
   buildCommandPayload,
   parseCommandResult,
@@ -148,6 +149,32 @@ it("routes remote numeric and boolean presentation targets using the authenticat
   for (let i = 0; i < 3; i++) await flush();
   const commands = harness.calls.filter((c) => c.path === "/api/v1/commands").map((c) => JSON.parse(String(c.init.body)));
   expect(commands).toEqual([{ id: "cmd_1", revision: 3, controlId: "level", value: 175 }, { id: "cmd_2", revision: 3, controlId: "power", value: 1 }]);
+  connection.stop();
+});
+
+it("round-trips an existing Spotify button as a slider and sends a remote scalar target with the actual manifest", async () => {
+  let deck = createDefaultDeck();
+  const button: PluginControl = { id: "spotify-volume", label: "Spotify volume", action: "plugin", pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
+  deck.pages[0].controls.push(button);
+  deck = JSON.parse(JSON.stringify(updateControl(deck, deck.pages[0].id, button.id, { presentation: "slider" })));
+  const control = deck.pages[0].controls.at(-1)!;
+  const payload = { ...snapshotBody(3, deck), plugins: { spotify: { status: "connected", lastError: null, state: null, manifest: spotifyManifest } } };
+  const harness = createHarness((path, init) => {
+    if (path === "/api/v1/pair/status") return jsonResponse(200, { requestId: "r1", status: "approved" });
+    if (path === "/api/v1/state") return jsonResponse(200, payload);
+    if (path === "/api/v1/commands") return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed" });
+    return jsonResponse(404, {});
+  });
+  const connection = new RemotePhoneConnection(harness.deps);
+  connection.start();
+  for (let i = 0; i < 3; i++) await flush();
+  harness.sockets[0].emit(payload); await flush();
+  expect(connection.getSnapshot().phase).toBe("active");
+  connection.commitVolume(control, 73);
+  for (let i = 0; i < 3; i++) await flush();
+  expect(harness.calls.filter(c => c.path === "/api/v1/commands").map(c => JSON.parse(String(c.init.body))))
+    .toEqual([{ id: "cmd_1", revision: 3, controlId: button.id, value: 73 }]);
+  expect(control).toMatchObject({ presentation: "slider", pluginArgs: { volume: 50 } });
   connection.stop();
 });
 

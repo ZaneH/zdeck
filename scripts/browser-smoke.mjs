@@ -876,7 +876,7 @@ try {
     window.__trustedPlugins = [];
     window.__runtimeStatus = 'detected';
     const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
-      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}},
+      {...${JSON.stringify(JSON.parse(readFileSync(join(ROOT, 'plugins/spotify/manifest.json'), 'utf8')).actions.find(action => action.id === 'set-volume'))}, title:'Spotify <volume>'},
       {id:'level', title:'Generic level', config:{amount:{type:'integer',minimum:-20,maximum:200,control:{step:5}}}},
       {id:'power', title:'Generic power', config:{enabled:{type:'boolean',control:{stateKey:'powered'}}}}
     ], icons:[
@@ -901,6 +901,7 @@ try {
         if (window.__failSave) throw {kind:'io',message:'The test deck could not be saved.'};
         if (window.__conflictSave) throw {kind:'conflict',message:'The deck was changed elsewhere.',currentRevision:savedRevision+1};
         savedDeck = args.deck; savedRevision = args.expectedRevision + 1;
+        window.__lastSavedDeck = savedDeck;
         return { exists: true, revision: savedRevision, deck: savedDeck };
       }
       if (command === 'desktop_run_control') {
@@ -1225,7 +1226,13 @@ try {
   await admin.eval("document.querySelector('.icon-picker').scrollIntoView({block:'start'})");
   await admin.screenshot('/tmp/zdeck-custom-icons-plugin-narrow.png');
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
-  check('plugin uses a configured button with sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelectorAll('.control-tile[data-action=plugin] input[type=range]').length === 0"));
+  check('actual Spotify metadata creates a slider with a sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelector('.control-tile.is-selected input[type=range]')?.step === '1'"));
+  const spotifyPresentation = "[...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select')";
+  check('Spotify Presentation chooser is reachable with button, slider and dial', await admin.eval(`(() => { const select = ${spotifyPresentation}; const r = select.getBoundingClientRect(); return r.width > 0 && r.height > 0 && [...select.options].map(o => o.value).join(',') === 'button,slider,dial'; })()`));
+  await admin.eval(`{ const select = ${spotifyPresentation}; select.value='button'; select.dispatchEvent(new Event('change',{bubbles:true})); }`);
+  check('saved Spotify actions can explicitly use a button', await admin.waitFor("document.querySelector('.control-tile.is-selected')?.dataset.presentation === 'button'"));
+  await admin.eval(`{ const select = ${spotifyPresentation}; select.value='slider'; select.dispatchEvent(new Event('change',{bubbles:true})); }`);
+  check('selecting Spotify Slider updates the tile', await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')"));
   await admin.eval(setValue('.inspector-form .native-control input', '101'));
   check('invalid plugin bounds disable Run', await admin.eval("document.querySelector('.inspector-form .native-control .button.primary').disabled"));
   await admin.eval(setValue('.inspector-form .native-control input', ''));
@@ -1233,6 +1240,13 @@ try {
   await admin.eval(setValue('.inspector-form .native-control input', '75'));
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("document.querySelector('.control-tile.is-selected input[type=range]').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  check('Spotify slider persists and dispatches a scalar desktop target', await admin.waitFor("window.__desktopCalls.length === 1") && await admin.eval("window.__desktopCalls[0].value === 100 && Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision,value' && window.__lastSavedDeck.pages.flatMap(p => p.controls).find(c => c.id === window.__desktopCalls[0].controlId)?.presentation === 'slider'"));
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("window.__desktopCalls = []");
   // Declared controls: actual keyboard/pointer gestures, fake IPC only.
   await admin.eval(click('.add-control'));
   await admin.waitFor("!!document.querySelector('.action-row')");
@@ -1320,7 +1334,8 @@ try {
   const executions = await admin.eval("window.__adminCalls.filter(c => c === 'plugin_execute').length");
   await admin.eval(click('[aria-label="Open phone preview"]'));
   await admin.waitFor("!!document.querySelector('.phone-shell .control-tile[data-action=plugin]')");
-  await admin.eval(click('.phone-shell .control-tile[data-action=plugin] button'));
+  await admin.eval("document.querySelector('.phone-shell .control-tile[data-action=plugin] input[type=range]').focus()");
+  await pressKey(admin, 'Home', 'Home', 36);
   check('phone preview renders the saved SVG', await admin.waitFor("document.querySelector('.phone-shell .control-tile[data-action=plugin] img')?.naturalWidth > 0"));
   check('phone preview simulates the plugin without native execution', await admin.eval(`window.__adminCalls.filter(c => c === 'plugin_execute').length === ${executions} && document.querySelector('.phone-shell').textContent.includes('Preview only')`));
   await admin.eval("location.hash = '#/'");
