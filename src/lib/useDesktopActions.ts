@@ -16,6 +16,7 @@ interface ActionView {
   deck: Deck | null;
   revision: number | null;
   inflight: boolean;
+  busyControlId: string | null;
   result: DesktopResult | null;
   error: string | null;
   pending: DesktopCommand | null;
@@ -23,7 +24,7 @@ interface ActionView {
 
 /** One user gesture at a time. No polling, automatic checks, retries, or action payloads. */
 export class DesktopActions {
-  private view: ActionView = { live: false, deck: null, revision: null, inflight: false, result: null, error: null, pending: null };
+  private view: ActionView = { live: false, deck: null, revision: null, inflight: false, busyControlId: null, result: null, error: null, pending: null };
   private listeners = new Set<() => void>();
   private queued: { controlId: string; value: number; deck: Deck; revision: number | null } | null = null;
   private invalidated: { deck: Deck; revision: number | null } | null = null;
@@ -73,7 +74,7 @@ export class DesktopActions {
     await this.send(this.view.pending);
   };
   private async send(command: DesktopCommand) {
-    this.update({ inflight: true, error: null });
+    this.update({ inflight: true, busyControlId: command.controlId, error: null });
     try {
       const result = await this.dispatch(command);
       this.update({ result, pending: result.state === "pending" ? command : null,
@@ -82,7 +83,7 @@ export class DesktopActions {
       const error = toDesktopActionError(cause);
       this.update({ live: false, pending: null, result: error.outcome === "unknown"
         ? { id: command.commandId, state: "unknown", message: error.message } : null, error: error.message });
-    } finally { this.update({ inflight: false }); }
+    } finally { this.update({ inflight: false, busyControlId: null }); }
     const queued = this.queued;
     if (this.view.pending) return;
     this.queued = null;

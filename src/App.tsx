@@ -650,7 +650,7 @@ export default function App() {
                     order={!desktop.live ? { index, total: page.controls.length, move: handleMoveControl } : undefined}
                     semantics={desktop.live ? "live" : "preview"}
                     disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}
-                    busy={desktop.inflight}
+                    busy={desktop.busyControlId === control.id}
                     volume={previewVolumes[control.id] ?? controlVolume(control)}
                     selected={selectedControlId === control.id}
                     pressed={pressedId === control.id}

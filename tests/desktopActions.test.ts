@@ -52,11 +52,15 @@ describe("explicit desktop Live actions", () => {
     const h = harness(); h.actions.enter();
     let resolve!: (result: DesktopResult) => void;
     h.dispatch.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    expect(h.actions.getSnapshot().busyControlId).toBeNull();
     const first = h.actions.press("ctl_volume", 63);
+    expect(h.actions.getSnapshot()).toMatchObject({ inflight: true, busyControlId: "ctl_volume" });
     await h.actions.press("ctl_volume", 64);
     await h.actions.press("ctl_volume", 85);
     expect(h.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.actions.getSnapshot().busyControlId).toBe("ctl_volume");
     resolve({ id: "command-1", state: "confirmed", message: "Confirmed." }); await first;
+    expect(h.actions.getSnapshot()).toMatchObject({ inflight: false, busyControlId: null });
     await h.actions.press("ctl_mic", 50); await h.actions.press("missing"); await h.actions.press("ctl_volume", 101);
     expect(h.dispatch).toHaveBeenCalledTimes(2);
     expect(h.dispatch.mock.calls[0][0]).toEqual({ commandId: "command-1", revision: 7, controlId: "ctl_volume", value: 63 });

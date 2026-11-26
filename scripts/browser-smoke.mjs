@@ -1333,6 +1333,7 @@ try {
   await admin.send('Input.dispatchMouseEvent', {type:'mousePressed',x:liveSlider.left+10,y:liveSlider.cy,button:'left',clickCount:1});
   await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.cx,y:liveSlider.cy,button:'left',buttons:1});
   check('live slider pointer movement sends before pointerup', await admin.waitFor('window.__desktopCalls.length === 3'));
+  check('dragging a slider marks only that control busy', await admin.eval("(() => { const busy = [...document.querySelectorAll('.control-grid .control-tile.is-busy')]; return busy.length === 1 && busy[0].contains(document.querySelector('.control-tile.is-selected input')) && [...document.querySelectorAll('.control-grid .control-tile[aria-busy=true]')].length === 1; })()"));
   await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.right-10,y:liveSlider.cy,button:'left',buttons:1});
   const pointerFinal = await admin.eval("Number(document.querySelector('.control-tile.is-selected input').value)");
   await admin.send('Input.dispatchMouseEvent', {type:'mouseReleased',x:liveSlider.right-10,y:liveSlider.cy,button:'left',clickCount:1});
