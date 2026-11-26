@@ -1,0 +1,57 @@
+"""Author-facing types. Wire keys deliberately match the TypeScript SDK."""
+from typing import Literal, TypedDict, Union
+
+Json = Union[None, bool, int, float, str, list["Json"], dict[str, "Json"]]
+Args = dict[str, Union[int, bool]]
+State = dict[str, Json]
+
+
+class IntegerControl(TypedDict):
+    step: int
+
+
+class BooleanControl(TypedDict):
+    stateKey: str
+
+
+class _IntegerConfig(TypedDict):
+    type: Literal["integer"]
+    minimum: int
+    maximum: int
+
+
+class IntegerConfig(_IntegerConfig, total=False):
+    control: IntegerControl
+
+
+class _BooleanConfig(TypedDict):
+    type: Literal["boolean"]
+
+
+class BooleanConfig(_BooleanConfig, total=False):
+    control: BooleanControl
+
+
+class Action(TypedDict):
+    id: str
+    title: str
+    config: dict[str, Union[IntegerConfig, BooleanConfig]]
+
+
+class Icon(TypedDict):
+    id: str
+    title: str
+    category: str
+    src: str
+
+
+class _Manifest(TypedDict):
+    id: str
+    version: str
+    protocolVersion: Literal[1]
+    actions: list[Action]
+
+
+class Manifest(_Manifest, total=False):
+    icons: list[Icon]
+    icon: str

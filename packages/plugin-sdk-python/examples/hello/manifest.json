@@ -1,0 +1,1 @@
+{"id":"hello-python","version":"0.1.0","protocolVersion":1,"actions":[{"id":"set-level","title":"Set level","config":{"level":{"type":"integer","minimum":0,"maximum":100,"control":{"step":5}}}},{"id":"set-enabled","title":"Set enabled","config":{"enabled":{"type":"boolean","control":{"stateKey":"enabled"}}}}]}
