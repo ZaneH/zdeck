@@ -521,6 +521,9 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .tile-order > summary::-webkit-details-marker { display: none; }
 .reorder-note { margin: 0 0 10px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
 .tile-order > summary:hover { background: var(--surface-3); color: var(--text); }
+.tile-order > summary { touch-action: none; user-select: none; }
+.tile-order > summary[aria-disabled="true"] { cursor: not-allowed; }
+body:has(.control-tile.is-dragging), body:has(.control-tile.is-dragging) * { cursor: grabbing !important; user-select: none; }
 @media (pointer: coarse), (max-width: 640px) {
   .tile-order > summary { width: 44px; height: 44px; }
   .tile-order > label { top: 46px; }
@@ -529,4 +532,4 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .tile-order > label { position: absolute; top: 30px; left: 0; width: 140px; padding: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 5px; box-shadow: 0 3px 8px #0004; }
 .is-reorderable .tile-primary { padding-top: 26px; }
 .control-tile.is-dragging { opacity: .45; }
-.control-tile.is-drop-target { outline: 3px dashed var(--accent); outline-offset: 3px; }
+.control-tile.is-drop-target::after { content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; border: 3px solid var(--accent); border-radius: inherit; background: color-mix(in srgb, var(--accent) 25%, transparent); }

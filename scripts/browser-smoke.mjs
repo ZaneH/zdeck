@@ -588,12 +588,25 @@ try {
   const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
   check('keyboard selection of a position reorders the control', keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
 
-  // Drag handlers expose source/target feedback and never invoke the tile action.
-  check('drag handle and drop target provide clear feedback', await editor.eval("(() => { const source = document.querySelectorAll('.control-tile')[0], target = document.querySelectorAll('.control-tile')[1]; window.__reorderData = new DataTransfer(); source.querySelector('.tile-order summary').dispatchEvent(new DragEvent('dragstart', { bubbles:true, dataTransfer:window.__reorderData })); target.dispatchEvent(new DragEvent('dragover', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); return window.__reorderData.getData('application/x-zdeck-control') !== ''; })()") && await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  // Real pointer input catches failures that synthetic native drag events miss.
+  await editor.eval("document.querySelector('.control-tile').scrollIntoView({block:'center'})");
+  await editor.send('Page.bringToFront');
+  const reorderGrip = await editor.eval(rectOf('.control-tile .tile-order summary'));
+  const reorderTarget = await editor.eval(rectOf('.control-tile:nth-child(2)'));
+  await editor.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: reorderGrip.cx, y: reorderGrip.cy, button: 'left', buttons: 1, clickCount: 1 });
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderGrip.cx + 10, y: reorderGrip.cy, button: 'left', buttons: 1 });
+  await editor.waitFor("!!document.querySelector('.is-dragging')");
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 1 });
+  check('drag handle and drop target provide clear feedback', await editor.waitFor("!!document.querySelector('.is-dragging') && !!document.querySelector('.is-drop-target')"));
+  check('placement preview uses a solid translucent fill and grabbing cursor', await editor.eval("(() => { const target = document.querySelector('.is-drop-target'); const preview = getComputedStyle(target, '::after'); return preview.borderTopStyle === 'solid' && preview.borderTopWidth === '3px' && preview.backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(target).cursor === 'grabbing'; })()"));
   await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
-  await editor.eval("document.querySelector('.is-drop-target').dispatchEvent(new DragEvent('drop', { bubbles:true, cancelable:true, dataTransfer:window.__reorderData })); document.querySelector('.is-dragging .tile-order summary').dispatchEvent(new DragEvent('dragend', { bubbles:true, dataTransfer:window.__reorderData }));");
+  await editor.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
   check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-footer').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
   await editor.eval(setSelect('.control-tile.is-selected .tile-order select', '0'));
+  const clickGrip = await editor.eval(rectOf('.control-tile.is-selected .tile-order summary'));
+  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
+  check('clicking the grip without dragging opens the position menu', await editor.waitFor("document.querySelector('.control-tile.is-selected .tile-order').open"));
+  await pointerClick(editor, clickGrip.cx, clickGrip.cy);
 
   // Spans persist without forcing extra implicit columns on narrower grids.
   check('action dropdown header has no action icon', await editor.eval("!document.querySelector('.action-picker > summary .lucide:not(.icon-picker-toggle)')"));
@@ -1526,7 +1539,7 @@ try {
   check('full editor with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));
   check('narrow editor stacks the inspector below the grid', await narrow.eval("document.querySelector('.inspector-dock').getBoundingClientRect().top >= document.querySelector('.control-grid').getBoundingClientRect().bottom - 1"));
   check('full page does not offer an extra control slot', await narrow.eval("!document.querySelector('.empty-key')"));
-  check('narrow editor reorder targets are touch-sized', await narrow.eval("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
+  check('narrow editor reorder targets are touch-sized', await narrow.waitFor("(() => { const handles = [...document.querySelectorAll('.tile-order > summary')]; return handles.length > 0 && handles.every(el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }); })()"));
   await narrow.eval("document.querySelector('.tile-order > summary').scrollIntoView({block:'center'})");
   const touchOrderHandle = await narrow.eval(rectOf('.tile-order > summary'));
   await narrow.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x:touchOrderHandle.cx,y:touchOrderHandle.cy}] });

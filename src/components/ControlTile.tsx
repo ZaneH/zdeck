@@ -32,8 +32,17 @@ export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
   busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order,
 }: ControlTileProps) {
-  const [dragOver, setDragOver] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
+  const dropTarget = useRef<HTMLElement | null>(null);
+  const suppressClick = useRef(false);
+  function clearDrag() {
+    dropTarget.current?.classList.remove("is-drop-target");
+    dropTarget.current = null;
+    drag.current = null;
+    setDragging(false);
+  }
+  useEffect(() => () => { dropTarget.current?.classList.remove("is-drop-target"); }, []);
   const remote = semantics === "remote";
   const live = semantics === "live";
   const volumeGesture = useRef<string | null>(null);
@@ -56,32 +65,56 @@ export function ControlTile({
 
   return (
     <article
-      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}${dragOver ? " is-drop-target" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
+      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
       style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}` } as CSSProperties}
       data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
-      onDragOver={(event) => {
-        if (!order || disabled || !event.dataTransfer.types.includes("application/x-zdeck-control")) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        setDragOver(true);
+      data-order-index={order?.index}
+      onPointerMove={(event) => {
+        const gesture = drag.current;
+        if (!gesture || disabled) return;
+        if (!gesture.active) {
+          if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 5) return;
+          gesture.active = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          suppressClick.current = true;
+          event.currentTarget.querySelector("details")!.open = false;
+          setDragging(true);
+        }
+        const source = event.currentTarget;
+        const hit = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".control-tile");
+        const target = hit && hit !== source && hit.parentElement === source.parentElement && hit.dataset.orderIndex !== undefined && !hit.classList.contains("is-disabled") ? hit : null;
+        dropTarget.current?.classList.remove("is-drop-target");
+        dropTarget.current = target;
+        target?.classList.add("is-drop-target");
       }}
-      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false); }}
-      onDrop={(event) => {
-        setDragOver(false);
-        if (!order || disabled) return;
-        event.preventDefault();
-        order.move(event.dataTransfer.getData("application/x-zdeck-control"), order.index);
+      onPointerUp={(event) => {
+        const targetIndex = dropTarget.current?.dataset.orderIndex;
+        const move = drag.current?.active && !disabled && targetIndex !== undefined;
+        clearDrag();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        if (move) order?.move(control.id, Number(targetIndex));
       }}
+      onPointerCancel={clearDrag}
+      onLostPointerCapture={(event) => { if (event.target === event.currentTarget) clearDrag(); }}
+      onKeyDown={(event) => { if (event.key === "Escape") clearDrag(); }}
     >
       {order ? <details className="tile-order">
         <summary aria-label={`Move ${control.label}`} title="Drag to reorder, or choose a position"
-          draggable={!disabled} onClick={(event) => event.stopPropagation()}
-          onDragStart={(event) => {
-            event.currentTarget.closest("details")!.open = false;
-            event.dataTransfer.setData("application/x-zdeck-control", control.id);
-            event.dataTransfer.effectAllowed = "move";
-            setDragging(true);
-          }} onDragEnd={() => { setDragging(false); setDragOver(false); }}>
+          draggable={false} aria-disabled={disabled || undefined}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (disabled || suppressClick.current) event.preventDefault();
+            suppressClick.current = false;
+          }}
+          onDragStart={(event) => event.preventDefault()}
+          onPointerDown={(event) => {
+            if (disabled || event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.focus();
+            suppressClick.current = false;
+            drag.current = { x: event.clientX, y: event.clientY, active: false };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}>
           <GripVertical size={16} aria-hidden="true" />
         </summary>
         <label className="field"><span>Position</span><select aria-label={`Position of ${control.label}`} value={order.index} disabled={disabled}
