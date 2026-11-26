@@ -72,6 +72,10 @@ import { DesktopTrayNotice } from "./components/DesktopTrayNotice";
 import { DesktopPreferencesCard } from "./components/DesktopPreferencesCard";
 
 import { SettingsSections } from "./components/SettingsSections";
+import { StatusFooter } from "./components/StatusFooter";
+import { loadFooter, saveFooter } from "./lib/footerPreferences";
+import type { FooterPreferences } from "./lib/footerPreferences";
+import { useServiceStatus } from "./lib/useServiceStatus";
 
 type Route = "editor" | "settings" | "phone";
 
@@ -132,6 +136,13 @@ export default function App() {
   const [initial] = useState(() => loadDeck(getStorage()));
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [sidebar, setSidebar] = useState(() => loadSidebar(getStorage()));
+  const [footer, setFooter] = useState(() => loadFooter(getStorage()));
+  const service = useServiceStatus(nativeMode && route !== "phone");
+  const changeFooter = (key: keyof FooterPreferences, enabled: boolean) => {
+    const value = { ...footer.value, [key]: enabled };
+    const saved = saveFooter(getStorage(), value);
+    setFooter({ value, error: saved ? null : "Footer preferences were not saved. This choice may not survive a restart." });
+  };
   const toggleSidebar = () => {
     const collapsed = !sidebar.collapsed;
     const saved = saveSidebar(getStorage(), collapsed);
@@ -438,7 +449,7 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
       onClick={(event) => {
         if (route === "editor" && event.target instanceof Element &&
-          !event.target.closest(".control-tile, .inspector-dock, dialog")) setSelectedControlId(null);
+          !event.target.closest(".control-tile, .inspector-dock, .status-footer, dialog")) setSelectedControlId(null);
       }}
     >
       <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
@@ -451,12 +462,6 @@ export default function App() {
           />
         ) : <a className="back-link" href="#/"><ArrowLeft size={15} aria-hidden="true" /> Back to deck</a>}
         <div className="topbar-spacer" />
-        {nativeMode && route === "editor" ? <div className="segmented desktop-mode" role="group" aria-label="Desktop control mode">
-          <button type="button" className="button secondary" aria-pressed={!desktop.live} onClick={desktop.preview}>Editor</button>
-          <button type="button" className="button secondary" aria-pressed={desktop.live}
-            disabled={!desktop.ready || desktop.inflight || !!desktop.pending}
-            onClick={() => { setPreviewNotice(null); desktop.enter(); }}>Live</button>
-        </div> : null}
         {route === "editor" ? (
           <button type="button" className="button secondary add-control" disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
             <Plus size={15} aria-hidden="true" /> Add control
@@ -490,15 +495,24 @@ export default function App() {
         </a>
       </header>
 
+      <div className="app-content">
       <DesktopTrayNotice />
       {route === "settings" ? (
         <main className="settings-view" id="main">
           <div className="settings-header">
             <h1>Settings</h1>
-            <p>Phone connection, OBS, external plugin, appearance, and local storage.</p>
+            <p>Phone connection, integrations, appearance, and local preferences.</p>
           </div>
 
-          <SettingsSections phone={<>
+          <SettingsSections footer={<section className="settings-card" aria-labelledby="footer-heading">
+            <h2 id="footer-heading">Footer</h2>
+            {([["service", "Show local service status"], ["plugins", "Show loaded plugin count"], ["dividers", "Show subtle dividers"]] as const).map(([key, label]) => (
+              <label key={key} className="desktop-close-choice">
+                <input type="checkbox" checked={footer.value[key]} onChange={event => changeFooter(key, event.target.checked)} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </section>} phone={<>
             {serviceRestore.error ? <p className="settings-error" role="alert">{serviceRestore.error}</p> : null}
             {serviceRestore.pending ? <p role="status">Checking local service…</p> : <RemoteSettingsCard onServiceAction={serviceRestore.clearError} />}
           </>} general={<>
@@ -579,8 +593,8 @@ export default function App() {
           <details className="settings-card preview-scope">
             <summary className="disclosure">About this preview</summary>
             <p>
-              Desktop tiles default to Editor. Explicit Live mode runs saved controls on this computer without a phone or phone service.
-              Editing or leaving the editor returns to Editor. The phone preview is always simulated. In the
+              Desktop tiles default to Editing. Choose Run controls in the footer to arm saved controls on this computer without a phone or phone service.
+              Editing or leaving the editor disarms controls. The phone preview is always simulated. In the
               desktop Inspector, OBS scene switching runs natively while OBS is
               connected. Microphone mute, output volume, and system play/pause
               work on macOS, Windows, and Linux. Audio actions read their state
@@ -625,7 +639,7 @@ export default function App() {
             ) : null}
 
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
-            {nativeMode && !desktop.ready ? <p className="desktop-mode-note">Save a valid synchronized deck before entering Live.</p> : null}
+            {nativeMode && !desktop.ready ? <p className="desktop-mode-note">Save a valid synchronized deck before arming controls.</p> : null}
             {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys.</p> : null}
             <div className="deck-workbench">
               <div className="control-grid">
@@ -706,13 +720,6 @@ export default function App() {
               }
             />
           </section>
-          <footer className="workspace-footer">
-            {desktop.live ? <span className="desktop-live-indicator" role="status" aria-label="Live: controls run on this computer">LIVE</span> : null}
-            {desktop.error || (desktop.result && desktop.result.state !== "confirmed" && desktop.result.code !== "media_key_sent") ? <p className={`native-feedback is-${desktop.result?.state ?? "failed"}`} role="alert">
-              {desktop.error ?? desktop.result?.message}
-            </p> : !desktop.live && previewNotice ? <p className="preview-feedback" role="status">{previewNotice}</p> : null}
-            {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check().then(() => plugin.refreshSnapshots())}>Check result</button> : null}
-          </footer>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
             manifests={enabledPluginManifests(plugin.snapshots)}
@@ -721,6 +728,22 @@ export default function App() {
         </main>
       )}
 
+      </div>
+      <StatusFooter preferences={footer.value} native={nativeMode}
+        service={service.status} serviceFailed={service.failed}
+        pluginCount={enabledPluginManifests(plugin.snapshots).length}
+        pluginsUnknown={nativeMode && (plugin.loading || !!plugin.catalogError)}
+        live={desktop.live} canRun={route === "editor" && desktop.ready && !desktop.inflight && !desktop.pending}
+        onEdit={desktop.preview} onRun={() => { setPreviewNotice(null); desktop.enter(); }}
+        feedback={<>
+          {footer.error ? <p className="footer-error" role="alert">{footer.error}</p> : null}
+          {route === "editor" ? <div className="workspace-feedback">
+            {desktop.error || (desktop.result && desktop.result.state !== "confirmed" && desktop.result.code !== "media_key_sent") ? <p className={`native-feedback is-${desktop.result?.state ?? "failed"}`} role="alert">
+              {desktop.error ?? desktop.result?.message}
+            </p> : !desktop.live && previewNotice ? <p className="preview-feedback" role="status">{previewNotice}</p> : null}
+            {desktop.pending ? <button type="button" className="button secondary" disabled={desktop.inflight} onClick={() => void desktop.check().then(() => plugin.refreshSnapshots())}>Check result</button> : null}
+          </div> : null}
+        </>} />
       <UpdateBanner />
     </div>
   );

@@ -290,11 +290,16 @@ async function typeInput(page, selector, text) {
   await page.eval(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.focus(); input.select(); })()`);
   await page.send('Input.insertText', { text });
 }
-// Mode toolbar clicks intentionally deselect. Select the same numeric/toggle tile again before testing its gestures.
+async function chooseDesktopMode(page, mode) {
+  await page.eval(click('.status-footer .footer-trigger'));
+  await page.waitFor("!!document.querySelector('.status-footer [role=menu]')");
+  await page.eval(clickText('.status-footer [role=menuitemradio]', mode === 'Live' ? 'Run controls' : 'Edit controls'));
+  await page.waitFor(`document.querySelector('.status-footer')?.dataset.live === '${mode === 'Live'}'`);
+}
 async function presentationMode(page, mode) {
   const index = await page.eval("[...document.querySelectorAll('.control-tile')].findIndex(tile => tile.classList.contains('is-selected'))");
-  await page.eval(clickText('.desktop-mode button', mode));
-  await page.eval(click(`.control-tile:nth-child(${index + 1}) .tile-primary`));
+  await chooseDesktopMode(page, mode);
+  if (index >= 0) await page.eval(click(`.control-tile:nth-child(${index + 1}) .tile-primary`));
 }
 
 async function pressKey(page, key, code, vk, text) {
@@ -612,7 +617,7 @@ try {
   check('placement preview uses a solid translucent fill and grabbing cursor', await editor.eval("(() => { const target = document.querySelector('.is-drop-target'); const preview = getComputedStyle(target, '::after'); return preview.borderTopStyle === 'solid' && preview.borderTopWidth === '3px' && preview.backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(target).cursor === 'grabbing'; })()"));
   await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
   await editor.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
-  check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-footer').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
+  check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-feedback').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
   await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '0'));
   const clickTile = await editor.eval(rectOf('.control-tile.is-selected .tile-primary'));
   await pointerClick(editor, clickTile.cx, clickTile.cy);
@@ -682,9 +687,10 @@ try {
   // ------------------------------------------------------------ settings + theme segmented control
   await editor.eval(click('[aria-label="Open settings"]'));
   check("settings opens from the topbar", await editor.waitFor("!!document.querySelector('.settings-view')"));
-  await editor.eval("window.scrollTo(0, document.documentElement.scrollHeight)");
+  await editor.eval("document.querySelector('.app-content').scrollTop = document.querySelector('.app-content').scrollHeight");
+  check('footer remains at the viewport bottom while settings scroll and root overscroll is disabled', await editor.eval("Math.abs(document.querySelector('.status-footer').getBoundingClientRect().bottom - innerHeight) < 2 && getComputedStyle(document.querySelector('.app-content')).overscrollBehaviorY === 'none' && getComputedStyle(document.documentElement).overscrollBehaviorY === 'none' && document.documentElement.scrollHeight <= innerHeight"));
   check('Settings back navigation remains visible while scrolling', await editor.eval("(() => { const button = document.querySelector('[aria-label=\"Back to editor\"]'); const r = button.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.closest('a') === button; })()"));
-  await editor.eval("window.scrollTo(0,0)");
+  await editor.eval("document.querySelector('.app-content').scrollTop = 0");
   check("active settings control toggles back to the editor", await editor.eval("document.querySelector('[aria-label=\"Back to editor\"]')?.getAttribute('href') === '#/' && document.querySelector('[aria-label=\"Back to editor\"]').getAttribute('aria-current') === 'page'"));
   check("closed About this preview reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.preview-scope'); const s = d.querySelector('summary'); return !d.open && getComputedStyle(d).display === 'block' && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
   check("closed Storage details reserves no blank space after its summary", await editor.eval("(() => { const d = document.querySelector('.storage-details'); const s = d.querySelector('summary'); return !d.open && (d.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom) <= 2; })()"));
@@ -693,7 +699,7 @@ try {
   check("clicking the same settings control returns to the editor", await editor.waitFor("!!document.querySelector('.canvas-panel') && !document.querySelector('.settings-view')"));
   await editor.eval(click('[aria-label="Open settings"]'));
   await editor.waitFor("!!document.querySelector('.settings-view')");
-  check("settings groups are navigable with an active General section", await editor.eval("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General' && document.querySelectorAll('.settings-nav a').length === 3"));
+  check("settings groups are navigable with an active General section", await editor.eval("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General' && document.querySelectorAll('.settings-nav a').length === 4"));
   check("browser Settings does not offer native close behavior", await editor.eval("!document.getElementById('desktop-preferences-heading')"));
   await editor.eval("document.querySelector('.settings-nav a[href=\"#/settings/phone\"]').focus()");
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
@@ -713,6 +719,30 @@ try {
   await editor.waitFor("document.documentElement.dataset.theme === 'dark'");
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
+
+  // ------------------------------------------------------------ custom footer menus and durable visibility
+  await editor.eval("document.querySelector('.footer-trigger').focus()");
+  await pressKey(editor, 'ArrowUp', 'ArrowUp', 38);
+  check('footer menu opens from the keyboard and focuses its first item', await editor.waitFor("document.activeElement?.getAttribute('role') === 'menuitem' && !!document.querySelector('.footer-popup')"));
+  await editor.screenshot('/tmp/zdeck-footer-menu.png');
+  await pressKey(editor, 'Escape', 'Escape', 27);
+  check('Escape closes footer menu and restores trigger focus', await editor.waitFor("!document.querySelector('.footer-popup') && document.activeElement === document.querySelector('.footer-trigger')"));
+  await editor.eval(clickText('.footer-trigger', 'Service unavailable'));
+  check('browser footer explains service limitation without pretending to be connected', await editor.waitFor("document.querySelector('.footer-popup')?.textContent.includes('only in the desktop app')"));
+  await editor.eval("document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
+  check('clicking outside dismisses the footer menu', await editor.waitFor("!document.querySelector('.footer-popup')"));
+  await editor.eval("document.querySelector('.footer-trigger').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))");
+  check('right-click opens the custom footer menu', await editor.waitFor("!!document.querySelector('.footer-popup [role=menu]')"));
+  await pressKey(editor, 'Escape', 'Escape', 27);
+  await editor.eval(click('[aria-label="Configure footer"]'));
+  await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Footer'");
+  await editor.eval("document.querySelectorAll('[aria-label=Footer][role=region] input').forEach(input => input.click())");
+  check('footer settings hide optional items but preserve mode and configuration', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && !document.querySelector('.status-footer').classList.contains('has-dividers') && !!document.querySelector('[aria-label=\"Configure footer\"]')"));
+  await editor.send('Page.reload');
+  check('footer visibility round-trips through a page restart', await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 1 && document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Footer' && [...document.querySelectorAll('[aria-label=Footer][role=region] input')].every(input => !input.checked)"));
+  await editor.eval("document.querySelectorAll('[aria-label=Footer][role=region] input').forEach(input => input.click())");
+  await editor.eval("location.hash = '#/'");
+  await editor.waitFor("document.querySelectorAll('.footer-trigger').length === 3");
 
   // ------------------------------------------------------------ onboarding walkthrough in an isolated context
   const { browserContextId: firstRunCtx } = await cdp.send('Target.createBrowserContext');
@@ -969,7 +999,10 @@ try {
         if (window.__failPlugin && args.pluginId === 'spotify') throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
         return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.actionId === 'power' ? {powered:args.args.enabled} : args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
       }
-      if (command === 'remote_status') return status();
+      if (command === 'remote_status') {
+        if (window.__failRemoteStatus) throw { kind: 'internal', message: 'Fixture status unavailable' };
+        return status();
+      }
       if (command === 'remote_list_devices') return [];
       if (command === 'obs_snapshot') return { connected: false, host: '127.0.0.1', port: 4455, scenes: [], currentScene: null, observedAtMs: Date.now() };
       if (command === 'remote_start') {
@@ -1012,6 +1045,7 @@ try {
   await admin.eval(click('.remote-command button'));
   check('blocked clipboard provides a selectable command and manual-copy fallback', await admin.waitFor("document.querySelector('.remote-command [role=status]')?.textContent.includes('copy it manually') && document.querySelector('.remote-command pre').tabIndex === 0"));
   await admin.eval("window.__clipboardFails = false");
+  check('running service has a green footer globe without claiming phone connectivity', await admin.waitFor("document.querySelector('.footer-trigger.is-connected')?.textContent === 'Service running' && !!document.querySelector('.footer-trigger.is-connected .lucide-globe')"));
   check('running service hydrates the address without persisting session or pairing data', await admin.eval("document.querySelector('input[type=url]').value === 'https://fixture.tailnet.ts.net' && !localStorage.getItem('deck.remote.origin.v1') && !window.__adminCalls.includes('remote_start')"));
   check('pairing steps are four numbered circles', await admin.eval("(() => { const items = [...document.querySelectorAll('.remote-steps > li')]; return items.length === 4 && items.every((li) => { const mark = getComputedStyle(li, '::before'); return mark.borderRadius === '50%' && mark.content !== 'none' && parseFloat(mark.width) > 0; }); })()"));
   const checkDisclosureGeometry = async () => {
@@ -1191,6 +1225,7 @@ try {
   await admin.eval(clickText(`${row('other')} dialog button`, 'Trust and enable'));
   await admin.waitFor("document.querySelector('[data-plugin-id=other] .plugin-row-actions > button').textContent === 'Disable'");
   await admin.eval("window.__holdEnable = null; window.__finishEnable()");
+  check('footer counts both enabled plugins', await admin.waitFor("[...document.querySelectorAll('.footer-trigger')].some(el => el.textContent === '2 plugins loaded')"));
   check('two plugins enable independently with no automatic state read or execute', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent === 'Disable'") && await admin.eval("!window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute') && window.__pluginCalls.filter(c=>c.command==='plugin_enable').map(c=>c.args.pluginId).sort().join(',')==='other,spotify'"));
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   check('catalog refresh preserves both enabled sessions', await admin.waitFor("!document.querySelector('.plugin-settings .settings-actions button').disabled") && await admin.eval("[...document.querySelectorAll('.plugin-row-actions > button')].filter(b=>b.textContent==='Disable').length===2"));
@@ -1268,7 +1303,7 @@ try {
   await admin.eval(setValue('.inspector-form .native-control input', '75'));
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
-  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.waitFor("document.querySelector('.status-footer')?.dataset.ready === 'true'");
   await presentationMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile.is-selected input[type=range]').focus()");
   await pressKey(admin, 'End', 'End', 35);
@@ -1281,7 +1316,7 @@ try {
   await admin.eval(clickText('.action-row', 'Generic level'));
   await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')");
   check('new generic numeric actions default to sliders with declared bounds', await admin.eval("(() => { const input = document.querySelector('.control-tile.is-selected input'); return input.min === '-20' && input.max === '200' && input.step === '5'; })()"));
-  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.waitFor("document.querySelector('.status-footer')?.dataset.ready === 'true'");
   await presentationMode(admin, 'Live');
   await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected input').focus()");
   await pressKey(admin, 'End', 'End', 35);
@@ -1309,7 +1344,7 @@ try {
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
   await pressKey(admin, 'End', 'End', 35);
   check('dial keyboard exposes the declared maximum and value', await admin.eval("document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow') === '200'"));
-  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.waitFor("document.querySelector('.status-footer')?.dataset.ready === 'true'");
   await presentationMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
   await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
@@ -1338,7 +1373,7 @@ try {
   await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
   await admin.eval(click('.presentation-picker summary'));
   await admin.eval(clickText('.presentation-picker button', 'Toggle switch'));
-  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.waitFor("document.querySelector('.status-footer')?.dataset.ready === 'true'");
   await presentationMode(admin, 'Live');
   check('live unknown toggle is disabled without claiming Off', await admin.eval("document.querySelector('.control-tile.is-selected .tile-toggle').disabled && !document.querySelector('.control-tile.is-selected .tile-toggle').hasAttribute('aria-checked') && document.querySelector('.control-tile.is-selected .tile-toggle').textContent.includes('State unknown')"));
   await presentationMode(admin, 'Editor');
@@ -1396,29 +1431,40 @@ try {
   await admin.eval(clickText('.action-row','Other action')); await admin.waitFor("!!document.querySelector('.native-control .button.primary')");
   await admin.eval(clickText('.native-control button','Run plugin action'));
   check('healthy plugin action stays usable after neighboring failure and disable', await admin.waitFor("window.__pluginArgs?.pluginId==='other' && window.__pluginArgs.actionId==='next'") && await admin.eval("!document.querySelector('.native-control').textContent.includes('Outcome unknown')"));
-  // ------------------------------------------------------------ explicit offline desktop Live mode (fake IPC only)
+  await admin.send('Page.bringToFront');
+  check('footer reflects the stopped local service outside settings', await admin.waitFor("[...document.querySelectorAll('.footer-trigger')].some(el => el.textContent === 'Service stopped')"));
+  await admin.eval("window.__failRemoteStatus = true; window.dispatchEvent(new Event('focus'))");
+  check('failed service observation clears the known state rather than showing stale green', await admin.waitFor("[...document.querySelectorAll('.footer-trigger')].some(el => el.textContent === 'Service unknown') && !document.querySelector('.footer-trigger.is-connected')"));
+  await admin.eval("window.__failRemoteStatus = false; window.dispatchEvent(new Event('focus'))");
+  check('service indicator recovers on the next observation', await admin.waitFor("[...document.querySelectorAll('.footer-trigger')].some(el => el.textContent === 'Service stopped')"));
+  // ------------------------------------------------------------ explicit offline desktop execution (fake IPC only)
   await admin.eval("location.hash = '#/'");
-  await admin.waitFor("!!document.querySelector('.desktop-mode')");
-  check('native editor defaults Editor and never needs the phone service', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
+  await admin.waitFor("!!document.querySelector('.status-footer')");
+  check('native editor defaults Editing and never needs the phone service', await admin.eval("document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.footer-trigger').textContent === 'Editing' && window.__desktopCalls.length === 0 && !window.__adminCalls.includes('remote_start')"));
   await admin.eval(click('.control-tile[data-action="mic-mute"] button'));
   check('Editor tile selection never invokes a desktop action', await admin.eval("window.__desktopCalls.length === 0"));
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
-  check('entering Live shows a compact accent indicator without executing', await admin.waitFor("document.querySelector('.desktop-live-indicator')?.textContent === 'LIVE'") && await admin.eval("window.__desktopCalls.length === 0 && !document.querySelector('.desktop-mode-note') && !document.querySelector('.is-reorderable')"));
+  await chooseDesktopMode(admin, 'Live');
+  check('arming shows a compact footer indicator without executing', await admin.waitFor("document.querySelector('.footer-trigger.is-armed')?.textContent === 'Controls armed'") && await admin.eval("window.__desktopCalls.length === 0 && !document.querySelector('.desktop-mode-note') && !document.querySelector('.is-reorderable') && !document.querySelector('.topbar [aria-label=\"Desktop control mode\"]')"));
+  await admin.eval(click('.status-footer .footer-trigger'));
+  await pressKey(admin, 'End', 'End', 35);
+  check('execution menu arrows reach the selected armed item', await admin.eval("document.activeElement?.textContent === 'Run controls' && document.activeElement.getAttribute('aria-checked') === 'true'"));
+  await admin.screenshot('/tmp/zdeck-footer-armed.png');
+  await pressKey(admin, 'Escape', 'Escape', 27);
   await admin.eval(click('[aria-label="Collapse Inspector sidebar"]'));
-  check('Live keeps the expand toggle reachable while the sidebar is hidden', await admin.waitFor("document.querySelector('.inspector-dock').hidden && !!document.querySelector('[aria-label=\"Expand Inspector sidebar\"]') && !!document.querySelector('.desktop-live-indicator')"));
+  check('armed controls keep the expand toggle reachable while the sidebar is hidden', await admin.waitFor("document.querySelector('.inspector-dock').hidden && !!document.querySelector('[aria-label=\"Expand Inspector sidebar\"]') && !!document.querySelector('.footer-trigger.is-armed')"));
   await admin.eval(click('[aria-label="Expand Inspector sidebar"]'));
-  check('Live footer fills the application height rather than following the controls', await admin.eval("(() => { const footer = document.querySelector('.workspace-footer'); const bounds = footer.getBoundingClientRect(); const workspace = document.querySelector('.workspace'); return footer.parentElement === workspace && Math.abs(bounds.bottom - (innerHeight - parseFloat(getComputedStyle(workspace).paddingBottom))) < 2 && document.documentElement.scrollHeight <= innerHeight; })()"));
+  check('status footer sits at the window edge outside the scrolling workspace', await admin.eval("(() => { const footer = document.querySelector('.status-footer'); return footer.parentElement.classList.contains('app-shell') && Math.abs(footer.getBoundingClientRect().bottom - innerHeight) < 2 && document.documentElement.scrollHeight <= innerHeight; })()"));
   await admin.eval("window.__holdDesktop = true");
   await admin.eval("document.querySelector('.control-tile[data-action=mic-mute] button').click(); document.querySelector('.control-tile[data-action=mic-mute] button').click()");
   check('Live dispatches one saved control with flat revision envelope and disables doublepress', await admin.waitFor("window.__desktopCalls.length === 1 && document.querySelector('.control-tile button').disabled") && await admin.eval("Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision' && window.__desktopCalls[0].controlId === 'ctl_mic' && Number.isSafeInteger(window.__desktopCalls[0].revision)"));
   await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
-  check('confirmed actions keep the footer quiet', await admin.waitFor("!document.querySelector('.control-tile button').disabled && !document.querySelector('.native-feedback') && document.querySelector('.workspace-footer').textContent === 'LIVE'"));
+  check('confirmed actions keep the footer quiet', await admin.waitFor("!document.querySelector('.control-tile button').disabled && !document.querySelector('.native-feedback') && document.querySelector('.workspace-feedback').textContent === '' && !!document.querySelector('.footer-trigger.is-armed')"));
   await admin.eval("window.__holdSave = true");
   await admin.eval(setSelect('#page-switcher', 'page_media'));
-  check('page edits immediately return Editor and block Live while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor' && document.querySelectorAll('.desktop-mode button')[1].disabled"));
+  check('page edits immediately disarm controls and block re-arming while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.status-footer').dataset.ready === 'false'"));
   await admin.eval("window.__holdSave = false; window.__finishSave()");
-  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.waitFor("document.querySelector('.status-footer').dataset.ready === 'true'");
+  await chooseDesktopMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile[data-action=volume] input').focus()");
   await admin.send('Page.bringToFront');
   await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
@@ -1432,29 +1478,29 @@ try {
   await admin.eval(click('.phone-shell .control-tile[data-action="media-play-pause"] button'));
   check('phone preview remains simulated after leaving Live', await admin.eval("window.__desktopCalls.length === 2 && document.querySelector('.phone-shell').textContent.includes('Preview only')"));
   await admin.eval("location.hash = '#/'");
-  await admin.waitFor("!!document.querySelector('.desktop-mode')");
-  check('returning from phone preview requires explicit re-entry to Live', await admin.eval("document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'"));
+  await admin.waitFor("!!document.querySelector('.status-footer')");
+  check('returning from phone preview requires explicit re-arming', await admin.eval("document.querySelector('.status-footer').dataset.live === 'false'"));
   await admin.eval("window.__desktopResult = 'unknown'");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await chooseDesktopMode(admin, 'Live');
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
-  check('unknown desktop result warns prominently and returns Editor without retry', await admin.waitFor("document.querySelector('.workspace-footer [role=alert]')?.textContent.includes('Outcome unknown') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'") && await admin.eval("window.__desktopCalls.length === 3 && !document.querySelector('.workspace-footer button')"));
+  check('unknown desktop result warns prominently and disarms without retry', await admin.waitFor("document.querySelector('.workspace-feedback [role=alert]')?.textContent.includes('Outcome unknown') && document.querySelector('.status-footer').dataset.live === 'false'") && await admin.eval("window.__desktopCalls.length === 3 && !document.querySelector('.workspace-feedback button')"));
   await admin.eval("window.__desktopResult = 'pending'");
-  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await chooseDesktopMode(admin, 'Live');
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
-  await admin.waitFor("document.querySelector('.workspace-footer button')?.textContent === 'Check result'");
+  await admin.waitFor("document.querySelector('.workspace-feedback button')?.textContent === 'Check result'");
   check('acknowledged pending results block further presses', await admin.eval("window.__desktopCalls.length === 4 && document.querySelector('.control-tile button').disabled"));
   await admin.eval("window.__desktopResult = 'confirmed'");
-  await admin.eval(clickText('.workspace-footer button', 'Check result'));
-  check('explicit pending check reuses exactly the same ID and request', await admin.waitFor("window.__desktopCalls.length === 5 && !document.querySelector('.workspace-footer button')") && await admin.eval("JSON.stringify(window.__desktopCalls[3]) === JSON.stringify(window.__desktopCalls[4])"));
+  await admin.eval(clickText('.workspace-feedback button', 'Check result'));
+  check('explicit pending check reuses exactly the same ID and request', await admin.waitFor("window.__desktopCalls.length === 5 && !document.querySelector('.workspace-feedback button')") && await admin.eval("JSON.stringify(window.__desktopCalls[3]) === JSON.stringify(window.__desktopCalls[4])"));
   await admin.eval("window.__desktopError = 'stale_revision'");
   await admin.eval(click('.control-tile[data-action="media-play-pause"] button'));
-  check('stale revision errors return Editor and never expose raw diagnostics', await admin.waitFor("document.querySelector('.workspace-footer').textContent.includes('saved deck changed') && document.querySelector('.desktop-mode [aria-pressed=true]').textContent === 'Editor'") && await admin.eval("!document.querySelector('.workspace-footer').textContent.includes('raw secret')"));
+  check('stale revision errors disarm controls and never expose raw diagnostics', await admin.waitFor("document.querySelector('.workspace-feedback').textContent.includes('saved deck changed') && document.querySelector('.status-footer').dataset.live === 'false'") && await admin.eval("!document.querySelector('.workspace-feedback').textContent.includes('raw secret')"));
   await admin.eval("window.__failSave = true");
   await admin.eval(setValue('.inspector-form input[type=text]', 'Edited after Live'));
-  check('a failed save keeps Live disabled', await admin.waitFor("document.querySelectorAll('.desktop-mode button')[1].disabled && document.querySelector('.storage-alert')?.textContent.includes('could not be saved')"));
+  check('a failed save keeps arming disabled', await admin.waitFor("document.querySelector('.status-footer').dataset.ready === 'false' && document.querySelector('.storage-alert')?.textContent.includes('could not be saved')"));
   await admin.eval("window.__failSave = false; window.__conflictSave = true");
   await admin.eval(setValue('.inspector-form input[type=text]', 'Conflicting edit'));
-  check('a conflicting save blocks the editor and cannot leave Live enabled', await admin.waitFor("document.querySelector('.settings-header h1')?.textContent === 'The deck file needs attention' && !document.querySelector('.desktop-mode')") && await admin.eval("window.__desktopCalls.length === 6"));
+  check('a conflicting save blocks the editor and cannot leave arming enabled', await admin.waitFor("document.querySelector('.settings-header h1')?.textContent === 'The deck file needs attention' && !document.querySelector('.status-footer')") && await admin.eval("window.__desktopCalls.length === 6"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: adminCtx });
 
   // ------------------------------------------------------------ light theme and reduced motion during setup

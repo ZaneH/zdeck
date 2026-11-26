@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-const sections = [["general", "General"], ["phone", "Phone connection"], ["integrations", "Integrations"]] as const;
+const sections = [["general", "General"], ["phone", "Phone connection"], ["integrations", "Integrations"], ["footer", "Footer"]] as const;
 type SettingsSection = typeof sections[number][0];
 
 function currentSection(): SettingsSection {
   const section = window.location.hash.split("/")[2];
-  return section === "phone" || section === "integrations" ? section : "general";
+  return section === "phone" || section === "integrations" || section === "footer" ? section : "general";
 }
 
-export function SettingsSections({ general, phone, integrations }: Record<SettingsSection, ReactNode>) {
+export function SettingsSections({ general, phone, integrations, footer }: Record<SettingsSection, ReactNode>) {
   const [active, setActive] = useState(currentSection);
   useEffect(() => {
     const onHash = () => setActive(currentSection());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const content = { general, phone, integrations };
+  const content = { general, phone, integrations, footer };
   return <>
     <nav className="settings-nav" aria-label="Settings sections">
       {sections.map(([section, label]) => <a key={section} className="button secondary"
