@@ -116,7 +116,7 @@ Pair once, then bookmark or revisit the **same HTTPS address in the same browser
 
 ## Plugins
 
-**Settings → External plugins is a local folder catalog, not a central registry or marketplace.** Refresh discovers local metadata and probes Node; it does not download, install, enable or execute a plugin. Plugin execution requires installed **Node.js 22.18+**, which is not bundled with zDeck.
+**Settings → External plugins is a local folder catalog, not a central registry or marketplace.** Refresh discovers local metadata and probes runtimes; it does not download, install, enable or execute a plugin. JavaScript/TypeScript plugins require installed **Node.js 22.18+**; Python plugins require **Python 3.10+** instead. Neither runtime is bundled. Authors can use the [Python SDK and self-contained example](packages/plugin-sdk-python/README.md) alongside the existing TypeScript SDK.
 
 1. Obtain and review a **complete prepared plugin folder**, including its SDK runtime and licenses. Open the plugin folder from Settings and copy it there. The current location is `~/.config/zdeck/plugins/` (Linux respects an absolute `XDG_CONFIG_HOME`).
 2. Choose **Refresh**, then **Enable** on its row. Review source/license/access, check the initially unchecked trust consent, and separately confirm enabling.
@@ -154,7 +154,7 @@ Read the [protocol/security contract](docs/protocol.md), [plugin trust model](do
 | Phone cannot open the site | Keep app/proxy running; check the exact HTTPS origin, certificate trust, tailnet or permitted LAN reachability and Wi-Fi client isolation. “Start” does not configure HTTPS. Do not disable security checks. |
 | Phone requests approval again | Use the same HTTPS address and browser/installed app. Cleared cookies, expiry (180 days), revocation, or an address/method change require pairing again. Service/app restarts preserve approvals; an expired or consumed invitation cannot be reused. |
 | Phone disconnects or action says Unknown | Reconnect for a fresh snapshot. Check the actual desktop before retrying; no offline queue or automatic action replay exists. |
-| Plugin missing, invalid or cannot enable | Refresh, check Node 22.18+, then use row **Diagnostics**. Copy the complete prepared folder with real SDK files, not source symlinks or a nested folder. See [plugin troubleshooting](docs/plugins.md). |
+| Plugin missing, invalid or cannot enable | Refresh, check the plugin's runtime (Node 22.18+ or Python 3.10+), then use row **Diagnostics**. Copy the complete prepared folder with real SDK files, not source symlinks or a nested folder. See [plugin troubleshooting](docs/plugins.md). |
 | Deck will not load/save | Keep the original native file and heed the recovery screen; fix/move it only after backing it up, then **Reload deck**. Browser invalid data falls back to a sample with a warning; the next edit replaces it. See [recovery](docs/development.md#persistence-and-recovery). |
 | Linux native window is narrow/collapsed or fails EGL startup | Use the pinned Nix shell and read the [WebKitGTK/graphics notes](docs/development.md#linux-graphics-and-webkitgtk). |
 | An app update is waiting | Use the PWA's **Reload** banner to apply the waiting build; updates do not force a reload during use. |

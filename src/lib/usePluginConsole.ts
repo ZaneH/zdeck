@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nativeAvailable } from "./native";
 import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshots, pluginState, pluginTrust, pluginUninstall } from "./nativePlugin";
-import { canRunPlugin, EMPTY_PLUGIN, pluginEntry, pluginIdentifier, toPluginError } from "./plugin";
+import { canRunPlugin, EMPTY_PLUGIN, pluginEntry, pluginIdentifier, runtimeForPlugin, toPluginError } from "./plugin";
 import type { PluginCatalog, PluginDiagnostics, PluginError, PluginSnapshots } from "./plugin";
 import type { PluginControl } from "./types";
 
@@ -94,8 +94,8 @@ export function usePluginConsole() {
     }),
     openDirectory: () => localOperation(pluginOpenDirectory),
     enable: (id: string) => {
-      if (catalogLock.current || !catalog || catalog.node.status !== "detected"
-        || !catalog.plugins.some((entry) => entry.id === id && entry.status === "ready")
+      if (catalogLock.current || !catalog
+        || !catalog.plugins.some((entry) => entry.id === id && entry.status === "ready" && runtimeForPlugin(catalog, entry)?.status === "detected")
         || pluginEntry(snapshots, id)?.status === "connected" || locks.current.has(id) || enabling.current.has(id)) return Promise.resolve();
       enabling.current.add(id);
       return run(id, () => pluginEnable(id)).finally(() => { enabling.current.delete(id); });

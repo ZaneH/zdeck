@@ -69,6 +69,20 @@ describe("independent plugin rows", () => {
     const html = renderToStaticMarkup(createElement(PluginSettingsCard, { plugin }));
     expect(html).toContain("Reload the app before enabling"); expect(html).toMatch(/disabled=""[^>]*aria-label="Enable spotify"/);
   });
+  it("enables Python rows without Node and disables only rows whose runtime is missing", () => {
+    const plugin = fixture({}, [entry("python-example", { runtime: "python" }), entry("node-example", { runtime: "node" })]);
+    plugin.catalog!.node = { status: "not_found", version: null, path: null };
+    plugin.catalog!.python = { status: "detected", version: "3.10.0", path: "/example/python" };
+    let html = renderToStaticMarkup(createElement(PluginSettingsCard, { plugin }));
+    expect(html).toMatch(/disabled=""[^>]*aria-label="Enable node-example"/);
+    expect(html).not.toMatch(/disabled=""[^>]*aria-label="Enable python-example"/);
+    expect(html).toContain("Detected Python 3.10.0");
+    plugin.catalog!.python = { status: "not_found", version: null, path: null };
+    html = renderToStaticMarkup(createElement(PluginSettingsCard, { plugin }));
+    expect(html).toMatch(/disabled=""[^>]*aria-label="Enable python-example"/);
+    expect(html).toContain("Python 3.10 or newer is required");
+    expect(plugin.enable).not.toHaveBeenCalled();
+  });
   it("keeps cached sessions manageable when an installed folder disappears", () => {
     const plugin = fixture({ spotify: connected("spotify") }); plugin.catalog!.plugins = [];
     const html = renderToStaticMarkup(createElement(PluginSettingsCard, { plugin }));

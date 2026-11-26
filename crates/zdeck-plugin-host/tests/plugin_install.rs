@@ -108,7 +108,7 @@ async fn missing_root_stays_missing_and_catalog_has_frozen_shape() {
     let f = Fixture::new();
     let catalog = f.install(vec![]).catalog().await.unwrap();
     assert!(catalog.plugins.is_empty()); assert!(!f.root.exists());
-    assert_eq!(serde_json::to_value(&catalog).unwrap(), json!({"directory":f.root.to_str().unwrap(),"node":{"status":"not_found","version":null,"path":null},"plugins":[]}));
+    assert_eq!(serde_json::to_value(&catalog).unwrap(), json!({"directory":f.root.to_str().unwrap(),"node":{"status":"not_found","version":null,"path":null},"python":{"status":"not_found","version":null,"path":null},"plugins":[]}));
 }
 
 #[tokio::test]

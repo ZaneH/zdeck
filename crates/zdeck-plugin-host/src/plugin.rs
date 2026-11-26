@@ -51,10 +51,10 @@ pub(crate) enum LaunchFailure { MissingDependency, RuntimeMissing, RuntimeIncomp
 impl PluginError {
     pub(crate) fn launch(failure: LaunchFailure) -> Self {
         let (code, message, hint) = match failure {
-            LaunchFailure::MissingDependency => ("missing_dependency", "Plugin could not load a required runtime dependency.", "Copy the complete packaged plugin folder, including node_modules. Do not copy the source folder alone; refresh the catalog and enable explicitly."),
-            LaunchFailure::RuntimeMissing => ("runtime_missing", "The selected plugin runtime could not be started.", "Install or select a readable executable Node.js 22.18.0 or newer, then refresh the catalog and enable explicitly."),
-            LaunchFailure::RuntimeIncompatible => ("runtime_incompatible", "The detected Node.js runtime is too old.", "Use Node.js 22.18.0 or newer, refresh the catalog, and enable explicitly."),
-            LaunchFailure::StartupExit => ("startup_exit", "Plugin exited before describing its actions.", "Check Node.js 22.18.0 or newer and a complete packaged plugin folder. Refresh the catalog and enable explicitly; no action was sent."),
+            LaunchFailure::MissingDependency => ("missing_dependency", "Plugin could not load a required runtime dependency.", "Copy the complete packaged plugin folder, including node_modules or zdeck_plugin_sdk as appropriate. Do not copy the source folder alone; refresh the catalog and enable explicitly."),
+            LaunchFailure::RuntimeMissing => ("runtime_missing", "The selected plugin runtime could not be started.", "Install the plugin's runtime (Node.js 22.18.0+ or Python 3.10+), then refresh the catalog and enable explicitly."),
+            LaunchFailure::RuntimeIncompatible => ("runtime_incompatible", "The detected plugin runtime is too old.", "Use the plugin's runtime (Node.js 22.18.0+ or Python 3.10+), refresh the catalog, and enable explicitly."),
+            LaunchFailure::StartupExit => ("startup_exit", "Plugin exited before describing its actions.", "Check the plugin's runtime (Node.js 22.18.0+ or Python 3.10+) and complete packaged folder. Refresh the catalog and enable explicitly; no action was sent."),
         };
         Self { kind: ErrorKind::Unavailable, code: Some(code), outcome: Outcome::NotStarted, message, hint }
     }
@@ -273,7 +273,7 @@ async fn startup_diagnostic(mut stderr: tokio::process::ChildStderr) -> Option<L
     // Match only Node-owned codes. Raw text/paths/exception strings never leave
     // this task; even forged diagnostics can only select a fixed host message.
     let text = String::from_utf8_lossy(&prefix);
-    if text.contains("ERR_MODULE_NOT_FOUND") || text.contains("MODULE_NOT_FOUND") {
+    if text.contains("ERR_MODULE_NOT_FOUND") || text.contains("MODULE_NOT_FOUND") || text.contains("ModuleNotFoundError:") {
         Some(LaunchFailure::MissingDependency)
     } else { None }
 }
@@ -545,18 +545,23 @@ fn target_arguments(action: &Action, mut args: Value, value: f64, toggle: bool) 
     if !arguments(action, &args) { return Err(invalid()); }
     Ok(args)
 }
-fn node_launch(program: String, entrypoint: String) -> Result<TrustedLaunch, PluginError> {
+fn plugin_launch(program: String, entrypoint: String) -> Result<TrustedLaunch, PluginError> {
     let entrypoint = PathBuf::from(entrypoint);
     if !entrypoint.is_absolute() || entrypoint.file_name().is_none() {
         return Err(PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted));
     }
     let cwd = entrypoint.parent().ok_or_else(|| PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted))?.to_path_buf();
     let entrypoint = entrypoint.into_os_string().into_string().map_err(|_| PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted))?;
-    TrustedLaunch::new(PathBuf::from(program), vec![entrypoint], cwd)
+    // The catalog selects one fixed filename, never flags from a manifest or IPC.
+    // -B prevents bytecode caches from changing a trusted Python package on launch.
+    let args = if PathBuf::from(&entrypoint).extension().is_some_and(|ext| ext == "py") {
+        vec!["-E".into(), "-s".into(), "-B".into(), entrypoint]
+    } else { vec![entrypoint] };
+    TrustedLaunch::new(PathBuf::from(program), args, cwd)
 }
 impl PluginState {
     /// Desktop trust boundary ONLY. The UI must explicitly confirm trust before
-    /// invoking this. Program is a locally selected Node runtime; no shell or
+    /// invoking this. Program is a locally selected Node or Python runtime; no shell or
     /// caller-supplied flags, and only an absolute entrypoint is passed to it.
     pub async fn connect(&self, program: String, entrypoint: String) -> Result<PluginSnapshot, PluginError> {
         self.run(SessionOperation::Connect(program, entrypoint, None)).await
@@ -611,7 +616,7 @@ impl Session {
                     None => None,
                 };
                 let result = async {
-                    let host = PluginHost::new(node_launch(program, entrypoint)?);
+                    let host = PluginHost::new(plugin_launch(program, entrypoint)?);
                     let manifest = host.describe().await?;
                     if expected.as_ref().is_some_and(|expected| expected != &manifest) {
                         let _ = host.stop().await;

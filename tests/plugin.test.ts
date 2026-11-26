@@ -137,6 +137,25 @@ describe("local plugin catalog and per-selection trust", () => {
     ]) expect(parsePluginCatalog(bad)).toBeNull();
   });
 
+  it("validates Python runtime metadata and enables each plugin with only its own runtime", () => {
+    const python = { status: "detected" as const, version: "3.10.0", path: "/usr/bin/python3" };
+    const entry = { ...ready, runtime: "python" as const };
+    const mixed: PluginCatalog = { ...catalog, python, node: { status: "not_found", version: null, path: null }, plugins: [entry] };
+    expect(parsePluginCatalog(mixed)).toEqual(mixed);
+    const selection = { pluginId: entry.id, trusted: true };
+    expect(canEnablePlugin(mixed, selection)).toBe(true);
+    expect(canEnablePlugin({ ...mixed, plugins: [ready] }, selection)).toBe(false);
+    expect(canEnablePlugin({ ...catalog, plugins: [entry] }, selection)).toBe(false);
+    expect(canEnablePlugin({ ...mixed, python: { status: "not_found", path: null, version: null } }, selection)).toBe(false);
+    for (const python of [null, { status: "detected", version: "3.9.9", path: "/python" },
+      { status: "unsupported", version: "3.10.0", path: "/python" }, { status: "detected", version: "3.10.0", path: "python" },
+      { status: "not_found", version: "3.10.0", path: null }]) expect(parsePluginCatalog({ ...mixed, python })).toBeNull();
+    expect(parsePluginCatalog({ ...mixed, plugins: [{ ...entry, runtime: "shell" }] })).toBeNull();
+    const invalid = parsePluginCatalog({ ...mixed, plugins: [{ ...entry, status: "invalid", identity: null, message: "secret path" }] });
+    expect(invalid?.plugins[0].message).toContain("zdeck_plugin_sdk");
+    expect(invalid?.plugins[0].message).not.toContain("secret path");
+  });
+
   it("lists more than sixty-four catalog entries without an arbitrary cap", () => {
     const lots = Array.from({ length: 200 }, (_, index) => ({ ...ready, id: `p${index}`, name: `p${index}` }));
     expect(parsePluginCatalog({ ...catalog, plugins: lots })?.plugins).toHaveLength(200);
