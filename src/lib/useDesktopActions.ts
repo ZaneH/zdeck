@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { effectivePresentation, presentationCompatible, validControlValue } from "./presentations";
 import type { PluginSnapshots } from "./plugin";
-import { isDeck } from "./deck";
+import { isDeck, pageControls } from "./deck";
 import { desktopRunControl, toDesktopActionError } from "./nativeActions";
 import type { DesktopCommand, DesktopResult } from "./nativeActions";
 import type { Deck } from "./types";
@@ -52,7 +52,7 @@ export class DesktopActions {
   press = async (controlId: string, value?: number) => {
     if (!this.isLive()) return;
     const context = this.context();
-    const control = context.deck.pages.flatMap((page) => page.controls).find((item) => item.id === controlId);
+    const control = context.deck.pages.flatMap(pageControls).find((item) => item.id === controlId);
     if (!control || !presentationCompatible(control, context.plugins)
       || (value === undefined ? effectivePresentation(control, context.plugins) !== "button"
         : !validControlValue(control, value, context.plugins))) return;

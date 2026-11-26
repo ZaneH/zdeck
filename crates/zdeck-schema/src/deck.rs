@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 /// Deck schema version understood by both the frontend and this store.
-pub const DECK_VERSION: u32 = 2;
+pub const DECK_VERSION: u32 = 3;
 pub const MAX_PAGES: usize = 12;
 pub const MAX_CONTROLS_PER_PAGE: usize = 24;
 const MAX_ID_BYTES: usize = 128;
@@ -23,6 +23,15 @@ pub enum Theme {
 fn presentation_valid(action: &str, p: &str) -> bool {
     p == "button" || (action == "volume" && matches!(p, "slider" | "dial"))
         || (action == "plugin" && matches!(p, "slider" | "dial" | "toggle-switch" | "toggle-button"))
+}
+
+/// A present optional field must deserialize as its value, so `null` is rejected.
+fn non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Mirrors the TypeScript `Control` union, tagged by `action`.
@@ -104,10 +113,22 @@ impl<'de> Deserialize<'de> for Control {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Page {
+pub struct Section {
     pub id: String,
     pub name: String,
     pub controls: Vec<Control>,
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub theme: Option<Theme>,
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Page {
+    pub id: String,
+    pub name: String,
+    pub sections: Vec<Section>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,6 +251,7 @@ impl Deck {
         }
 
         let mut page_ids: HashSet<&str> = HashSet::new();
+        let mut section_ids: HashSet<&str> = HashSet::new();
         let mut control_ids: HashSet<&str> = HashSet::new();
 
         for page in &self.pages {
@@ -243,12 +265,29 @@ impl Deck {
                     "Page names must be non-empty and bounded.",
                 ));
             }
-            if page.controls.len() > MAX_CONTROLS_PER_PAGE {
+            if page.sections.is_empty() {
+                return Err(DeckError::invalid_input("A page needs at least one section."));
+            }
+            if page.sections.iter().map(|section| section.controls.len()).sum::<usize>() > MAX_CONTROLS_PER_PAGE {
                 return Err(DeckError::invalid_input(format!(
                     "A page can hold at most {MAX_CONTROLS_PER_PAGE} controls."
                 )));
             }
-            for control in &page.controls {
+            for section in &page.sections {
+                if section.id.is_empty() || section.id.len() > MAX_ID_BYTES || !section_ids.insert(&section.id) {
+                    return Err(DeckError::invalid_input(
+                        "Section IDs must be non-empty and unique.",
+                    ));
+                }
+                if section.name.trim().is_empty() || section.name.len() > MAX_NAME_BYTES {
+                    return Err(DeckError::invalid_input(
+                        "Section names must be non-empty and bounded.",
+                    ));
+                }
+                if section.accent.as_deref().is_some_and(|accent| !ACCENTS.contains(&accent)) {
+                    return Err(DeckError::invalid_input("Unknown section accent color."));
+                }
+                for control in &section.controls {
                 if control.id.is_empty()
                     || control.id.len() > MAX_ID_BYTES
                     || !control_ids.insert(&control.id)
@@ -299,6 +338,7 @@ impl Deck {
                         }
                     }
                 }
+                }
             }
         }
 
@@ -331,6 +371,10 @@ pub fn default_deck() -> Deck {
         }
     }
 
+    fn section(id: &str, name: &str, controls: Vec<Control>) -> Section {
+        Section { id: id.to_string(), name: name.to_string(), controls, theme: None, accent: None }
+    }
+
     Deck {
         version: DECK_VERSION,
         theme: Theme::Dark,
@@ -340,7 +384,7 @@ pub fn default_deck() -> Deck {
             Page {
                 id: "page_stream".to_string(),
                 name: "Stream".to_string(),
-                controls: vec![
+                sections: vec![section("page_stream_section", "Stream", vec![
                     obs("ctl_starting_soon", "Starting soon", "Starting soon"),
                     obs("ctl_live", "Go live", "Live"),
                     plain("ctl_mic", "Mic mute", ControlAction::MicMute),
@@ -349,12 +393,12 @@ pub fn default_deck() -> Deck {
                         "Play / pause",
                         ControlAction::MediaPlayPause,
                     ),
-                ],
+                ])],
             },
             Page {
                 id: "page_media".to_string(),
                 name: "Media".to_string(),
-                controls: vec![
+                sections: vec![section("page_media_section", "Media", vec![
                     plain(
                         "ctl_volume",
                         "Volume",
@@ -365,31 +409,95 @@ pub fn default_deck() -> Deck {
                         "Play / pause",
                         ControlAction::MediaPlayPause,
                     ),
-                ],
+                ])],
             },
         ],
     }
 }
 
-/// Decode and validate a stored document, promoting valid v1 decks in memory.
+fn promoted_section_id(page_id: &str, index: usize, used: &mut HashSet<String>) -> String {
+    let candidate = format!("{page_id}_section");
+    if candidate.len() <= MAX_ID_BYTES && !used.contains(&candidate) {
+        used.insert(candidate.clone());
+        return candidate;
+    }
+    let mut fallback_index = index;
+    while used.contains(&format!("section_{fallback_index}")) {
+        fallback_index += 1;
+    }
+    let fallback = format!("section_{fallback_index}");
+    used.insert(fallback.clone());
+    fallback
+}
+
+fn promote_legacy_pages(value: &mut serde_json::Value) -> Result<(), DeckError> {
+    let invalid = || DeckError::invalid_file("The deck file is not a valid versioned deck document.");
+    let deck = value
+        .get_mut("deck")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(invalid)?;
+    let pages = deck
+        .get_mut("pages")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(invalid)?;
+    let mut used = HashSet::new();
+    for (index, page) in pages.iter_mut().enumerate() {
+        let page = page.as_object_mut().ok_or_else(invalid)?;
+        // Only the original flat page shape is legacy data; a mixed v3 page is rejected.
+        if page.len() != 3
+            || !["id", "name", "controls"]
+                .iter()
+                .all(|key| page.contains_key(*key))
+        {
+            return Err(invalid());
+        }
+        let id = page
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(invalid)?
+            .to_string();
+        let name = page
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(invalid)?
+            .to_string();
+        let Some(controls) = page.remove("controls").filter(serde_json::Value::is_array) else {
+            return Err(invalid());
+        };
+        let section_id = promoted_section_id(&id, index, &mut used);
+        page.insert(
+            "sections".into(),
+            serde_json::json!([{ "id": section_id, "name": name, "controls": controls }]),
+        );
+    }
+    deck.insert("version".into(), DECK_VERSION.into());
+    Ok(())
+}
+
+/// Decode and validate a stored document, promoting valid v1/v2 decks in memory.
 /// This does not rewrite bytes or advance the stored revision.
 pub fn decode_document(bytes: &[u8]) -> Result<DeckDocument, DeckError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes)
+    let mut value: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|_| DeckError::invalid_file("The deck file is not valid JSON."))?;
-    if let Some(version) = value.pointer("/deck/version").and_then(serde_json::Value::as_u64) {
-        if version != 1 && version != u64::from(DECK_VERSION) {
+    let version = value.pointer("/deck/version").and_then(serde_json::Value::as_u64);
+    if let Some(version) = version {
+        if version != 1 && version != 2 && version != u64::from(DECK_VERSION) {
             return Err(DeckError::unsupported_version("The deck version is not supported."));
         }
     }
-    let mut document: DeckDocument = serde_json::from_value(value).map_err(|_| {
+    let legacy = matches!(version, Some(1 | 2));
+    if legacy {
+        // Promotion is in-memory only; the store still owns explicit saves.
+        promote_legacy_pages(&mut value)?;
+    }
+    let document: DeckDocument = serde_json::from_value(value).map_err(|_| {
         DeckError::invalid_file("The deck file is not a valid versioned deck document.")
     })?;
-    if document.deck.version == 1 {
-        if document.deck.pages.iter().flat_map(|p| &p.controls).any(|c| matches!(c.action, ControlAction::Plugin { .. })) {
-            return Err(DeckError::invalid_file("Plugin controls require deck version 2."));
-        }
-        // Promotion is in-memory only; the store still owns explicit saves.
-        document.deck.version = DECK_VERSION;
+    if version == Some(1)
+        && document.deck.pages.iter().flat_map(|p| &p.sections).flat_map(|s| &s.controls)
+            .any(|c| matches!(c.action, ControlAction::Plugin { .. }))
+    {
+        return Err(DeckError::invalid_file("Plugin controls require deck version 2."));
     }
     document.deck.validate().map_err(|error| match error {
         DeckError::UnsupportedVersion { message } => DeckError::UnsupportedVersion { message },
@@ -408,7 +516,7 @@ mod tests {
     fn automatic_obs_labels_round_trip_and_validate_strictly() {
         use serde_json::json;
         let mut deck = serde_json::to_value(default_deck()).unwrap();
-        deck["pages"][0]["controls"][0] = json!({
+        deck["pages"][0]["sections"][0]["controls"][0] = json!({
             "id":"camera", "label":"Camera", "action":"obs-scene", "scene":"Camera", "autoLabel":true
         });
         let document = json!({"revision":7, "deck":deck});
@@ -416,14 +524,14 @@ mod tests {
         assert_eq!(serde_json::to_value(restored).unwrap(), document);
         for invalid in [json!(null), json!("true"), json!(1)] {
             let mut value = document.clone();
-            value["deck"]["pages"][0]["controls"][0]["autoLabel"] = invalid;
+            value["deck"]["pages"][0]["sections"][0]["controls"][0]["autoLabel"] = invalid;
             assert!(decode_document(&serde_json::to_vec(&value).unwrap()).is_err());
         }
         let mut mismatch = document.clone();
-        mismatch["deck"]["pages"][0]["controls"][0]["label"] = json!("Custom");
+        mismatch["deck"]["pages"][0]["sections"][0]["controls"][0]["label"] = json!("Custom");
         assert!(decode_document(&serde_json::to_vec(&mismatch).unwrap()).is_err());
         let mut wrong_action = document;
-        wrong_action["deck"]["pages"][0]["controls"][0] = json!({"id":"mic", "label":"Mic", "action":"mic-mute", "autoLabel":true});
+        wrong_action["deck"]["pages"][0]["sections"][0]["controls"][0] = json!({"id":"mic", "label":"Mic", "action":"mic-mute", "autoLabel":true});
         assert!(decode_document(&serde_json::to_vec(&wrong_action).unwrap()).is_err());
     }
 
@@ -434,20 +542,19 @@ mod tests {
         assert_eq!(serde_json::to_value(serde_json::from_value::<Deck>(original.clone()).unwrap()).unwrap(), original);
         for presentation in ["button", "slider", "dial", "toggle-switch", "toggle-button"] {
             let mut value = original.clone();
-            value["pages"][0]["controls"][0] = json!({"id":"power","label":"Power","action":"plugin","pluginId":"power","pluginAction":"set","pluginArgs":{"enabled":true},"presentation":presentation});
+            value["pages"][0]["sections"][0]["controls"][0] = json!({"id":"power","label":"Power","action":"plugin","pluginId":"power","pluginAction":"set","pluginArgs":{"enabled":true},"presentation":presentation});
             let deck: Deck = serde_json::from_value(value.clone()).unwrap(); deck.validate().unwrap();
             assert_eq!(serde_json::to_value(deck).unwrap(), value);
         }
         for presentation in [json!(null), json!("knob"), json!("slider"), json!("toggle-switch")] {
-            let mut value = original.clone(); value["pages"][0]["controls"][0]["presentation"] = presentation;
+            let mut value = original.clone(); value["pages"][0]["sections"][0]["controls"][0]["presentation"] = presentation;
             assert!(serde_json::from_value::<Deck>(value).is_err());
         }
     }
 
     fn fixture_deck() -> Deck {
-        let mut deck: Deck = serde_json::from_str(FIXTURE).expect("fixture is a valid legacy Deck");
-        deck.version = DECK_VERSION;
-        deck
+        decode_document(&serde_json::to_vec(&stored_fixture()).unwrap())
+            .expect("fixture is a valid legacy document").deck
     }
 
     fn stored_fixture() -> serde_json::Value {
@@ -478,7 +585,7 @@ mod tests {
 
     #[test]
     fn stored_document_rejects_unsupported_versions() {
-        for version in [0, 3, u64::MAX] {
+        for version in [0, 4, u64::MAX] {
             let mut value = stored_fixture();
             value["deck"]["version"] = version.into();
             assert_eq!(decode_document(&serde_json::to_vec(&value).unwrap()),
@@ -513,8 +620,9 @@ mod tests {
         let kinds: HashSet<&str> = deck
             .pages
             .iter()
-            .flat_map(|page| {
-                page.controls.iter().map(|control| match &control.action {
+            .flat_map(|page| &page.sections)
+            .flat_map(|section| {
+                section.controls.iter().map(|control| match &control.action {
                     ControlAction::ObsScene { .. } => "obs-scene",
                     ControlAction::MicMute => "mic-mute",
                     ControlAction::MediaPlayPause => "media-play-pause",
@@ -540,17 +648,17 @@ mod tests {
         let control = json!({"id":"plugin_button","label":"Volume","action":"plugin","pluginId":"spotify","pluginAction":"set-volume","pluginArgs":{"volume":50}});
         let parsed: Control = serde_json::from_value(control.clone()).unwrap();
         let mut deck = fixture_deck();
-        deck.pages[0].controls.push(parsed);
+        deck.pages[0].sections[0].controls.push(parsed);
         deck.validate().unwrap();
-        assert_eq!(serde_json::to_value(deck.pages[0].controls.last().unwrap()).unwrap(), control);
+        assert_eq!(serde_json::to_value(deck.pages[0].sections[0].controls.last().unwrap()).unwrap(), control);
         for (field, value) in [("pluginId", json!("../node")), ("pluginAction", json!("Bad")), ("pluginArgs", json!({"volume":1.5})), ("pluginArgs", json!({"secret":"token"})), ("pluginArgs", json!({"n":9007199254740992i64}))] {
             let mut c = control.clone(); c[field] = value;
             let mut deck = fixture_deck();
-            if let Ok(c) = serde_json::from_value(c) { deck.pages[0].controls.push(c); assert!(deck.validate().is_err()); }
+            if let Ok(c) = serde_json::from_value(c) { deck.pages[0].sections[0].controls.push(c); assert!(deck.validate().is_err()); }
         }
         let mut c = control.clone();
         c["pluginArgs"] = json!((0..9).map(|i| (format!("n{i}"), json!(1))).collect::<serde_json::Map<_,_>>());
-        let mut deck = fixture_deck(); deck.pages[0].controls.push(serde_json::from_value(c).unwrap()); assert!(deck.validate().is_err());
+        let mut deck = fixture_deck(); deck.pages[0].sections[0].controls.push(serde_json::from_value(c).unwrap()); assert!(deck.validate().is_err());
         for value in [json!(null), json!([]), json!(1)] {
             let mut c = control.clone(); c["pluginArgs"] = value;
             assert!(serde_json::from_value::<Control>(c).is_err());
@@ -582,7 +690,7 @@ mod tests {
         assert!(missing_active.validate().is_err());
 
         let mut bad_volume = fixture_deck();
-        if let Some(control) = bad_volume.pages[1].controls.first_mut() {
+        if let Some(control) = bad_volume.pages[1].sections[0].controls.first_mut() {
             control.action = ControlAction::Volume { volume: 101.0 };
         }
         assert!(bad_volume.validate().is_err());
@@ -595,8 +703,108 @@ mod tests {
         ));
 
         let mut long_label = fixture_deck();
-        long_label.pages[0].controls[0].label = "x".repeat(MAX_LABEL_BYTES + 1);
+        long_label.pages[0].sections[0].controls[0].label = "x".repeat(MAX_LABEL_BYTES + 1);
         assert!(long_label.validate().is_err());
     }
 
+    #[test]
+    fn sections_are_required_unique_and_bounded() {
+        let mut missing = fixture_deck();
+        missing.pages[0].sections.clear();
+        assert!(missing.validate().is_err());
+
+        let mut duplicate = fixture_deck();
+        let first_section = duplicate.pages[0].sections[0].clone();
+        duplicate.pages[0].sections.push(first_section);
+        assert!(duplicate.validate().is_err());
+
+        let mut blank = fixture_deck();
+        blank.pages[0].sections[0].name = "  ".into();
+        assert!(blank.validate().is_err());
+
+        let mut accent = fixture_deck();
+        accent.pages[0].sections[0].accent = Some("#000000".into());
+        assert!(accent.validate().is_err());
+
+        let mut too_many = fixture_deck();
+        let section = &mut too_many.pages[0].sections[0];
+        let control = section.controls[0].clone();
+        section.controls.extend(std::iter::repeat_n(control, MAX_CONTROLS_PER_PAGE));
+        assert!(too_many.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_versions_reject_pages_with_canonical_sections_or_unknown_fields() {
+        let canonical = serde_json::to_value(default_deck()).unwrap();
+        for version in [1, 2] {
+            let mut value = serde_json::json!({"revision": 1, "deck": canonical.clone()});
+            value["deck"]["version"] = version.into();
+            assert!(decode_document(&serde_json::to_vec(&value).unwrap()).is_err());
+
+            let mut extra = stored_fixture();
+            extra["deck"]["version"] = version.into();
+            extra["deck"]["pages"][0]["extra"] = true.into();
+            assert!(decode_document(&serde_json::to_vec(&extra).unwrap()).is_err());
+
+            let mut missing = stored_fixture();
+            missing["deck"]["version"] = version.into();
+            missing["deck"]["pages"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("controls");
+            assert!(decode_document(&serde_json::to_vec(&missing).unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn legacy_migration_bounds_long_page_ids_with_deterministic_section_ids() {
+        let page_id = "p".repeat(MAX_ID_BYTES);
+        let second_id = "q".repeat(MAX_ID_BYTES);
+        let value = serde_json::json!({
+            "revision": 1,
+            "deck": {
+                "version": 2,
+                "theme": "dark",
+                "accent": ACCENTS[0],
+                "activePageId": page_id,
+                "pages": [
+                    {"id": page_id, "name": "Long", "controls": []},
+                    {"id": second_id, "name": "Also long", "controls": []}
+                ]
+            }
+        });
+        let document = decode_document(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(document.deck.pages[0].sections[0].id, "section_0");
+        assert_eq!(document.deck.pages[1].sections[0].id, "section_1");
+        assert!(document.deck.pages.iter().all(|page| page.sections[0].id.len() <= MAX_ID_BYTES));
+    }
+
+    #[test]
+    fn canonical_sections_reject_null_overrides_and_overlong_section_fields() {
+        let mut value = serde_json::to_value(default_deck()).unwrap();
+        value["pages"][0]["sections"][0]["theme"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Deck>(value.clone()).is_err());
+        value["pages"][0]["sections"][0]["theme"] = serde_json::json!("light");
+        value["pages"][0]["sections"][0]["accent"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<Deck>(value).is_err());
+
+        let mut deck = fixture_deck();
+        deck.pages[0].sections[0].id = "x".repeat(MAX_ID_BYTES + 1);
+        assert!(deck.validate().is_err());
+        deck.pages[0].sections[0].id = "x".repeat(MAX_ID_BYTES);
+        deck.pages[0].sections[0].name = "é".repeat(MAX_NAME_BYTES / 2 + 1);
+        assert!(deck.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_v2_documents_migrate_to_sections_without_renumbering_controls() {
+        let mut value = stored_fixture();
+        value["deck"]["version"] = 2.into();
+        let document = decode_document(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(document.deck.version, DECK_VERSION);
+        assert_eq!(document.deck.pages[0].sections.len(), 1);
+        assert_eq!(document.deck.pages[0].sections[0].id, "page_stream_section");
+        assert_eq!(document.deck.pages[0].sections[0].controls[0].id, "ctl_starting_soon");
+        assert_eq!(document.deck.pages[0].sections[0].controls.len(), 4);
+    }
 }

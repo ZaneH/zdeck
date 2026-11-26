@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import type { Deck, Page } from "../lib/types";
+import { pageControls } from "../lib/deck";
 
 interface PageListProps {
   deck: Deck;
@@ -85,7 +86,7 @@ export function PageList({
                 aria-current={page.id === activePageId ? "page" : undefined}
               >
                 <span className="page-name">{page.name}</span>
-                <span className="page-count">{page.controls.length}</span>
+                <span className="page-count">{pageControls(page).length}</span>
               </button>
             )}
           </li>

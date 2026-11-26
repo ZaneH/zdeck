@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { clampVolume, controlVolume } from "../lib/actions";
-import { activePage, findPage } from "../lib/deck";
+import { activePage, findPage, pageControls } from "../lib/deck";
+import { sectionStyle } from "../lib/sections";
 import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
 import type { LoadStatus } from "../lib/persistence";
 import { applyTheme } from "../lib/theme";
@@ -9,6 +10,7 @@ import type { PluginSnapshots } from "../lib/plugin";
 import type { Control, Deck } from "../lib/types";
 import { BrandMark } from "./BrandMark";
 import { ControlTile } from "./ControlTile";
+import { PhoneSectionNav, usePhoneNavigation } from "./phoneNavigation";
 import { UpdateBanner } from "./UpdateBanner";
 
 interface PhoneDeckProps {
@@ -28,6 +30,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
   const [notice, setNotice] = useState("");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
   const pressTimer = useRef<number | null>(null);
+  const scrollerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     applyTheme(deck.theme, deck.accent);
@@ -72,6 +75,13 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
   );
 
   const page = findPage(deck, pageId) ?? activePage(deck);
+  const navigation = usePhoneNavigation({
+    pageId: page.id,
+    pageIds: deck.pages.map((item) => item.id),
+    sectionIds: page.sections.map((section) => section.id),
+    onPageChange: setPageId,
+    scrollerRef,
+  });
 
   const press = (control: Control) => {
     setPressedId(control.id);
@@ -116,27 +126,36 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
 
       <p className="phone-status">Local preview only. No desktop actions are sent.</p>
 
-      <main className="phone-main">
+      <main className="phone-main" ref={scrollerRef} {...navigation.pagerProps}>
         <div className="phone-page-heading">
           <h1>{page.name}</h1>
         </div>
 
-        <div className="phone-grid">
-          {page.controls.map((control) => (
-            <ControlTile
-              key={control.id}
-              control={control}
-              plugins={plugins}
-              variant="phone"
-              volume={previewVolumes[control.id] ?? controlVolume(control)}
-              pressed={pressedId === control.id}
-              onPrimary={() => press(control)}
-              onVolumeChange={(value) => changeVolume(control, value)}
-            />
-          ))}
-        </div>
+        {page.sections.map((section) => (
+          <section
+            key={section.id} className="phone-section" data-phone-section={section.id}
+            data-theme={section.theme} style={sectionStyle(section)}
+            aria-labelledby={`phone-section-${section.id}`}
+          >
+            <h2 id={`phone-section-${section.id}`} className="section-heading">{section.name}</h2>
+            <div className="phone-grid">
+              {section.controls.map((control) => (
+                <ControlTile
+                  key={control.id}
+                  control={control}
+                  plugins={plugins}
+                  variant="phone"
+                  volume={previewVolumes[control.id] ?? controlVolume(control)}
+                  pressed={pressedId === control.id}
+                  onPrimary={() => press(control)}
+                  onVolumeChange={(value) => changeVolume(control, value)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
 
-        {page.controls.length === 0 ? (
+        {pageControls(page).length === 0 ? (
           <p className="empty-note">This page has no controls yet.</p>
         ) : null}
 
@@ -152,6 +171,11 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
       </main>
 
       <footer className="phone-footer">
+        <PhoneSectionNav
+          names={page.sections.map((section) => section.name)}
+          index={navigation.sectionIndex}
+          onSelect={navigation.goToSection}
+        />
         <nav className="phone-pages" aria-label="Deck pages">
           {deck.pages.map((item) => (
             <button

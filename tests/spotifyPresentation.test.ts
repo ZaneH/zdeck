@@ -17,7 +17,7 @@ const plugins: PluginSnapshots = { spotify: { status: "connected", manifest: par
 function savedVolume() {
   const control = createControl("plugin", { pluginId: parsed.id, pluginAction: action.id, pluginArgs: pluginDefaults(action) });
   const deck = createDefaultDeck();
-  deck.pages[0].controls.push(control);
+  deck.pages[0].sections[0].controls.push(control);
   return { deck, control };
 }
 
@@ -41,13 +41,13 @@ describe("actual Spotify set-volume presentation", () => {
     const { deck, control } = savedVolume();
     const saved = JSON.parse(JSON.stringify(updateControl(deck, deck.pages[0].id, control.id, { presentation: "slider" })));
     expect(isDeck(saved)).toBe(true);
-    expect(saved.pages[0].controls.at(-1)).toMatchObject({ presentation: "slider", pluginArgs: { volume: 50 } });
+    expect(saved.pages[0].sections[0].controls.at(-1)).toMatchObject({ presentation: "slider", pluginArgs: { volume: 50 } });
     const dispatch = vi.fn(async (command) => ({ id: command.commandId, state: "confirmed" as const, message: "Confirmed." }));
     const actions = new DesktopActions(() => ({ native: true, editor: true, deck: saved, savedRevision: 8, plugins }), dispatch, () => "spotify-target");
     actions.enter();
     await actions.press(control.id, 73);
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ commandId: "spotify-target", revision: 8, controlId: control.id, value: 73 });
-    expect(saved.pages[0].controls.at(-1).pluginArgs).toEqual({ volume: 50 });
+    expect(saved.pages[0].sections[0].controls.at(-1).pluginArgs).toEqual({ volume: 50 });
   });
 
   it("does not infer slider support for an older installed manifest or erase a saved choice", () => {
@@ -56,7 +56,7 @@ describe("actual Spotify set-volume presentation", () => {
     delete older.actions.find(action => action.id === "set-volume")!.config.volume.control;
     const oldPlugins = { spotify: { ...plugins.spotify, manifest: older } };
     expect(compatiblePresentations(control, oldPlugins)).toEqual(["button"]);
-    const saved = updateControl(deck, deck.pages[0].id, control.id, { presentation: "slider" }).pages[0].controls.at(-1)!;
+    const saved = updateControl(deck, deck.pages[0].id, control.id, { presentation: "slider" }).pages[0].sections[0].controls.at(-1)!;
     expect(presentationCompatible(saved, oldPlugins)).toBe(false);
     expect(saved.presentation).toBe("slider");
     expect(presentationCompatible(saved, plugins)).toBe(true);

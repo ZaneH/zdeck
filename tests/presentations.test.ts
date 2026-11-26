@@ -61,11 +61,11 @@ describe("presentation contracts", () => {
     expect(presentationCompatible(level, {})).toBe(false);
     expect(render(level, {})).toMatch(/<button[^>]*disabled=""/);
     let deck = createDefaultDeck();
-    deck.pages[0].controls.push(power);
+    deck.pages[0].sections[0].controls.push(power);
     expect(isDeck(JSON.parse(JSON.stringify(deck)))).toBe(true);
     deck = updateControl(deck, deck.pages[0].id, power.id, { action: "media-play-pause" });
-    expect(deck.pages[0].controls.at(-1)?.presentation).toBeUndefined();
-    deck.pages[0].controls[0].presentation = "dial";
+    expect(deck.pages[0].sections[0].controls.at(-1)?.presentation).toBeUndefined();
+    deck.pages[0].sections[0].controls[0].presentation = "dial";
     expect(isDeck(deck)).toBe(false);
   });
   it("renders all five presentations with separate, named interactive elements", () => {

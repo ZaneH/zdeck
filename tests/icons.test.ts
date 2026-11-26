@@ -51,32 +51,37 @@ describe("portable custom icons", () => {
 
   it("persists any icon independently of action, survives edits and resets cleanly", () => {
     let deck = createDefaultDeck();
-    const id = deck.pages[0].controls[0].id;
+    const id = deck.pages[0].sections[0].controls[0].id;
     const pageId = deck.activePageId;
     deck = updateControl(deck, pageId, id, { icon: { type: "image", src } });
     deck = updateControl(deck, pageId, id, { action: "volume", volume: 33 });
-    expect(deck.pages[0].controls[0]).toMatchObject({ action: "volume", icon: { type: "image", src } });
+    expect(deck.pages[0].sections[0].controls[0]).toMatchObject({ action: "volume", icon: { type: "image", src } });
     let stored = "";
     const storage = { getItem: () => stored, setItem: (_: string, value: string) => { stored = value; } };
     expect(saveDeck(storage, deck)).toBe(true);
     expect(loadDeck(storage).deck).toEqual(deck);
     expect(parseSnapshot({ type: "snapshot", protocolVersion: 1, revision: 1, deck })?.deck).toEqual(deck);
-    expect(normalizeDeck({ ...createDefaultDeck(), version: 1 })?.version).toBe(2);
+    const sample = createDefaultDeck();
+    expect(normalizeDeck({
+      ...sample,
+      version: 1,
+      pages: sample.pages.map((page) => ({ id: page.id, name: page.name, controls: page.sections[0].controls })),
+    })?.version).toBe(3);
     deck = updateControl(deck, pageId, id, { icon: { type: "builtin", name: "star" } });
     expect(isDeck(deck)).toBe(true);
     deck = updateControl(deck, pageId, id, { label: "New label" });
-    expect(deck.pages[0].controls[0].icon).toEqual({ type: "builtin", name: "star" });
+    expect(deck.pages[0].sections[0].controls[0].icon).toEqual({ type: "builtin", name: "star" });
     deck = updateControl(deck, pageId, id, { icon: null });
-    expect(deck.pages[0].controls[0]).not.toHaveProperty("icon");
+    expect(deck.pages[0].sections[0].controls[0]).not.toHaveProperty("icon");
     for (const invalid of [null, { type: "builtin", name: "nope" }, { type: "image", src: "file:///secret" }]) {
       const bad = structuredClone(deck) as any;
-      bad.pages[0].controls[0].icon = invalid;
+      bad.pages[0].sections[0].controls[0].icon = invalid;
       expect(isDeck(bad)).toBe(false);
     }
   });
 
   it("keeps default and custom icons visible while a phone action is running", () => {
-    const base = createDefaultDeck().pages[0].controls[0];
+    const base = createDefaultDeck().pages[0].sections[0].controls[0];
     for (const control of [base, { ...base, icon: { type: "image" as const, src } }]) {
       const render = (busy: boolean) => renderToStaticMarkup(createElement(ControlTile, {
         control, variant: "phone", semantics: "remote", volume: 50, busy, disabled: busy,
@@ -98,7 +103,7 @@ describe("portable custom icons", () => {
     expect(iconGroups([manifest], "player").map(([group]) => group)).toEqual(["player / Media"]);
     expect(iconGroups([manifest], "album")[0][1][0].icon).toEqual({ type: "image", src });
     expect(iconGroups([manifest], "missing")).toEqual([]);
-    const control = { ...createDefaultDeck().pages[0].controls[0], icon: { type: "image" as const, src } };
+    const control = { ...createDefaultDeck().pages[0].sections[0].controls[0], icon: { type: "image" as const, src } };
     for (const variant of ["editor", "phone"] as const) {
       const html = renderToStaticMarkup(createElement(ControlTile, { control, variant, volume: 50 }));
       expect(html).toContain(`src="${src}"`);

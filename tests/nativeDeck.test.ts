@@ -53,8 +53,8 @@ describe("native deck errors", () => {
   });
 });
 
-describe("native v2 snapshot boundary", () => {
-  it("accepts only validated v2 decks from Rust, which owns native v1 migration", () => {
+describe("native v3 snapshot boundary", () => {
+  it("accepts only validated v3 decks from Rust, which owns native v1/v2 migration", () => {
     const snapshot = { revision: 3, exists: true, deck: createDefaultDeck() };
     expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
     for (const bad of [null, { ...snapshot, revision: -1 }, { ...snapshot, exists: "true" },
@@ -171,12 +171,12 @@ describe("shared deck fixture", () => {
     expect(isDeck(legacy)).toBe(false);
     const deck = normalizeDeck(legacy);
     expect(isDeck(deck)).toBe(true);
-    // Keep the shared Rust v1 fixture intact; both readers normalize it to v2.
+    // Keep the shared Rust v1 fixture intact; both readers normalize it to v3.
     expect(createDefaultDeck()).toEqual(deck);
 
     const kinds = new Set(
       (deck as Deck).pages.flatMap((page) =>
-        page.controls.map((control) => control.action),
+        page.sections.flatMap((section) => section.controls.map((control) => control.action)),
       ),
     );
     expect(kinds).toEqual(

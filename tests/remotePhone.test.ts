@@ -121,7 +121,7 @@ it("routes remote numeric and boolean presentation targets using the authenticat
   const deck = createDefaultDeck();
   const numeric: PluginControl = { id: "level", label: "Level", action: "plugin", pluginId: "power", pluginAction: "level", pluginArgs: { amount: 50 }, presentation: "slider" };
   const toggle: PluginControl = { id: "power", label: "Power", action: "plugin", pluginId: "power", pluginAction: "power", pluginArgs: { enabled: false }, presentation: "toggle-button" };
-  deck.pages[0].controls.push(numeric, toggle);
+  deck.pages[0].sections[0].controls.push(numeric, toggle);
   const plugins = { power: { status: "connected", lastError: null, state: { enabled: false }, manifest: {
     id: "power", version: "1.0.0", protocolVersion: 1, actions: [
       { id: "level", title: "Level", config: { amount: { type: "integer", minimum: -20, maximum: 200, control: { step: 5 } } } },
@@ -155,9 +155,9 @@ it("routes remote numeric and boolean presentation targets using the authenticat
 it("round-trips an existing Spotify button as a slider and sends a remote scalar target with the actual manifest", async () => {
   let deck = createDefaultDeck();
   const button: PluginControl = { id: "spotify-volume", label: "Spotify volume", action: "plugin", pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
-  deck.pages[0].controls.push(button);
+  deck.pages[0].sections[0].controls.push(button);
   deck = JSON.parse(JSON.stringify(updateControl(deck, deck.pages[0].id, button.id, { presentation: "slider" })));
-  const control = deck.pages[0].controls.at(-1)!;
+  const control = deck.pages[0].sections[0].controls.at(-1)!;
   const payload = { ...snapshotBody(3, deck), plugins: { spotify: { status: "connected", lastError: null, state: null, manifest: spotifyManifest } } };
   const harness = createHarness((path, init) => {
     if (path === "/api/v1/pair/status") return jsonResponse(200, { requestId: "r1", status: "approved" });
@@ -216,7 +216,7 @@ async function driveToActive(command?: Handler): Promise<{
 }
 
 describe("saved plugin phone buttons", () => {
-  it("accepts v2 plugin snapshots but never legacy phone snapshots", () => {
+  it("accepts canonical plugin snapshots but never legacy phone snapshots", () => {
     expect(parseSnapshot(snapshotBody(3, { ...sampleDeck, version: 1 } as unknown as Deck))).toBeNull();
   });
 
@@ -227,7 +227,7 @@ describe("saved plugin phone buttons", () => {
     const control: PluginControl = { id: "spotify-volume", label: "Spotify volume", action: "plugin",
       pluginId: "spotify", pluginAction: "set-volume", pluginArgs: { volume: 50 } };
     const deck = structuredClone(sampleDeck);
-    deck.pages[0].controls.push(control);
+    deck.pages[0].sections[0].controls.push(control);
     sockets[0].emit(snapshotBody(4, deck));
     await flush();
     connection.commitVolume(control, 90);
@@ -448,7 +448,7 @@ describe("connection lifecycle", () => {
       commandCalls += 1;
       throw new Error("network lost");
     });
-    const control = sampleDeck.pages[0].controls[0];
+    const control = sampleDeck.pages[0].sections[0].controls[0];
     connection.pressControl(control);
     await flush();
     expect(commandCalls).toBe(1);
@@ -470,7 +470,7 @@ describe("connection lifecycle", () => {
         if (count === 1) return new Promise<RemoteResponse>((resolve) => { finish = resolve; });
         return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Confirmed" });
       });
-      const volume = sampleDeck.pages[1].controls.find((c) => c.action === "volume")!;
+      const volume = sampleDeck.pages[1].sections[0].controls.find((c) => c.action === "volume")!;
       connection.commitVolume(volume, 20);
       connection.commitVolume(volume, 60);
       connection.commitVolume(volume, 90);
@@ -489,7 +489,7 @@ describe("connection lifecycle", () => {
     const { connection, calls } = await driveToActive((_path, init) => {
       return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed", message: "Action confirmed." });
     });
-    const volume = sampleDeck.pages[1].controls[0];
+    const volume = sampleDeck.pages[1].sections[0].controls[0];
     expect(volume.action).toBe("volume");
     connection.pressControl(volume);
     await flush();
@@ -509,7 +509,7 @@ describe("connection lifecycle", () => {
     const { connection, sockets, calls } = await driveToActive(() =>
       jsonResponse(409, { error: "stale" }),
     );
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     expect(calls.filter((call) => call.path === "/api/v1/commands").length).toBe(1);
     expect(connection.getSnapshot().resultKind).toBe("info");
@@ -619,7 +619,7 @@ describe("connection lifecycle", () => {
     await connection.submitPairing(TOKEN, 'Phone');
     await harness.clock.advance(2000);
     harness.sockets[0].emit(snapshotBody(3, sampleDeck));
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     connection.onHidden();
     expect(connection.getSnapshot().result?.state).toBe('unknown');
@@ -633,7 +633,7 @@ describe("connection lifecycle", () => {
     const { connection, clock, calls } = await driveToActive(() => ({
       ok: true, status: 200, json: () => new Promise<unknown>(() => {}),
     }));
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     await clock.advance(12001);
     expect(connection.getSnapshot().result?.state).toBe('unknown');
@@ -651,7 +651,7 @@ describe("connection lifecycle", () => {
     await harness.clock.advance(12000);
     expect(connection.getSnapshot().phase).toBe('disconnected');
     expect(harness.sockets[0].closed).toBe(true);
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     expect(harness.calls.filter(call => call.path === '/api/v1/commands')).toHaveLength(0);
   });
@@ -660,7 +660,7 @@ describe("connection lifecycle", () => {
     const { connection } = await driveToActive((_path, init) => jsonResponse(200, {
       id: JSON.parse(String(init.body)).id, state: 'pending', message: 'Still running',
     }));
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     expect(connection.getSnapshot().result?.state).toBe('unknown');
     expect(connection.getSnapshot().result?.message).toContain('Check the desktop before retrying');
@@ -670,14 +670,14 @@ describe("connection lifecycle", () => {
     const { connection } = await driveToActive(() => jsonResponse(200, {
       id: 'unrelated', state: 'confirmed', message: 'Wrong result',
     }));
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     expect(connection.getSnapshot().result?.state).toBe('unknown');
   });
 
   it("rejects non-finite volume targets before sending anything", async () => {
     const { connection, calls } = await driveToActive();
-    for (const value of [NaN, Infinity, -1, 101]) connection.commitVolume(sampleDeck.pages[1].controls[0], value);
+    for (const value of [NaN, Infinity, -1, 101]) connection.commitVolume(sampleDeck.pages[1].sections[0].controls[0], value);
     await flush();
     expect(calls.filter(call => call.path === '/api/v1/commands')).toHaveLength(0);
   });
@@ -711,7 +711,7 @@ describe("connection lifecycle", () => {
     const { connection } = await driveToActive((_path, init) => jsonResponse(200, {
       id: JSON.parse(String(init.body)).id, state: "confirmed", message: `Outcome ${++sequence}`,
     }));
-    const control = sampleDeck.pages[0].controls[0];
+    const control = sampleDeck.pages[0].sections[0].controls[0];
     for (let index = 0; index < 15; index += 1) {
       connection.pressControl(control);
       await flush();
@@ -732,7 +732,7 @@ describe("connection lifecycle", () => {
       count += 1;
       return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "unknown", code: "media_key_sent" });
     });
-    const control = sampleDeck.pages.flatMap(page => page.controls).find(control => control.action === "media-play-pause")!;
+    const control = sampleDeck.pages.flatMap(page => page.sections.flatMap(section => section.controls)).find(control => control.action === "media-play-pause")!;
     connection.pressControl(control);
     await flush();
     expect(count).toBe(1);
@@ -746,7 +746,7 @@ describe("connection lifecycle", () => {
     const { connection } = await driveToActive((_path, init) => jsonResponse(200, {
       id: JSON.parse(String(init.body)).id, state: "unknown", code: "plugin_outcome_unknown", message: "Inspect plugin state before retrying.",
     }));
-    connection.pressControl(sampleDeck.pages[0].controls[0]);
+    connection.pressControl(sampleDeck.pages[0].sections[0].controls[0]);
     await flush();
     expect(connection.getSnapshot().resultKind).toBe("unknown");
     expect(connection.getSnapshot().warning).toBeTruthy();
@@ -759,7 +759,7 @@ describe("connection lifecycle", () => {
       if (fail) throw new Error("network lost");
       return jsonResponse(200, { id: JSON.parse(String(init.body)).id, state: "confirmed" });
     });
-    const control = sampleDeck.pages[0].controls[0];
+    const control = sampleDeck.pages[0].sections[0].controls[0];
     connection.pressControl(control);
     await flush();
     expect(connection.getSnapshot().warning).toContain("Check the desktop before trying again");

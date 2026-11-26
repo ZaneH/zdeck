@@ -82,7 +82,7 @@ describe("explicit desktop Live actions", () => {
   it("routes declared plugin scalar targets, not saved values, and rejects incompatible presentations", async () => {
     const h = harness();
     const deck = createDefaultDeck();
-    deck.pages[0].controls.push({ id: "level", action: "plugin", label: "Level", pluginId: "mixer", pluginAction: "level", pluginArgs: { amount: 50 }, presentation: "dial" });
+    deck.pages[0].sections[0].controls.push({ id: "level", action: "plugin", label: "Level", pluginId: "mixer", pluginAction: "level", pluginArgs: { amount: 50 }, presentation: "dial" });
     h.patch({ deck, plugins: { mixer: { status: "connected", state: {}, lastError: null, manifest: { id: "mixer", version: "1.0.0", protocolVersion: 1,
       actions: [{ id: "level", title: "Level", config: { amount: { type: "integer", minimum: -20, maximum: 200, control: { step: 5 } } } }] } } } });
     h.actions.enter();

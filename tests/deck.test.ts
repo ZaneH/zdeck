@@ -6,7 +6,10 @@ import {
   createDefaultDeck,
   findControl,
   isDeck,
+  MAX_CONTROLS_PER_PAGE,
   MAX_PAGES,
+  normalizeDeck,
+  pageControls,
   moveControl,
   movePage,
   removeControl,
@@ -26,7 +29,7 @@ describe("deck editing", () => {
     const result = addControl(deck, "page_stream", "mic-mute");
     expect(result).not.toBeNull();
     expect(result?.control.label).toBe("Mic mute");
-    expect(result?.deck.pages[0].controls).toHaveLength(5);
+    expect(result?.deck.pages[0].sections[0].controls).toHaveLength(5);
   });
 
   it("does not add a control to a missing page", () => {
@@ -124,7 +127,7 @@ describe("deck editing", () => {
     expect(moveControl(deck, "missing", "ctl_mic", 1)).toBe(deck);
 
     const moved = moveControl(deck, "page_stream", "ctl_mic", -1);
-    expect(moved.pages[0].controls.map((control) => control.id)).toEqual([
+    expect(moved.pages[0].sections[0].controls.map((control) => control.id)).toEqual([
       "ctl_starting_soon",
       "ctl_mic",
       "ctl_live",
@@ -189,7 +192,7 @@ describe("OBS scene labels", () => {
   it("strictly validates automatic-label metadata", () => {
     const { deck } = added();
     expect(isDeck(deck)).toBe(true);
-    const control = deck.pages[0].controls.at(-1)!;
+    const control = deck.pages[0].sections[0].controls.at(-1)!;
     for (const autoLabel of [null, "true", 1]) {
       expect(isDeck({ ...deck, pages: [{ ...deck.pages[0], controls: [{ ...control, autoLabel }] }] })).toBe(false);
     }
@@ -216,7 +219,7 @@ describe("deck validation", () => {
     expect(isDeck(duplicate)).toBe(false);
 
     const badVolume = createDefaultDeck();
-    badVolume.pages[1].controls[0] = {
+    badVolume.pages[1].sections[0].controls[0] = {
       id: "ctl_volume",
       label: "Volume",
       action: "volume",
@@ -229,7 +232,7 @@ describe("deck validation", () => {
     const badVersion = JSON.parse(JSON.stringify(createDefaultDeck())) as {
       version: number;
     };
-    badVersion.version = 3;
+    badVersion.version = 4;
     expect(isDeck(badVersion)).toBe(false);
 
     const badTheme = JSON.parse(JSON.stringify(createDefaultDeck())) as {
@@ -237,5 +240,151 @@ describe("deck validation", () => {
     };
     badTheme.theme = "midnight";
     expect(isDeck(badTheme)).toBe(false);
+  });
+});
+
+describe("page sections", () => {
+  function withSecondSection() {
+    const deck = createDefaultDeck();
+    deck.pages[0].sections.push({ id: "page_stream_second", name: "Second", controls: [] });
+    return deck;
+  }
+
+  it("adds controls to the first section by default or an explicit section target", () => {
+    const deck = withSecondSection();
+    const first = addControl(deck, "page_stream", "mic-mute")!;
+    expect(first.deck.pages[0].sections[0].controls.at(-1)?.id).toBe(first.control.id);
+    const second = addControl(deck, "page_stream", "mic-mute", undefined, "page_stream_second")!;
+    expect(second.deck.pages[0].sections[1].controls.at(-1)?.id).toBe(second.control.id);
+    expect(addControl(deck, "page_stream", "mic-mute", undefined, "missing")).toBeNull();
+  });
+
+  it("keeps the page-wide control limit across sections", () => {
+    const deck = withSecondSection();
+    deck.pages[0].sections[1].controls = Array.from({ length: MAX_CONTROLS_PER_PAGE - pageControls(deck.pages[0]).length }, (_, index) => ({
+      id: `extra_${index}`,
+      label: `Extra ${index}`,
+      action: "mic-mute" as const,
+    }));
+    expect(isDeck(deck)).toBe(true);
+    expect(addControl(deck, "page_stream", "mic-mute")).toBeNull();
+  });
+
+  it("locates a control's containing section for edits, moves and removal", () => {
+    const deck = withSecondSection();
+    const first = addControl(deck, "page_stream", "mic-mute", undefined, "page_stream_second")!;
+    const second = addControl(first.deck, "page_stream", "mic-mute", undefined, "page_stream_second")!;
+    let next = updateControl(second.deck, "page_stream", first.control.id, { label: "Second mic" });
+    expect(next.pages[0].sections[1].controls[0].label).toBe("Second mic");
+    next = moveControl(next, "page_stream", first.control.id, 1);
+    expect(next.pages[0].sections[1].controls.map((control) => control.id)).toEqual([second.control.id, first.control.id]);
+    next = removeControl(next, "page_stream", first.control.id);
+    expect(next.pages[0].sections[1].controls.map((control) => control.id)).toEqual([second.control.id]);
+  });
+
+  it("requires sections with unique ids, non-empty names and valid overrides", () => {
+    const emptySections = createDefaultDeck();
+    emptySections.pages[0].sections = [];
+    expect(isDeck(emptySections)).toBe(false);
+
+    const duplicateSection = withSecondSection();
+    duplicateSection.pages[0].sections[1].id = duplicateSection.pages[0].sections[0].id;
+    expect(isDeck(duplicateSection)).toBe(false);
+
+    const blankSection = withSecondSection();
+    blankSection.pages[0].sections[1].name = "  ";
+    expect(isDeck(blankSection)).toBe(false);
+
+    const unknownSection = withSecondSection();
+    Object.assign(unknownSection.pages[0].sections[1], { extra: true });
+    expect(isDeck(unknownSection)).toBe(false);
+
+    const overrides = withSecondSection();
+    overrides.pages[0].sections[1].theme = "light";
+    overrides.pages[0].sections[1].accent = "#6ee7b7";
+    expect(isDeck(overrides)).toBe(true);
+    overrides.pages[0].sections[1].theme = "midnight" as never;
+    expect(isDeck(overrides)).toBe(false);
+    overrides.pages[0].sections[1].theme = "light";
+    overrides.pages[0].sections[1].accent = "#000000" as never;
+    expect(isDeck(overrides)).toBe(false);
+  });
+
+  it("migrates v1 and v2 decks to one deterministic section per page", () => {
+    const deck = createDefaultDeck();
+    for (const version of [1, 2]) {
+      const legacy = {
+        ...deck,
+        version,
+        pages: deck.pages.map((page) => ({
+          id: page.id,
+          name: page.name,
+          controls: page.sections[0].controls,
+        })),
+      };
+      const migrated = normalizeDeck(legacy);
+      expect(migrated?.version).toBe(3);
+      expect(migrated?.pages).toEqual(deck.pages);
+    }
+  });
+
+  it("rejects legacy versions whose pages already have canonical sections or unknown fields", () => {
+    const deck = createDefaultDeck();
+    for (const version of [1, 2]) {
+      expect(normalizeDeck({ ...deck, version })).toBeNull();
+      const mixed = {
+        ...deck,
+        version,
+        pages: deck.pages.map((page, index) => index === 0
+          ? { id: page.id, name: page.name, controls: page.sections[0].controls, sections: page.sections }
+          : { id: page.id, name: page.name, controls: page.sections[0].controls }),
+      };
+      expect(normalizeDeck(mixed)).toBeNull();
+      const unknown = {
+        ...deck,
+        version,
+        pages: [{ id: "p", name: "P", controls: [], extra: true }],
+      };
+      expect(normalizeDeck(unknown)).toBeNull();
+    }
+  });
+
+  it("bounds section ids and names to 128 UTF-8 bytes", () => {
+    const longId = withSecondSection();
+    longId.pages[0].sections[1].id = "é".repeat(65);
+    expect(isDeck(longId)).toBe(false);
+
+    const longName = withSecondSection();
+    longName.pages[0].sections[1].name = "é".repeat(65);
+    expect(isDeck(longName)).toBe(false);
+
+    const atLimit = withSecondSection();
+    atLimit.pages[0].sections[1].id = "é".repeat(64);
+    atLimit.pages[0].sections[1].name = "é".repeat(64);
+    expect(isDeck(atLimit)).toBe(true);
+  });
+
+  it("keeps migrated section ids bounded and deterministic for long page ids", () => {
+    const pageId = "p".repeat(128);
+    const legacy = {
+      version: 2,
+      theme: "dark",
+      accent: "#4cc9f0",
+      activePageId: pageId,
+      pages: [{ id: pageId, name: "Long", controls: [] }],
+    };
+    const migrated = normalizeDeck(legacy);
+    expect(migrated?.pages[0].sections[0].id).toBe("section_0");
+    expect(new TextEncoder().encode(migrated!.pages[0].sections[0].id).length).toBeLessThanOrEqual(128);
+
+    const secondId = "q".repeat(128);
+    const two = normalizeDeck({
+      ...legacy,
+      pages: [
+        { id: pageId, name: "Long", controls: [] },
+        { id: secondId, name: "Also long", controls: [] },
+      ],
+    });
+    expect(two?.pages.map((page) => page.sections[0].id)).toEqual(["section_0", "section_1"]);
   });
 });

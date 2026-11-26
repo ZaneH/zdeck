@@ -1,6 +1,6 @@
 import type { ControlIcon } from "./icons";
 
-export const DECK_VERSION = 2 as const;
+export const DECK_VERSION = 3 as const;
 
 export const THEMES = ["dark", "light"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -83,10 +83,18 @@ export type Control =
   | MediaPlayPauseControl
   | VolumeControl;
 
-export interface Page {
+export interface Section {
   id: string;
   name: string;
   controls: Control[];
+  theme?: Theme;
+  accent?: Accent;
+}
+
+export interface Page {
+  id: string;
+  name: string;
+  sections: Section[];
 }
 
 export interface Deck {

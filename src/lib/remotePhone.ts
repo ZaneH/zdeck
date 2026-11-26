@@ -1,5 +1,5 @@
 import { newId } from "./actions";
-import { activePage, findPage, isDeck, isRecord } from "./deck";
+import { activePage, findPage, isDeck, isRecord, pageControls } from "./deck";
 import type { Control, Deck } from "./types";
 import { parsePluginSnapshots } from "./plugin";
 import type { PluginSnapshots } from "./plugin";
@@ -309,7 +309,7 @@ function initialSnapshot(): RemotePhoneSnapshot {
 function findControlLabel(deck: Deck | null, controlId: string): string | null {
   if (!deck) return null;
   for (const page of deck.pages) {
-    const control = page.controls.find((candidate) => candidate.id === controlId);
+    const control = pageControls(page).find((candidate) => candidate.id === controlId);
     if (control) return control.label;
   }
   return null;
@@ -870,7 +870,7 @@ export class RemotePhoneConnection {
 
   private async sendCommand(controlId: string, value?: number): Promise<void> {
     if (this.stopped || this.snap.phase !== "active" || this.snap.revision === null) return;
-    const saved = this.snap.deck?.pages.flatMap((page) => page.controls).find((control) => control.id === controlId);
+    const saved = this.snap.deck?.pages.flatMap(pageControls).find((control) => control.id === controlId);
     if (!saved || !presentationCompatible(saved, this.snap.plugins)
       || (value === undefined ? effectivePresentation(saved, this.snap.plugins) !== "button"
         : !validControlValue(saved, value, this.snap.plugins))) return;

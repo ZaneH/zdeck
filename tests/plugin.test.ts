@@ -201,16 +201,16 @@ describe("generic saved plugin controls", () => {
     expect(isDeck(added.deck)).toBe(true);
     expect(controlSummary(added.control)).toBe("spotify · set-volume · volume: 50");
     const changed = updateControl(added.deck, "page_stream", added.control.id, { pluginArgs: { volume: 75 }, label: "Spotify volume" });
-    expect(changed.pages[0].controls.at(-1)).toMatchObject({ ...options, pluginArgs: { volume: 75 }, label: "Spotify volume" });
-    const builtin = updateControl(changed, "page_stream", added.control.id, { action: "mic-mute" }).pages[0].controls.at(-1)!;
+    expect(changed.pages[0].sections[0].controls.at(-1)).toMatchObject({ ...options, pluginArgs: { volume: 75 }, label: "Spotify volume" });
+    const builtin = updateControl(changed, "page_stream", added.control.id, { action: "mic-mute" }).pages[0].sections[0].controls.at(-1)!;
     expect(builtin).toEqual({ id: added.control.id, label: "Mic mute", action: "mic-mute" });
     expect(() => createControl("plugin")).toThrow();
     for (const args of [null, [], { n: 1.5 }, { n: "50" }, { n: Number.MAX_SAFE_INTEGER + 1 },
       { "bad-key!": 1 }, Object.fromEntries(Array.from({ length: 9 }, (_, i) => ["n" + i, i]))]) expect(isPluginArgs(args)).toBe(false);
     const bad = structuredClone(added.deck);
-    Object.assign(bad.pages[0].controls.at(-1)!, { pluginArgs: { volume: "50" } });
+    Object.assign(bad.pages[0].sections[0].controls.at(-1)!, { pluginArgs: { volume: "50" } });
     expect(isDeck(bad)).toBe(false);
-    expect(updateControl(added.deck, "page_stream", added.control.id, { pluginId: "../bad" }).pages[0].controls.at(-1)).toEqual(added.control);
+    expect(updateControl(added.deck, "page_stream", added.control.id, { pluginId: "../bad" }).pages[0].sections[0].controls.at(-1)).toEqual(added.control);
   });
 
   it("defaults every required integer and disables mismatched/disconnected/invalid runs", () => {
@@ -239,25 +239,34 @@ describe("generic saved plugin controls", () => {
 });
 
 describe("legacy local deck migration", () => {
-  it("upgrades in memory only and writes v2 on the normal explicit save", () => {
-    const legacy = { ...createDefaultDeck(), version: 1 };
+  function legacyDeck(version = 1) {
+    const deck = createDefaultDeck();
+    return {
+      ...deck,
+      version,
+      pages: deck.pages.map((page) => ({ id: page.id, name: page.name, controls: page.sections[0].controls })),
+    };
+  }
+
+  it("upgrades in memory only and writes v3 on the normal explicit save", () => {
+    const legacy = legacyDeck();
     let stored = JSON.stringify(legacy), writes = 0;
     const storage = { getItem: () => stored, setItem: (_: string, value: string) => { stored = value; writes++; } };
     const loaded = loadDeck(storage);
     expect(loaded.status).toBe("loaded");
-    expect(loaded.deck.version).toBe(2);
+    expect(loaded.deck.version).toBe(3);
     expect(isDeck(legacy)).toBe(false);
     expect(JSON.parse(stored).version).toBe(1);
     expect(writes).toBe(0);
     expect(saveDeck(storage, loaded.deck)).toBe(true);
-    expect(JSON.parse(stored).version).toBe(2);
+    expect(JSON.parse(stored).version).toBe(3);
     expect(writes).toBe(1);
   });
 
   it("refuses v1 plugin variants, unknown fields, corrupt data and newer versions without clobbering", () => {
-    const legacy = { ...createDefaultDeck(), version: 1 };
+    const legacy = legacyDeck();
     const control = createControl("plugin", options);
-    const badDecks = [{ ...legacy, version: 3 }, { ...legacy, unknown: true },
+    const badDecks = [{ ...legacy, version: 4 }, { ...legacy, unknown: true },
       { ...legacy, pages: [{ ...legacy.pages[0], unknown: true }] },
       { ...legacy, pages: [{ ...legacy.pages[0], controls: [control] }] },
       { ...legacy, pages: [{ ...legacy.pages[0], controls: [{ id: "mic", label: "Mic", action: "mic-mute", unknown: true }] }] },

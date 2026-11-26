@@ -287,17 +287,17 @@ mod tests {
     }
 
     fn fixture_deck() -> Deck {
-        let mut deck: Deck = serde_json::from_str(FIXTURE).expect("fixture is a valid legacy Deck");
-        deck.version = DECK_VERSION;
-        deck
+        let legacy = serde_json::from_str::<serde_json::Value>(FIXTURE).unwrap();
+        let document = serde_json::json!({"revision": 7, "deck": legacy});
+        decode_document(&serde_json::to_vec(&document).unwrap()).unwrap().deck
     }
 
     #[tokio::test]
     async fn control_spans_are_optional_bounded_and_persisted() {
         use serde_json::json;
         let mut deck = fixture_deck();
-        assert_eq!(deck.pages[0].controls[0].row_span.unwrap_or(1), 1);
-        assert_eq!(deck.pages[0].controls[0].column_span.unwrap_or(1), 1);
+        assert_eq!(deck.pages[0].sections[0].controls[0].row_span.unwrap_or(1), 1);
+        assert_eq!(deck.pages[0].sections[0].controls[0].column_span.unwrap_or(1), 1);
         for (field, invalid) in [("rowSpan", vec![json!(0), json!(-1), json!(1.5), json!(25), json!("2"), json!(null)]),
                                  ("columnSpan", vec![json!(0), json!(-1), json!(1.5), json!(5), json!("2"), json!(null)])] {
             for value in invalid {
@@ -306,24 +306,24 @@ mod tests {
                 assert!(serde_json::from_value::<Control>(control).is_err());
             }
         }
-        deck.pages[0].controls[0].row_span = Some(24);
-        deck.pages[0].controls[0].column_span = Some(4);
+        deck.pages[0].sections[0].controls[0].row_span = Some(24);
+        deck.pages[0].sections[0].controls[0].column_span = Some(4);
         deck.validate().unwrap();
         let dir = TempDir::new();
         let store = DeckStore::new(dir.0.join(DECK_FILE_NAME));
         let initial = store.load().await.unwrap();
         store.save(initial.revision, deck.clone()).await.unwrap();
         assert_eq!(DeckStore::new(dir.0.join(DECK_FILE_NAME)).load().await.unwrap().deck, deck);
-        deck.pages[0].controls[0].column_span = Some(5);
+        deck.pages[0].sections[0].controls[0].column_span = Some(5);
         assert!(deck.validate().is_err());
     }
 
     #[tokio::test]
     async fn legacy_file_migrates_only_in_memory_until_explicit_save() {
         let dir = TempDir::new();
-        let legacy: Deck = serde_json::from_str(FIXTURE).unwrap();
-        assert_eq!(legacy.version, 1);
-        let bytes = serde_json::to_vec(&DeckDocument { revision: 7, deck: legacy }).unwrap();
+        let legacy = serde_json::from_str::<serde_json::Value>(FIXTURE).unwrap();
+        assert_eq!(legacy["version"], 1);
+        let bytes = serde_json::to_vec(&serde_json::json!({"revision": 7, "deck": legacy})).unwrap();
         std::fs::write(dir.file(), &bytes).unwrap();
         let store = DeckStore::new(dir.file());
         let snapshot = store.load().await.unwrap();
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
         store.save(7, snapshot.deck).await.unwrap();
         let saved: DeckDocument = serde_json::from_slice(&std::fs::read(dir.file()).unwrap()).unwrap();
-        assert_eq!(saved.deck.version, 2); assert_eq!(saved.revision, 8);
+        assert_eq!(saved.deck.version, DECK_VERSION); assert_eq!(saved.revision, 8);
     }
 
     #[tokio::test]
@@ -383,20 +383,20 @@ mod tests {
         let dir = TempDir::new();
         let store = DeckStore::new(dir.file());
         let mut deck = default_deck();
-        deck.pages[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
-        deck.pages[0].controls[1].icon = Some(crate::icons::ControlIcon::Builtin { name: "music".into() });
+        deck.pages[0].sections[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
+        deck.pages[0].sections[0].controls[1].icon = Some(crate::icons::ControlIcon::Builtin { name: "music".into() });
         let saved = store.save(0, deck.clone()).await.unwrap();
         assert_eq!(saved.deck, deck);
         assert_eq!(DeckStore::new(dir.file()).load().await.unwrap().deck, deck);
         let encoded = serde_json::to_value(&deck).unwrap();
-        assert_eq!(encoded["pages"][0]["controls"][0]["icon"]["src"], "data:image/svg+xml;base64,PHN2Zy8+");
+        assert_eq!(encoded["pages"][0]["sections"][0]["controls"][0]["icon"]["src"], "data:image/svg+xml;base64,PHN2Zy8+");
         for icon in [json!(null), json!({"type":"builtin","name":"unknown"}),
             json!({"type":"image","src":"https://example.com/icon.svg"}),
             json!({"type":"image","src":"data:image/png;base64,AAAA","extra":true})] {
-            let mut bad = encoded.clone(); bad["pages"][0]["controls"][0]["icon"] = icon;
+            let mut bad = encoded.clone(); bad["pages"][0]["sections"][0]["controls"][0]["icon"] = icon;
             assert!(serde_json::from_value::<Deck>(bad).is_err());
         }
-        deck.pages[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "file:///private".into() });
+        deck.pages[0].sections[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "file:///private".into() });
         assert!(store.save(saved.revision, deck).await.is_err());
         assert_eq!(store.load().await.unwrap().revision, saved.revision);
     }

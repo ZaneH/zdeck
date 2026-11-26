@@ -68,7 +68,8 @@ pub(crate) fn validate_command_fields(id: &str, control_id: &str, value: Option<
     Ok(())
 }
 pub(crate) fn find_control<'a>(deck: &'a Deck, id: &str) -> Option<&'a Control> {
-    deck.pages.iter().flat_map(|page| &page.controls).find(|control| control.id == id)
+    deck.pages.iter().flat_map(|page| &page.sections).flat_map(|section| &section.controls)
+        .find(|control| control.id == id)
 }
 pub(crate) fn validate_action_value(control: &Control, value: Option<f64>) -> Result<(), ActionError> {
     if value.is_some() && control.presentation.as_deref() == Some("button") {

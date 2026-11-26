@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
-import { activePage, findPage } from "../lib/deck";
+import { activePage, findPage, pageControls } from "../lib/deck";
+import { sectionStyle } from "../lib/sections";
 import { useRemotePhone } from "../lib/useRemotePhone";
 import type { RemotePhase } from "../lib/remotePhone";
 import { BrandMark } from "./BrandMark";
 import { ControlTile } from "./ControlTile";
+import { PhoneSectionNav, usePhoneNavigation } from "./phoneNavigation";
 
 const DEFAULT_NAME = "My phone";
 
@@ -165,6 +167,18 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const [name, setName] = useState(DEFAULT_NAME);
   const [manualLink, setManualLink] = useState("");
   const [targets, setTargets] = useState<Record<string, number>>({});
+  const scrollerRef = useRef<HTMLElement>(null);
+  const deck = remote.deck;
+  const page = deck
+    ? (remote.pageId ? findPage(deck, remote.pageId) ?? activePage(deck) : activePage(deck))
+    : null;
+  const navigation = usePhoneNavigation({
+    pageId: page?.id ?? "",
+    pageIds: deck?.pages.map((item) => item.id) ?? [],
+    sectionIds: page?.sections.map((section) => section.id) ?? [],
+    onPageChange: remote.setPage,
+    scrollerRef,
+  });
 
   const secure =
     typeof window !== "undefined" && window.location.protocol === "https:";
@@ -231,8 +245,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
     );
   }
 
-  const deck = remote.deck;
-  if (!deck) {
+  if (!deck || !page) {
     return (
       <div className="remote-app">
         <header className="phone-header remote-header">
@@ -249,10 +262,9 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
     );
   }
 
-  const page = remote.pageId ? findPage(deck, remote.pageId) ?? activePage(deck) : activePage(deck);
   const active = remote.phase === "active";
   const controlsDisabled = !active || remote.busyControlId !== null;
-  const hasVolume = page.controls.some((control) => control.action === "volume");
+  const hasVolume = pageControls(page).some((control) => control.action === "volume");
   const latestActivity = remote.activity[0];
 
   return (
@@ -264,33 +276,42 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
         </span>
       </header>
 
-      <main className="phone-main" id="main">
+      <main className="phone-main" id="main" ref={scrollerRef} {...navigation.pagerProps}>
         <div className="phone-page-heading">
           <h1>{page.name}</h1>
         </div>
 
-        <div className="phone-grid">
-          {page.controls.map((control) => (
-            <ControlTile
-              key={control.id}
-              control={control}
-              plugins={remote.plugins}
-              variant="phone"
-              semantics="remote"
-              disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
-              volume={targets[control.id] ?? controlVolume(control)}
-              pressed={false}
-              busy={remote.busyControlId === control.id}
-              onPrimary={() => remote.press(control)}
-              onVolumeChange={(value) =>
-                setTargets((current) => ({ ...current, [control.id]: value }))
-              }
-              onVolumeCommit={(value) => remote.commitVolume(control, value)}
-            />
-          ))}
-        </div>
+        {page.sections.map((section) => (
+          <section
+            key={section.id} className="phone-section" data-phone-section={section.id}
+            data-theme={section.theme} style={sectionStyle(section)}
+            aria-labelledby={`remote-section-${section.id}`}
+          >
+            <h2 id={`remote-section-${section.id}`} className="section-heading">{section.name}</h2>
+            <div className="phone-grid">
+              {section.controls.map((control) => (
+                <ControlTile
+                  key={control.id}
+                  control={control}
+                  plugins={remote.plugins}
+                  variant="phone"
+                  semantics="remote"
+                  disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
+                  volume={targets[control.id] ?? controlVolume(control)}
+                  pressed={false}
+                  busy={remote.busyControlId === control.id}
+                  onPrimary={() => remote.press(control)}
+                  onVolumeChange={(value) =>
+                    setTargets((current) => ({ ...current, [control.id]: value }))
+                  }
+                  onVolumeCommit={(value) => remote.commitVolume(control, value)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
 
-        {page.controls.length === 0 ? (
+        {pageControls(page).length === 0 ? (
           <p className="empty-note">This page has no controls yet.</p>
         ) : null}
 
@@ -336,6 +357,11 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
       </main>
 
       <footer className="phone-footer">
+        <PhoneSectionNav
+          names={page.sections.map((section) => section.name)}
+          index={navigation.sectionIndex}
+          onSelect={navigation.goToSection}
+        />
         <nav className="phone-pages" aria-label="Deck pages">
           {deck.pages.map((item) => (
             <button

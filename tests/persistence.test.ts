@@ -9,6 +9,8 @@ import {
   setupDismissed,
   dismissSetup,
 } from "../src/lib/persistence";
+import { addSection, moveSection, renameSection, setSectionAccent, setSectionTheme } from "../src/lib/sections";
+import { ACCENTS } from "../src/lib/types";
 import type { StorageLike } from "../src/lib/types";
 
 class MemoryStorage implements StorageLike {
@@ -90,6 +92,34 @@ describe("deck persistence", () => {
     expect(result.deck).toEqual(deck);
   });
 
+  it("remembers section order, controls and appearance overrides across reloads", () => {
+    const storage = new MemoryStorage();
+    const original = createDefaultDeck();
+    const pageId = original.pages[0].id;
+    const added = addSection(original, pageId)!;
+    let deck = renameSection(added.deck, pageId, added.section.id, "Audio");
+    deck = setSectionTheme(deck, pageId, added.section.id, "light");
+    deck = setSectionAccent(deck, pageId, added.section.id, ACCENTS[1].value);
+    const withControl = addControl(deck, pageId, "mic-mute", undefined, added.section.id)!;
+    deck = moveSection(withControl.deck, pageId, added.section.id, -1);
+    expect(saveDeck(storage, deck)).toBe(true);
+    const restored = loadDeck(storage);
+    expect(restored.status).toBe("loaded");
+    expect(restored.deck).toEqual(deck);
+    expect(restored.deck.pages[0].sections[0]).toMatchObject({
+      id: added.section.id, name: "Audio", theme: "light", accent: ACCENTS[1].value,
+      controls: [withControl.control],
+    });
+    expect(restored.deck.pages[0].sections[1].controls).toEqual(original.pages[0].sections[0].controls);
+
+    deck = setSectionTheme(restored.deck, pageId, added.section.id, null);
+    deck = setSectionAccent(deck, pageId, added.section.id, null);
+    expect(saveDeck(storage, deck)).toBe(true);
+    const inherited = loadDeck(storage).deck.pages[0].sections[0];
+    expect(inherited).not.toHaveProperty("theme");
+    expect(inherited).not.toHaveProperty("accent");
+  });
+
   it("remembers automatic and explicit OBS labels across reloads", () => {
     const storage = new MemoryStorage();
     const { deck, control } = addControl(createDefaultDeck(), "page_stream", "obs-scene", { scene: "Camera" })!;
@@ -106,6 +136,21 @@ describe("deck persistence", () => {
     edited = updateControl(edited, "page_stream", control.id, { label: "" });
     expect(saveDeck(storage, edited)).toBe(true);
     expect(findControl(loadDeck(storage).deck, "page_stream", control.id)).toMatchObject({ label: "Break", autoLabel: true });
+  });
+
+  it("rejects legacy versions that already carry canonical sections or unknown page fields", () => {
+    const storage = new MemoryStorage();
+    const deck = createDefaultDeck();
+    for (const version of [1, 2]) {
+      storage.setItem(STORAGE_KEY, JSON.stringify({ ...deck, version }));
+      expect(loadDeck(storage).status).toBe("invalid");
+      storage.setItem(STORAGE_KEY, JSON.stringify({
+        ...deck,
+        version,
+        pages: [{ ...deck.pages[0], controls: deck.pages[0].sections[0].controls }],
+      }));
+      expect(loadDeck(storage).status).toBe("invalid");
+    }
   });
 
   it("rejects malformed JSON and old versions", () => {
@@ -127,9 +172,9 @@ describe("deck persistence", () => {
   it("rejects invalid stored ranges and missing active pages", () => {
     const storage = new MemoryStorage();
     const badVolume = JSON.parse(JSON.stringify(createDefaultDeck())) as {
-      pages: { controls: { volume: number }[] }[];
+      pages: { sections: { controls: { volume: number }[] }[] }[];
     };
-    badVolume.pages[1].controls[0].volume = 120;
+    badVolume.pages[1].sections[0].controls[0].volume = 120;
     storage.setItem(STORAGE_KEY, JSON.stringify(badVolume));
     expect(loadDeck(storage).status).toBe("invalid");
 
@@ -151,7 +196,7 @@ describe("deck persistence", () => {
   it("does not write an invalid deck", () => {
     const storage = new MemoryStorage();
     const invalid = createDefaultDeck();
-    invalid.pages[0].controls[0].label = "   ";
+    invalid.pages[0].sections[0].controls[0].label = "   ";
     expect(saveDeck(storage, invalid)).toBe(false);
     expect(storage.getItem(STORAGE_KEY)).toBeNull();
   });

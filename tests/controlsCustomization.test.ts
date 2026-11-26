@@ -12,7 +12,7 @@ function memoryStorage() {
 
 describe("control layout and ordering", () => {
   it("defaults legacy controls, including volume, to 1×1 in both tile renderers", () => {
-    for (const control of createDefaultDeck().pages.flatMap((page) => page.controls)) {
+    for (const control of createDefaultDeck().pages.flatMap((page) => page.sections.flatMap((section) => section.controls))) {
       for (const variant of ["editor", "phone"] as const) {
         const html = renderToStaticMarkup(createElement(ControlTile, { control, variant, volume: 50 }));
         expect(html).toContain('--column-span:1;grid-row:span 1');
@@ -27,7 +27,7 @@ describe("control layout and ordering", () => {
     const storage = memoryStorage();
     expect(saveDeck(storage, deck)).toBe(true);
     expect(loadDeck(storage)).toEqual({ status: "loaded", deck });
-    const control = deck.pages[0].controls[2];
+    const control = deck.pages[0].sections[0].controls[2];
     for (const variant of ["editor", "phone"] as const) {
       expect(renderToStaticMarkup(createElement(ControlTile, { control, variant, semantics: "remote", volume: 50 })))
         .toContain('--column-span:4;grid-row:span 24');
@@ -39,18 +39,18 @@ describe("control layout and ordering", () => {
     for (const [key, values] of [["rowSpan", [0, -1, 1.5, 25, Infinity, NaN, "2", null]], ["columnSpan", [0, -1, 1.5, 5, Infinity, NaN, "2", null]]] as const) {
       for (const value of values) {
         const invalid = structuredClone(deck);
-        Object.assign(invalid.pages[0].controls[0], { [key]: value });
+        Object.assign(invalid.pages[0].sections[0].controls[0], { [key]: value });
         expect(isDeck(invalid), `${key}: ${value}`).toBe(false);
-        expect(updateControl(deck, "page_stream", "ctl_starting_soon", { [key]: value } as never).pages[0].controls[0]).toEqual(deck.pages[0].controls[0]);
+        expect(updateControl(deck, "page_stream", "ctl_starting_soon", { [key]: value } as never).pages[0].sections[0].controls[0]).toEqual(deck.pages[0].sections[0].controls[0]);
       }
     }
   });
 
   it("moves to a drop position without swapping or losing the intervening controls", () => {
     const deck = createDefaultDeck();
-    const ids = deck.pages[0].controls.map((control) => control.id);
+    const ids = deck.pages[0].sections[0].controls.map((control) => control.id);
     const moved = moveControl(deck, "page_stream", ids[0], 3);
-    expect(moved.pages[0].controls.map((control) => control.id)).toEqual([...ids.slice(1), ids[0]]);
+    expect(moved.pages[0].sections[0].controls.map((control) => control.id)).toEqual([...ids.slice(1), ids[0]]);
     expect(moveControl(moved, "page_stream", ids[0], -3)).toEqual(deck);
     for (const delta of [0, 0.5, NaN, Infinity, -1, 4]) expect(moveControl(deck, "page_stream", ids[0], delta)).toBe(deck);
     expect(moveControl(deck, "page_stream", "external-drag", 1)).toBe(deck);

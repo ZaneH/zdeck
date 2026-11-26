@@ -15,7 +15,7 @@ const manifests: PluginManifest[] = [
     icons: [{ id: "cue", title: "Cue", category: "Media", src: svg }] },
 ];
 const meta = { title: "Controls/Icon picker", component: IconPicker,
-  args: { control: createDefaultDeck().pages[0].controls[0], manifests, onPatch: () => {} },
+  args: { control: createDefaultDeck().pages[0].sections[0].controls[0], manifests, onPatch: () => {} },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof IconPicker>;
 export default meta;
@@ -24,10 +24,10 @@ type Story = StoryObj<typeof meta>;
 function Example({ control, manifests }: { control: Control; manifests: PluginManifest[] }) {
   const [deck, setDeck] = useState(() => {
     const deck = createDefaultDeck();
-    deck.pages[0].controls[0] = control;
+    deck.pages[0].sections[0].controls[0] = control;
     return deck;
   });
-  const current = deck.pages[0].controls[0];
+  const current = deck.pages[0].sections[0].controls[0];
   return <div style={{ display: "grid", gap: 16, maxWidth: 360 }}>
     <ControlTile control={current} variant="phone" volume={50} />
     <IconPicker control={current} manifests={manifests} onPatch={(patch) => setDeck((deck) => updateControl(deck, deck.activePageId, current.id, patch))} />

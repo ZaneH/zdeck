@@ -33,13 +33,13 @@ describe("Spotify provided icons", () => {
     expect(groups.map(([group]) => group)).toEqual(["spotify / Media"]);
     expect(groups[0][1].map(({ icon }) => icon)).toEqual(manifest.icons.map(({ src }) => ({ type: "image", src })));
     for (const provided of manifest.icons) {
-      const initial = createDefaultDeck(), control = initial.pages[0].controls[0];
+      const initial = createDefaultDeck(), control = initial.pages[0].sections[0].controls[0];
       const deck = updateControl(initial, initial.activePageId, control.id, { icon: { type: "image", src: provided.src } });
       let stored = "";
       const storage = { getItem: () => stored, setItem: (_: string, value: string) => { stored = value; } };
       expect(saveDeck(storage, deck)).toBe(true);
       expect(loadDeck(storage).deck).toEqual(deck);
-      const html = renderToStaticMarkup(createElement(IconPicker, { control: deck.pages[0].controls[0], manifests: enabled, onPatch: () => {} }));
+      const html = renderToStaticMarkup(createElement(IconPicker, { control: deck.pages[0].sections[0].controls[0], manifests: enabled, onPatch: () => {} }));
       expect(html).toContain(`spotify / Media: ${provided.title}`);
       expect(html).toContain('aria-pressed="true"');
       expect(html).toContain(`src="${provided.src}"`);

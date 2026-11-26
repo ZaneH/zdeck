@@ -65,7 +65,7 @@ async fn runs_without_a_service_and_matches_the_shared_phone_dispatcher() {
     let native=env.run("same","ctl_play_pause",None).await.unwrap();
     assert_eq!(native.state,CommandState::Confirmed);
     let deck=env.store.load().await.unwrap().deck;
-    let control=deck.pages.iter().flat_map(|p|&p.controls).find(|c|c.id=="ctl_play_pause").unwrap();
+    let control=deck.pages.iter().flat_map(|p|&p.sections).flat_map(|s|&s.controls).find(|c|c.id=="ctl_play_pause").unwrap();
     let direct=env.dispatcher.execute("same",control,None).await.unwrap();
     assert_eq!(without_timestamps(serde_json::to_value(native).unwrap()),without_timestamps(serde_json::to_value(direct).unwrap()));
     assert_eq!(env.runner.calls().iter().filter(|c|c.args==["play-pause"]).count(),2);
@@ -74,13 +74,13 @@ async fn runs_without_a_service_and_matches_the_shared_phone_dispatcher() {
 #[tokio::test]
 async fn disconnected_obs_and_plugin_have_identical_shared_error_outcomes() {
     let env=Env::standard(&[]).await;
-    let mut deck=default_deck();let obs=deck.pages[0].controls[0].clone();
+    let mut deck=default_deck();let obs=deck.pages[0].sections[0].controls[0].clone();
     let native=env.run("obs",&obs.id,None).await.unwrap();
     let direct=env.dispatcher.execute("obs",&obs,None).await.unwrap();
     assert_eq!(native.state,CommandState::Failed);
     assert_eq!(serde_json::to_value(native).unwrap(),serde_json::to_value(direct).unwrap());
     let plugin=Control {id:"disconnected-plugin".into(),label:"Plugin".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:Default::default()}};
-    deck.pages[0].controls.push(plugin.clone());env.store.save(1,deck).await.unwrap();
+    deck.pages[0].sections[0].controls.push(plugin.clone());env.store.save(1,deck).await.unwrap();
     let native=env.desktop.run(&env.store,command("plugin",2,&plugin.id,None)).await.unwrap();
     let direct=env.dispatcher.execute("plugin",&plugin,None).await.unwrap();
     assert_eq!(native.state,CommandState::Failed);assert_eq!(native.code,Some("plugin_unavailable"));
@@ -93,7 +93,7 @@ async fn stale_unsaved_missing_and_invalid_requests_never_reach_adapters() {
     let env=Env::standard(&[]).await;
     assert_eq!(env.desktop.run(&env.store,command("stale",0,"ctl_volume",None)).await.unwrap_err().code,ActionErrorCode::StaleRevision);
     // A local edited control is not authoritative until explicitly saved.
-    let mut unsaved=default_deck();unsaved.pages[0].controls.push(Control {id:"unsaved".into(),label:"Unsaved".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::MediaPlayPause});
+    let mut unsaved=default_deck();unsaved.pages[0].sections[0].controls.push(Control {id:"unsaved".into(),label:"Unsaved".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::MediaPlayPause});
     assert_eq!(env.run("missing","unsaved",None).await.unwrap_err().code,ActionErrorCode::ControlNotFound);
     for (id,control,value) in [("","ctl_volume",None),("bad\nid","ctl_volume",None),("valid","",None),("valid","ctl_volume",Some(f64::NAN)),("valid","ctl_volume",Some(f64::INFINITY)),("valid","ctl_volume",Some(-1.0)),("valid","ctl_volume",Some(101.0)),("valid","ctl_mic",Some(1.0)),("valid","ctl_play_pause",Some(1.0))] {
         assert_eq!(env.run(id,control,value).await.unwrap_err().code,ActionErrorCode::InvalidRequest);
@@ -107,7 +107,7 @@ async fn stale_unsaved_missing_and_invalid_requests_never_reach_adapters() {
     assert_eq!(error.code,ActionErrorCode::DeckUnavailable);
     assert!(!serde_json::to_string(&error).unwrap().contains("secret"));
     let mut deck = default_deck();
-    deck.pages.iter_mut().flat_map(|p| &mut p.controls).find(|c| c.id == "ctl_volume").unwrap().presentation = Some("button".into());
+    deck.pages.iter_mut().flat_map(|p| &mut p.sections).flat_map(|s| &mut s.controls).find(|c| c.id == "ctl_volume").unwrap().presentation = Some("button".into());
     env.store.save(1, deck).await.unwrap();
     assert_eq!(env.desktop.run(&env.store, command("button-target", 2, "ctl_volume", Some(50.0))).await.unwrap_err().code, ActionErrorCode::InvalidRequest);
     assert!(env.runner.calls().is_empty());
@@ -133,7 +133,7 @@ async fn identical_concurrent_commands_execute_once_and_conflicts_fail() {
     assert_eq!(env.run("click","ctl_volume",Some(60.0)).await.unwrap_err().code,ActionErrorCode::CommandConflict);
     assert_eq!(env.run("click","ctl_mic",Some(40.0)).await.unwrap_err().code,ActionErrorCode::CommandConflict);
     let mut deck=default_deck();
-    deck.pages.iter_mut().flat_map(|p|&mut p.controls).find(|c|c.id=="ctl_volume").unwrap().action=ControlAction::MediaPlayPause;
+    deck.pages.iter_mut().flat_map(|p|&mut p.sections).flat_map(|s|&mut s.controls).find(|c|c.id=="ctl_volume").unwrap().action=ControlAction::MediaPlayPause;
     env.store.save(1,deck).await.unwrap();
     let duplicate=env.desktop.run(&env.store,command("click",2,"ctl_volume",Some(40.0))).await.unwrap();
     assert_eq!(serde_json::to_value(duplicate).unwrap(),serde_json::to_value(cached).unwrap());
@@ -145,7 +145,7 @@ async fn identical_concurrent_commands_execute_once_and_conflicts_fail() {
 async fn native_and_phone_dispatch_serialize_read_modify_read() {
     let env=Env::new(&["Volume: 0.50","","Volume: 0.50 [MUTED]","Volume: 0.50 [MUTED]","","Volume: 0.50"],Duration::from_millis(5),Duration::from_secs(1)).await;
     let deck=env.store.load().await.unwrap().deck;
-    let control=deck.pages.iter().flat_map(|p|&p.controls).find(|c|c.id=="ctl_mic").unwrap();
+    let control=deck.pages.iter().flat_map(|p|&p.sections).flat_map(|s|&s.controls).find(|c|c.id=="ctl_mic").unwrap();
     let (native,phone)=tokio::join!(env.run("native-toggle","ctl_mic",None),env.dispatcher.execute("phone-toggle",control,None));
     assert_eq!(native.unwrap().state,CommandState::Confirmed);
     assert_eq!(phone.unwrap().state,CommandState::Confirmed);
@@ -211,7 +211,7 @@ async fn inflight_is_bounded_without_a_queue_of_unadmitted_actions() {
 #[tokio::test]
 async fn capacity_fails_closed_and_never_evicts_an_old_failed_id() {
     let env=Env::standard(&[]).await;
-    let id=default_deck().pages[0].controls[0].id.clone();
+    let id=default_deck().pages[0].sections[0].controls[0].id.clone();
     for i in 0..DesktopActions::CAPACITY {assert_eq!(env.run(&format!("id-{i}"),&id,None).await.unwrap().state,CommandState::Failed);}
     assert_eq!(env.run("overflow",&id,None).await.unwrap_err().code,ActionErrorCode::Capacity);
     assert_eq!(env.run("id-0",&id,None).await.unwrap().state,CommandState::Failed);
@@ -236,7 +236,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
         let node=std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for fake desktop plugin test; not skipped");assert!(node.status.success());
         env.plugin.connect("fake",String::from_utf8(node.stdout).unwrap().trim().into(),entry.to_str().unwrap().into()).await.unwrap();
         assert!(!log.exists(),"connect describes only");
-        let mut deck=default_deck();deck.pages[0].controls.push(Control {id:"plugin".into(),label:"Plugin".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:json!({"n":7}).as_object().unwrap().clone()}});
+        let mut deck=default_deck();deck.pages[0].sections[0].controls.push(Control {id:"plugin".into(),label:"Plugin".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:json!({"n":7}).as_object().unwrap().clone()}});
         env.store.save(1,deck).await.unwrap();
         assert_eq!(env.desktop.run(&env.store,command("invalid-value",2,"plugin",Some(8.0))).await.unwrap_err().code,ActionErrorCode::InvalidRequest);
         assert!(!log.exists());

@@ -319,6 +319,13 @@ async function pointerClick(page, x, y) {
   await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1, buttons: 1 });
   await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1, buttons: 1 });
 }
+async function touchDrag(page, from, to) {
+  await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: from.x, y: from.y }] });
+  for (let step = 1; step <= 4; step += 1) {
+    await page.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + ((to.x - from.x) * step) / 4, y: from.y + ((to.y - from.y) * step) / 4 }] });
+  }
+  await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
 async function chooseSetupAction(page, kind) {
   if (!await page.eval("document.querySelector('.setup-action-change').open")) {
     await page.eval(click('[aria-label="Change action"]'));
@@ -850,8 +857,8 @@ try {
   check("Add returns focus to the page title", await firstRun.waitFor("document.activeElement.id === 'page-title'"));
   const addedDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
   const addedPage = addedDeck.pages.find((deckPage) => deckPage.id === addedDeck.activePageId);
-  const addedControls = addedPage.controls.filter((control) => control.label === 'Practice scene');
-  check("Add saves the configured control exactly once", addedControls.length === 1 && addedControls[0].action === 'obs-scene' && addedControls[0].scene === 'Practice' && addedPage.controls.length === 5, JSON.stringify(addedControls));
+  const addedControls = addedPage.sections.flatMap((section) => section.controls).filter((control) => control.label === 'Practice scene');
+  check("Add saves the configured control exactly once", addedControls.length === 1 && addedControls[0].action === 'obs-scene' && addedControls[0].scene === 'Practice' && addedPage.sections.flatMap((section) => section.controls).length === 5, JSON.stringify(addedControls));
   check("Add remembers the setup flag", await firstRun.eval("localStorage.getItem('deck.setup.v1') === 'dismissed'"));
   check("the new control is selected in the inspector", await firstRun.eval("document.querySelector('.inspector-form input[type=\"text\"]').value === 'Practice scene'"));
   await firstRun.screenshot("/tmp/deck-design-setup-result-editor.png");
@@ -877,8 +884,9 @@ try {
   await firstRun.waitFor("!!document.querySelector('.app-shell')");
   const replayDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
   const replayPage = replayDeck.pages.find((deckPage) => deckPage.id === replayDeck.activePageId);
-  const replayVolume = replayPage.controls.filter((control) => control.label === 'Replay volume');
-  check("replay preserves the existing deck and adds once", replayPage.controls.length === 6 && replayPage.controls.filter((control) => control.label === 'Practice scene').length === 1 && replayVolume.length === 1 && replayVolume[0].volume === 35, JSON.stringify(replayDeck.pages[0].controls.map((c) => c.label)));
+  const replayControls = replayPage.sections.flatMap((section) => section.controls);
+  const replayVolume = replayControls.filter((control) => control.label === 'Replay volume');
+  check("replay preserves the existing deck and adds once", replayControls.length === 6 && replayControls.filter((control) => control.label === 'Practice scene').length === 1 && replayVolume.length === 1 && replayVolume[0].volume === 35, JSON.stringify(replayControls.map((c) => c.label)));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: firstRunCtx });
 
   // ------------------------------------------------------------ welcome choice continuity on a fresh profile
@@ -917,7 +925,16 @@ try {
   // Rust migrates this shared legacy fixture before returning native snapshots.
   const smokeSvgSource = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><script>window.__iconScriptRan=true</script><circle cx="12" cy="12" r="10" fill="#6ee7b7"/></svg>').toString('base64');
   const smokePngSource = 'data:image/png;base64,' + readFileSync(join(ROOT, 'public/icons/favicon-32.png')).toString('base64');
-  const adminDeck = { ...JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8')), version: 2 };
+  const adminFixture = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8'));
+  const adminDeck = {
+    ...adminFixture,
+    version: 3,
+    pages: adminFixture.pages.map((page) => ({
+      id: page.id,
+      name: page.name,
+      sections: [{ id: `${page.id}_section`, name: page.name, controls: page.controls }],
+    })),
+  };
   await admin.send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.isTauri = true;
     window.__adminCalls = [];
@@ -970,7 +987,7 @@ try {
         if (Object.keys(args).some(k => !['commandId','revision','controlId','value'].includes(k)) || args.revision !== savedRevision) throw {code:'invalid_request',message:'wrong envelope'};
         if (window.__holdDesktop) await new Promise(resolve => { window.__finishDesktop = resolve; });
         if (window.__desktopError) throw {code:window.__desktopError,message:'raw secret diagnostic'};
-        const control = savedDeck.pages.flatMap(p => p.controls).find(c => c.id === args.controlId);
+        const control = savedDeck.pages.flatMap(p => p.sections.flatMap(s => s.controls)).find(c => c.id === args.controlId);
         if (control?.pluginAction === 'power') cachedPlugins.spotify = {...cachedPlugins.spotify, state:{powered:args.value === 1}};
         return {id:args.commandId,state:window.__desktopResult || 'confirmed',message:'Safe backend result.'};
       }
@@ -1312,7 +1329,7 @@ try {
   await presentationMode(admin, 'Live');
   await admin.eval("document.querySelector('.control-tile.is-selected input[type=range]').focus()");
   await pressKey(admin, 'End', 'End', 35);
-  check('Spotify slider persists and dispatches a scalar desktop target', await admin.waitFor("window.__desktopCalls.length === 1") && await admin.eval("window.__desktopCalls[0].value === 100 && Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision,value' && window.__lastSavedDeck.pages.flatMap(p => p.controls).find(c => c.id === window.__desktopCalls[0].controlId)?.presentation === 'slider'"));
+  check('Spotify slider persists and dispatches a scalar desktop target', await admin.waitFor("window.__desktopCalls.length === 1") && await admin.eval("window.__desktopCalls[0].value === 100 && Object.keys(window.__desktopCalls[0]).sort().join(',') === 'commandId,controlId,revision,value' && window.__lastSavedDeck.pages.flatMap(p => p.sections.flatMap(s => s.controls)).find(c => c.id === window.__desktopCalls[0].controlId)?.presentation === 'slider'"));
   await presentationMode(admin, 'Editor');
   await admin.eval("window.__desktopCalls = []");
   // Declared controls: actual keyboard/pointer gestures, fake IPC only.
@@ -1617,6 +1634,34 @@ try {
   await manage.eval(click('.page-dialog .page-actions [title="Remove page"]'));
   check("accepting the confirmation removes only the named page", await manage.eval("document.querySelectorAll('.page-dialog .page-name').length === 2 && ![...document.querySelectorAll('.page-dialog .page-name')].some((n) => n.textContent === 'Smoke page')"));
   await manage.eval("window.confirm = window.__deckOriginalConfirm");
+  await manage.eval("document.querySelector('.page-dialog').close()");
+
+  // Keep the original selected control while choosing a different Add target.
+  await manage.eval(click('.control-tile .tile-primary'));
+  await manage.eval(click('[aria-label="Add section"]'));
+  check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('#section-target').selectedOptions[0]?.textContent === 'Section 2'"));
+  await manage.eval(click('.add-control'));
+  await manage.eval(clickText('.action-library .action-row', 'Volume slider'));
+  check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
+  await manage.eval(click('[aria-label="Manage sections"]'));
+  await manage.eval(click('.section-dialog [title="Rename section"]'));
+  await typeInput(manage, '.section-dialog .page-rename input', 'Audio');
+  await manage.eval(click('.section-dialog [aria-label^="Save name"]'));
+  await manage.eval(setSelect('.section-appearance .field:nth-of-type(1) select', 'light'));
+  await manage.eval(setSelect('.section-appearance .field:nth-of-type(2) select', '#6ee7b7'));
+  await manage.eval(click('.section-dialog [title="Move section up"]'));
+  await manage.eval(click('[aria-label="Close section manager"]'));
+  check('section appearance and order apply to its controls', await manage.waitFor("(() => { const s = document.querySelector('.deck-section'); return s.querySelector('.section-heading').textContent === 'Audio' && s.dataset.theme === 'light' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7'; })()"));
+  await manage.reload();
+  check('section configuration survives a browser reload', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections[0].name === 'Audio' && p.sections[0].theme === 'light' && p.sections[0].accent === '#6ee7b7' && p.sections[0].controls.length === 1; })()"));
+  await manage.eval(click('[aria-label="Manage sections"]'));
+  await manage.eval(click('.section-dialog [title="Remove section"]'));
+  check('populated section deletion focuses the safe Cancel action', await manage.waitFor(`document.querySelector('[aria-labelledby="remove-section-title"]')?.open && document.activeElement.textContent.trim() === 'Cancel'`));
+  await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Cancel'));
+  check('cancelling section deletion retains its controls', await manage.eval("document.querySelectorAll('#section-target option').length === 2"));
+  await manage.eval(click('.section-dialog [title="Remove section"]'));
+  await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Remove section'));
+  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('#section-target option').length === 1 && document.querySelector('.section-dialog [title=\"Remove section\"]').disabled"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: manageCtx });
 
   // ------------------------------------------------------------ cross-tab sync
@@ -1679,6 +1724,57 @@ try {
   check("real phone landscape hides desktop chrome and keeps four columns", await phoneLandscape.eval("getComputedStyle(document.querySelector('.phone-preview-bar')).display === 'none' && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 4"));
   await phoneLandscape.screenshot("/tmp/deck-smoke-phone-landscape.png");
 
+  // ------------------------------------------------------------ phone section snap and page swipes
+  const { browserContextId: navCtx } = await cdp.send('Target.createBrowserContext');
+  const phoneNav = await openPage('phone-sections', `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, navCtx);
+  livePages.push(phoneNav);
+  const navDeck = {
+    version: 3, theme: 'dark', accent: '#4cc9f0', activePageId: 'p1',
+    pages: [
+      { id: 'p1', name: 'One', sections: [
+        { id: 's1', name: 'First', controls: [{ id: 'c1', label: 'Mute', action: 'mic-mute' }] },
+        { id: 's2', name: 'Second', controls: [{ id: 'c2', label: 'Play', action: 'media-play-pause' }] },
+      ] },
+      { id: 'p2', name: 'Two', sections: [
+        { id: 's3', name: 'Third', controls: [{ id: 'c3', label: 'Scene', action: 'obs-scene', scene: 'Live' }] },
+        { id: 's4', name: 'Fourth', controls: [] },
+      ] },
+    ],
+  };
+  await phoneNav.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(navDeck))})`);
+  await phoneNav.reload();
+  await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One'");
+  check('phone sections offer accessible previous/next controls', await phoneNav.eval("(() => { const nav = document.querySelector('.phone-section-nav'); return !!nav && nav.getAttribute('aria-label') === 'Page sections' && !!nav.querySelector('[aria-label=\"Previous section\"]:disabled') && !nav.querySelector('[aria-label=\"Next section\"]').disabled; })()"));
+  check('short phone sections fill the available control viewport', await phoneNav.eval("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); return getComputedStyle(main).scrollSnapType.startsWith('y') && section.getBoundingClientRect().height >= main.clientHeight - 60 && section.getBoundingClientRect().height <= main.clientHeight + 1; })()"));
+  await phoneNav.eval(click('[aria-label="Next section"]'));
+  check('next section control scrolls to the second snap section', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); const nav = document.querySelector('.phone-section-current'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && nav.textContent.includes('Second') && !nav.previousElementSibling.disabled; })()"));
+  check('last section disables next and names the current section', await phoneNav.eval("document.querySelector('[aria-label=\"Next section\"]').disabled && document.querySelector('.phone-section-current').textContent.includes('Second')"));
+  const headingSwipe = await phoneNav.eval(rectOf('[data-phone-section="s2"] .section-heading'));
+  await touchDrag(phoneNav, { x: headingSwipe.right - 10, y: headingSwipe.cy }, { x: headingSwipe.left + 10, y: headingSwipe.cy });
+  check('swipe left moves to the next page without wrapping', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
+  const twoSwipe = await phoneNav.eval(rectOf('[data-phone-section="s3"] .section-heading'));
+  await touchDrag(phoneNav, { x: twoSwipe.cx, y: twoSwipe.cy }, { x: twoSwipe.cx - 10, y: twoSwipe.cy - 120 });
+  check('a diagonal vertical scroll does not change pages', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
+  const controlSwipe = await phoneNav.eval(rectOf('.phone-section .tile-primary'));
+  await touchDrag(phoneNav, { x: controlSwipe.right - 8, y: controlSwipe.cy }, { x: controlSwipe.left + 8, y: controlSwipe.cy });
+  check('a swipe starting on a control keeps the current page', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
+  await touchDrag(phoneNav, { x: twoSwipe.right - 10, y: twoSwipe.cy }, { x: twoSwipe.left + 10, y: twoSwipe.cy });
+  check('page swipes stop at the last page', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
+  await phoneNav.eval(clickText('.phone-page-tab', 'One'));
+  check('page tabs remain an alternative and reset the section position', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('.phone-section-current').textContent.includes('First') && document.querySelector('.phone-main').scrollTop === 0"));
+  await phoneNav.screenshot('/tmp/deck-smoke-phone-sections.png');
+  const tallDeck = structuredClone(navDeck);
+  tallDeck.pages[0].sections[0].controls = Array.from({ length: 16 }, (_, index) => ({ id: `tall-${index}`, label: `Control ${index}`, action: 'mic-mute' }));
+  await phoneNav.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(tallDeck))})`);
+  await phoneNav.reload();
+  await phoneNav.waitFor("document.querySelectorAll('[data-phone-section=\"s1\"] .control-tile').length === 16");
+  check('tall sections retain full-sized controls and exceed the viewport', await phoneNav.eval("document.querySelector('[data-phone-section=\"s1\"]').clientHeight > document.querySelector('.phone-main').clientHeight"));
+  await phoneNav.eval("document.querySelector('.phone-main').scrollTop = 350");
+  check('scrolling within a tall section does not advance its section indicator', await phoneNav.waitFor("document.querySelector('.phone-main').scrollTop >= 300 && document.querySelector('.phone-section-current').textContent.includes('First')"));
+  await phoneNav.eval(click('[aria-label="Next section"]'));
+  check('a tall section can advance to the next section without a scroll trap', await phoneNav.waitFor("document.querySelector('.phone-section-current').textContent.includes('Second') && document.querySelector('.phone-main').scrollTop > 900"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: navCtx });
+
   // ------------------------------------------------------------ desktop phone preview orientation
   const { browserContextId: previewCtx } = await cdp.send('Target.createBrowserContext');
   const desktopPhone = await openPage('phone-desktop', `${BASE}/#/phone`, { width: 1024, height: 900 }, previewCtx);
@@ -1706,7 +1802,7 @@ try {
   check("portrait toggle actually changes the grid to two columns", desktopPortraitCols === 2, `cols=${desktopPortraitCols}`);
   check("desktop portrait frame is ~390px wide and under 780px tall", Math.abs(desktopPortraitBox.width - 390) <= 1 && desktopPortraitBox.height <= 781, JSON.stringify(desktopPortraitBox));
   check("portrait toggle reports its pressed state", await desktopPhone.eval("document.querySelector('[aria-label=\"Preview orientation\"] [aria-pressed=\"true\"]').textContent === 'Portrait'"));
-  check("long pages scroll inside the desktop frame", await desktopPhone.eval("(() => { const shell = document.querySelector('.phone-shell'); return shell.scrollHeight > shell.clientHeight; })()"));
+  check("long pages scroll inside the desktop frame", await desktopPhone.eval("(() => { const main = document.querySelector('.phone-main'); return main.scrollHeight > main.clientHeight; })()"));
   check("page navigation stays reachable inside the frame", await desktopPhone.eval("(() => { const footer = document.querySelector('.phone-footer'); const shell = document.querySelector('.phone-shell'); return !!footer.querySelector('.phone-page-tab') && footer.getBoundingClientRect().bottom <= shell.getBoundingClientRect().bottom + 1; })()"));
   check("desktop preview puts a 44px Close preview in the outer chrome", await desktopPhone.eval("(() => { const el = document.querySelector('.preview-close-desktop'); const bar = document.querySelector('.phone-preview-bar'); if (!el || !bar) return false; const r = el.getBoundingClientRect(); return bar.contains(el) && getComputedStyle(document.querySelector('.preview-close-narrow')).display === 'none' && el.getAttribute('aria-label') === 'Close preview' && el.getAttribute('title') === 'Close preview' && r.width >= 44 && r.height >= 44; })()"));
   await desktopPhone.screenshot('/tmp/deck-design-preview-portrait.png');
@@ -1733,8 +1829,8 @@ try {
   const stressDeck = JSON.parse(await editor.eval("localStorage.getItem('deck.local.v1')"));
   const longName = 'A very long control label with forty chars'.slice(0, 40);
   stressDeck.pages.forEach(page => { page.name = longName; });
-  const templates = stressDeck.pages.flatMap(page => page.controls);
-  stressDeck.pages[0].controls = Array.from({ length: 24 }, (_, index) => ({ ...templates[index % templates.length], id: `stress-${index}`, label: longName }));
+  const templates = stressDeck.pages.flatMap(page => page.sections.flatMap(section => section.controls));
+  stressDeck.pages[0].sections[0].controls = Array.from({ length: 24 }, (_, index) => ({ ...templates[index % templates.length], id: `stress-${index}`, label: longName }));
   stressDeck.activePageId = stressDeck.pages[0].id;
   await narrow.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(stressDeck))})`);
   await narrow.reload();
@@ -1911,6 +2007,7 @@ try {
     "deck-design-pairing-steps.png",
     "deck-smoke-phone-portrait.png",
     "deck-smoke-phone-landscape.png",
+    "deck-smoke-phone-sections.png",
     "deck-smoke-offline-shell.png",
     "deck-smoke-update-banner.png",
     "deck-smoke-after-update.png",

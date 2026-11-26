@@ -9,6 +9,7 @@ import type {
   Deck,
   Page,
   Presentation,
+  Section,
   Theme,
 } from "./types";
 import { actionDefinition, clampVolume, createControl, newId } from "./actions";
@@ -18,6 +19,7 @@ export const MAX_PAGES = 12;
 export const MAX_CONTROLS_PER_PAGE = 24;
 export const MAX_ROW_SPAN = 24;
 export const MAX_COLUMN_SPAN = 4;
+const MAX_SECTION_BYTES = 128;
 export function isSpan(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
 }
@@ -26,12 +28,17 @@ export function findPage(deck: Deck, pageId: string): Page | undefined {
   return deck.pages.find((page) => page.id === pageId);
 }
 
+export function pageControls(page: Page): Control[] {
+  return page.sections.flatMap((section) => section.controls);
+}
+
 export function findControl(
   deck: Deck,
   pageId: string,
   controlId: string,
 ): Control | undefined {
-  return findPage(deck, pageId)?.controls.find((control) => control.id === controlId);
+  const page = findPage(deck, pageId);
+  return page ? pageControls(page).find((control) => control.id === controlId) : undefined;
 }
 
 export function activePage(deck: Deck): Page {
@@ -60,7 +67,7 @@ export function addPage(deck: Deck, name?: string): { deck: Deck; page: Page } |
   const page: Page = {
     id: newId("page"),
     name: name?.trim() || `Page ${deck.pages.length + 1}`,
-    controls: [],
+    sections: [{ id: newId("section"), name: "Section 1", controls: [] }],
   };
   return {
     deck: { ...deck, pages: [...deck.pages, page], activePageId: page.id },
@@ -104,14 +111,18 @@ export function addControl(
   pageId: string,
   kind: ActionKind,
   options?: ControlOptions,
+  sectionId?: string,
 ): { deck: Deck; control: Control } | null {
   const page = findPage(deck, pageId);
-  if (!page || page.controls.length >= MAX_CONTROLS_PER_PAGE) return null;
+  const section = page?.sections.find((item) => item.id === (sectionId ?? page.sections[0]?.id));
+  if (!page || !section || pageControls(page).length >= MAX_CONTROLS_PER_PAGE) return null;
 
   const control = createControl(kind, options);
   const next = mapPage(deck, pageId, (current) => ({
     ...current,
-    controls: [...current.controls, control],
+    sections: current.sections.map((item) =>
+      item.id === section.id ? { ...item, controls: [...item.controls, control] } : item,
+    ),
   }));
   return { deck: next, control };
 }
@@ -177,6 +188,17 @@ function patchControl(control: Control, patch: ControlPatch): Control {
   }
 }
 
+function mapSection(deck: Deck, pageId: string, controlId: string, update: (section: Section) => Section): Deck {
+  return mapPage(deck, pageId, (current) => ({
+    ...current,
+    sections: current.sections.map((section) =>
+      section.controls.some((control) => control.id === controlId)
+        ? update(section)
+        : section,
+    ),
+  }));
+}
+
 export function updateControl(
   deck: Deck,
   pageId: string,
@@ -184,11 +206,11 @@ export function updateControl(
   patch: ControlPatch,
 ): Deck {
   const page = findPage(deck, pageId);
-  if (!page || !page.controls.some((control) => control.id === controlId)) return deck;
+  if (!page || !findControl(deck, pageId, controlId)) return deck;
 
-  return mapPage(deck, pageId, (current) => ({
-    ...current,
-    controls: current.controls.map((control) =>
+  return mapSection(deck, pageId, controlId, (section) => ({
+    ...section,
+    controls: section.controls.map((control) =>
       control.id === controlId ? patchControl(control, patch) : control,
     ),
   }));
@@ -196,11 +218,11 @@ export function updateControl(
 
 export function removeControl(deck: Deck, pageId: string, controlId: string): Deck {
   const page = findPage(deck, pageId);
-  if (!page || !page.controls.some((control) => control.id === controlId)) return deck;
+  if (!page || !findControl(deck, pageId, controlId)) return deck;
 
-  return mapPage(deck, pageId, (current) => ({
-    ...current,
-    controls: current.controls.filter((control) => control.id !== controlId),
+  return mapSection(deck, pageId, controlId, (section) => ({
+    ...section,
+    controls: section.controls.filter((control) => control.id !== controlId),
   }));
 }
 
@@ -212,11 +234,15 @@ export function moveControl(
 ): Deck {
   const page = findPage(deck, pageId);
   if (!page) return deck;
-  const index = page.controls.findIndex((control) => control.id === controlId);
+  const section = page.sections.find((item) =>
+    item.controls.some((control) => control.id === controlId),
+  );
+  if (!section) return deck;
+  const index = section.controls.findIndex((control) => control.id === controlId);
   const target = index + delta;
-  if (index < 0 || !Number.isSafeInteger(target) || target < 0 || target >= page.controls.length || target === index) return deck;
+  if (!Number.isSafeInteger(target) || target < 0 || target >= section.controls.length || target === index) return deck;
 
-  return mapPage(deck, pageId, (current) => {
+  return mapSection(deck, pageId, controlId, (current) => {
     const controls = [...current.controls];
     const [control] = controls.splice(index, 1);
     controls.splice(target, 0, control);
@@ -242,45 +268,57 @@ export function createDefaultDeck(): Deck {
       {
         id: "page_stream",
         name: "Stream",
-        controls: [
+        sections: [
           {
-            id: "ctl_starting_soon",
-            label: "Starting soon",
-            action: "obs-scene",
-            scene: "Starting soon",
-          },
-          {
-            id: "ctl_live",
-            label: "Go live",
-            action: "obs-scene",
-            scene: "Live",
-          },
-          {
-            id: "ctl_mic",
-            label: "Mic mute",
-            action: "mic-mute",
-          },
-          {
-            id: "ctl_play_pause",
-            label: "Play / pause",
-            action: "media-play-pause",
+            id: "page_stream_section",
+            name: "Stream",
+            controls: [
+              {
+                id: "ctl_starting_soon",
+                label: "Starting soon",
+                action: "obs-scene",
+                scene: "Starting soon",
+              },
+              {
+                id: "ctl_live",
+                label: "Go live",
+                action: "obs-scene",
+                scene: "Live",
+              },
+              {
+                id: "ctl_mic",
+                label: "Mic mute",
+                action: "mic-mute",
+              },
+              {
+                id: "ctl_play_pause",
+                label: "Play / pause",
+                action: "media-play-pause",
+              },
+            ],
           },
         ],
       },
       {
         id: "page_media",
         name: "Media",
-        controls: [
+        sections: [
           {
-            id: "ctl_volume",
-            label: "Volume",
-            action: "volume",
-            volume: 50,
-          },
-          {
-            id: "ctl_media_pause",
-            label: "Play / pause",
-            action: "media-play-pause",
+            id: "page_media_section",
+            name: "Media",
+            controls: [
+              {
+                id: "ctl_volume",
+                label: "Volume",
+                action: "volume",
+                volume: 50,
+              },
+              {
+                id: "ctl_media_pause",
+                label: "Play / pause",
+                action: "media-play-pause",
+              },
+            ],
           },
         ],
       },
@@ -343,13 +381,39 @@ function onlyFields(value: Record<string, unknown>, fields: string[]): boolean {
   return Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field));
 }
 
-/** Only local import/load may upgrade a fully validated legacy deck; phone snapshots stay v2-only. */
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function migratedSectionId(pageId: string, index: number, used: Set<string>): string {
+  const candidate = `${pageId}_section`;
+  if (utf8Length(candidate) <= MAX_SECTION_BYTES && !used.has(candidate)) return candidate;
+  let fallbackIndex = index;
+  while (used.has(`section_${fallbackIndex}`)) fallbackIndex += 1;
+  return `section_${fallbackIndex}`;
+}
+
+/** Only local import/load may upgrade a fully validated legacy deck; phone snapshots stay v3-only. */
 export function normalizeDeck(value: unknown): Deck | null {
   if (isDeck(value)) return value;
-  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.pages)) return null;
-  if (value.pages.some((page) => !isRecord(page) || !Array.isArray(page.controls)
-    || page.controls.some((control) => !isRecord(control) || control.action === "plugin"))) return null;
-  const upgraded = { ...value, version: DECK_VERSION };
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2) || !Array.isArray(value.pages)) return null;
+  const usedSectionIds = new Set<string>();
+  const pages: unknown[] = [];
+  for (const [index, page] of value.pages.entries()) {
+    // Promotion accepts only the original flat page shape; mixed v3 pages are not legacy data.
+    if (!isRecord(page) || !onlyFields(page, ["id", "name", "controls"])
+      || typeof page.id !== "string" || typeof page.name !== "string"
+      || !Array.isArray(page.controls)) return null;
+    if (value.version === 1 && page.controls.some((control) => isRecord(control) && control.action === "plugin")) return null;
+    const sectionId = migratedSectionId(page.id, index, usedSectionIds);
+    usedSectionIds.add(sectionId);
+    pages.push({
+      id: page.id,
+      name: page.name,
+      sections: [{ id: sectionId, name: page.name, controls: page.controls }],
+    });
+  }
+  const upgraded = { ...value, version: DECK_VERSION, pages };
   return isDeck(upgraded) ? upgraded : null;
 }
 
@@ -366,24 +430,36 @@ export function isDeck(value: unknown): value is Deck {
   }
 
   const pageIds = new Set<string>();
+  const sectionIds = new Set<string>();
   const controlIds = new Set<string>();
 
   for (const page of value.pages) {
-    if (!isRecord(page) || !onlyFields(page, ["id", "name", "controls"])) return false;
+    if (!isRecord(page) || !onlyFields(page, ["id", "name", "sections"])) return false;
     if (typeof page.id !== "string" || !page.id || pageIds.has(page.id)) return false;
     pageIds.add(page.id);
     if (typeof page.name !== "string" || !page.name.trim()) return false;
-    if (
-      !Array.isArray(page.controls) ||
-      page.controls.length > MAX_CONTROLS_PER_PAGE
-    ) {
-      return false;
-    }
+    if (!Array.isArray(page.sections) || page.sections.length === 0) return false;
 
-    for (const control of page.controls) {
-      if (!isControl(control) || controlIds.has(control.id)) return false;
-      controlIds.add(control.id);
+    let controlCount = 0;
+    for (const section of page.sections) {
+      if (!isRecord(section) || !onlyFields(section, ["id", "name", "controls",
+        ...["theme", "accent"].filter((key) => Object.hasOwn(section, key))])) return false;
+      if (typeof section.id !== "string" || !section.id || sectionIds.has(section.id)
+        || utf8Length(section.id) > MAX_SECTION_BYTES) return false;
+      sectionIds.add(section.id);
+      if (typeof section.name !== "string" || !section.name.trim()
+        || utf8Length(section.name) > MAX_SECTION_BYTES) return false;
+      if (Object.hasOwn(section, "theme") && !isTheme(section.theme)) return false;
+      if (Object.hasOwn(section, "accent") && !isAccent(section.accent)) return false;
+      if (!Array.isArray(section.controls)) return false;
+      controlCount += section.controls.length;
+
+      for (const control of section.controls) {
+        if (!isControl(control) || controlIds.has(control.id)) return false;
+        controlIds.add(control.id);
+      }
     }
+    if (controlCount > MAX_CONTROLS_PER_PAGE) return false;
   }
 
   return (

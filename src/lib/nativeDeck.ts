@@ -89,7 +89,7 @@ export function parseDeckSnapshot(value: unknown): DeckSnapshot {
 
 export async function nativeDeckLoad(): Promise<DeckSnapshot> {
   requireNative();
-  // Native v1 files are migrated by Rust; a legacy wire snapshot must not bypass v2 validation.
+  // Native v1/v2 files are migrated by Rust; a legacy wire snapshot must not bypass v3 validation.
   return parseDeckSnapshot(await invoke<unknown>("native_deck_load"));
 }
 

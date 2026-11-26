@@ -14,7 +14,7 @@ vi.mock("../src/lib/useMediaPermission", () => ({ useMediaPermission: () => setu
 function render(native = true) {
   // Media state and cached plugin metadata are consumed for this selected control.
   const props = {
-    control: createDefaultDeck().pages.flatMap(page => page.controls).find(control => control.action === "media-play-pause"),
+    control: createDefaultDeck().pages.flatMap(page => page.sections.flatMap(section => section.controls)).find(control => control.action === "media-play-pause"),
     pageName: "Main", previewVolume: 50, canMoveUp: true, canMoveDown: true,
     obs: { native: false }, plugin: { snapshots: {} },
     system: { native, media: { status: "unknown", observedAtMs: 0 }, mediaPending: false,

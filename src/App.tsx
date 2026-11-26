@@ -19,6 +19,7 @@ import {
   findControl,
   findPage,
   moveControl,
+  pageControls,
   movePage,
   removeControl,
   removePage,
@@ -63,6 +64,7 @@ import { ControlTile } from "./components/ControlTile";
 import { Inspector } from "./components/Inspector";
 import { ObsSettingsCard } from "./components/ObsSettingsCard";
 import { PageList } from "./components/PageList";
+import { SectionList } from "./components/SectionList";
 import { PhoneDeck } from "./components/PhoneDeck";
 import { RemoteSettingsCard } from "./components/RemoteSettingsCard";
 import { useRestoreRemoteService } from "./lib/useRestoreRemoteService";
@@ -76,6 +78,17 @@ import { StatusFooter } from "./components/StatusFooter";
 import { loadFooter, saveFooter } from "./lib/footerPreferences";
 import type { FooterPreferences } from "./lib/footerPreferences";
 import { useServiceStatus } from "./lib/useServiceStatus";
+import {
+  addSection,
+  moveSection,
+  pageArrowDelta,
+  removeSection,
+  renameSection,
+  sectionNameError,
+  sectionStyle,
+  setSectionAccent,
+  setSectionTheme,
+} from "./lib/sections";
 
 type Route = "editor" | "settings" | "phone";
 
@@ -152,7 +165,11 @@ export default function App() {
   const [loadStatus, setLoadStatus] = useState<LoadStatus>(initial.status);
   const [saveError, setSaveError] = useState(initial.status === "unavailable");
   const [selectedControlId, setSelectedControlId] = useState<string | null>(
-    () => activePage(initial.deck).controls[0]?.id ?? null,
+    () => pageControls(activePage(initial.deck))[0]?.id ?? null,
+  );
+  // Transient editor focus; never persisted. Reconciles with page and control selection.
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
+    () => activePage(initial.deck).sections[0]?.id ?? null,
   );
   const actionDialog = useRef<HTMLDialogElement>(null);
   const [setupOpen, setSetupOpen] = useState(!nativeMode && initial.status === "empty" && !setupDismissed(getStorage()));
@@ -285,6 +302,11 @@ export default function App() {
     }
   }, [deck, page.id, selectedControlId]);
 
+  useEffect(() => {
+    if (selectedSectionId && page.sections.some((section) => section.id === selectedSectionId)) return;
+    setSelectedSectionId(page.sections[0]?.id ?? null);
+  }, [page, selectedSectionId]);
+
   const previewControl = (control: Control) => {
     setPressedId(control.id);
     setPreviewNotice(`Preview only: ${control.label} pressed. No desktop action was sent.`);
@@ -304,7 +326,7 @@ export default function App() {
   };
 
   const handleAddControl = (kind: ActionKind, options?: ControlOptions) => {
-    const result = addControl(deck, page.id, kind, options);
+    const result = addControl(deck, page.id, kind, options, selectedSectionId ?? undefined);
     if (!result) {
       setPreviewNotice("Control limit reached on this page.");
       return;
@@ -321,7 +343,7 @@ export default function App() {
   };
 
   const finishSetup = (control: Control) => {
-    const result = addControl(deck, page.id, control.action, control);
+    const result = addControl(deck, page.id, control.action, control, selectedSectionId ?? undefined);
     if (!result) return false;
     commitDeck(result.deck);
     setSelectedControlId(result.control.id);
@@ -344,7 +366,8 @@ export default function App() {
 
   const handleMoveControl = (controlId: string, targetIndex: number) => {
     if (desktop.live || desktop.inflight || desktop.pending) return;
-    const index = page.controls.findIndex((control) => control.id === controlId);
+    const section = page.sections.find((item) => item.controls.some((control) => control.id === controlId));
+    const index = section?.controls.findIndex((control) => control.id === controlId) ?? -1;
     const next = moveControl(deck, page.id, controlId, targetIndex - index);
     if (next === deck) return;
     commitDeck(next);
@@ -352,6 +375,7 @@ export default function App() {
   };
 
   const handleSelectPage = (pageId: string) => {
+    setSelectedSectionId(findPage(deck, pageId)?.sections[0]?.id ?? null);
     commitDeck(setActivePage(deck, pageId));
     setSelectedControlId(null);
     setPreviewNotice(null);
@@ -365,6 +389,7 @@ export default function App() {
     }
     commitDeck(result.deck);
     setSelectedControlId(null);
+    setSelectedSectionId(result.page.sections[0]?.id ?? null);
     setPreviewNotice(`Added ${result.page.name}. Local preview only.`);
   };
 
@@ -391,6 +416,65 @@ export default function App() {
 
   const handleTheme = (theme: Theme) => commitDeck(setTheme(deck, theme));
   const handleAccent = (accent: Accent) => commitDeck(setAccent(deck, accent));
+
+  const handleAddSection = (afterSectionId: string | null) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    const result = addSection(deck, page.id, afterSectionId);
+    if (!result) {
+      setPreviewNotice("Could not add a section.");
+      return;
+    }
+    commitDeck(result.deck);
+    setSelectedSectionId(result.section.id);
+  };
+
+  const handleRenameSection = (sectionId: string, name: string) => {
+    if (desktop.live || desktop.inflight || desktop.pending || sectionNameError(name)) return;
+    commitDeck(renameSection(deck, page.id, sectionId, name));
+  };
+
+  const handleRemoveSection = (sectionId: string) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    if (page.sections.length <= 1) {
+      setPreviewNotice("A page needs at least one section.");
+      return;
+    }
+    const next = removeSection(deck, page.id, sectionId);
+    if (next === deck) return;
+    commitDeck(next);
+    if (selectedSectionId === sectionId) setSelectedSectionId(null);
+  };
+
+  const handleMoveSection = (sectionId: string, delta: number) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    commitDeck(moveSection(deck, page.id, sectionId, delta));
+  };
+
+  const handleSectionTheme = (sectionId: string, theme: Theme | null) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    commitDeck(setSectionTheme(deck, page.id, sectionId, theme));
+  };
+
+  const handleSectionAccent = (sectionId: string, accent: Accent | null) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    commitDeck(setSectionAccent(deck, page.id, sectionId, accent));
+  };
+
+  useEffect(() => {
+    if (route !== "editor") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
+      const delta = pageArrowDelta(event);
+      if (!delta) return;
+      const index = deck.pages.findIndex((item) => item.id === page.id);
+      const target = deck.pages[index + delta];
+      if (!target) return;
+      event.preventDefault();
+      handleSelectPage(target.id);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [route, deck]);
 
   if (nativeMode && nativeLoading) return <NativeGate error={null} onRetry={reloadNativeDeck} />;
   if (nativeMode && nativeBlocked) return <NativeGate error={nativeBlocked} onRetry={reloadNativeDeck} />;
@@ -440,7 +524,7 @@ export default function App() {
             : "Local storage is unavailable.";
 
   if (setupOpen && route === "editor") {
-    return <><SetupGuide pageName={page.name} canAdd={page.controls.length < MAX_CONTROLS_PER_PAGE} storageAlert={storageAlert} onFinish={finishSetup} onDismiss={closeSetup} /><UpdateBanner /></>;
+    return <><SetupGuide pageName={page.name} canAdd={pageControls(page).length < MAX_CONTROLS_PER_PAGE} storageAlert={storageAlert} onFinish={finishSetup} onDismiss={closeSetup} /><UpdateBanner /></>;
   }
 
   return (
@@ -463,7 +547,7 @@ export default function App() {
         ) : <a className="back-link" href="#/"><ArrowLeft size={15} aria-hidden="true" /> Back to deck</a>}
         <div className="topbar-spacer" />
         {route === "editor" ? (
-          <button type="button" className="button secondary add-control" disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
+          <button type="button" className="button secondary add-control" disabled={pageControls(page).length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
             <Plus size={15} aria-hidden="true" /> Add control
           </button>
         ) : null}
@@ -582,7 +666,7 @@ export default function App() {
             ) : (
               <p className="muted">
                 Saved as versioned JSON under <code>{STORAGE_KEY}</code> in this browser
-                only. Valid version 1 decks are upgraded in memory and saved as version 2 on your next edit.
+                only. Valid version 1 and 2 decks are upgraded in memory and saved as version 3 on your next edit.
                 Invalid, unknown-field or unsupported-version data is left unchanged until an explicit edit replaces it.
               </p>
             )}
@@ -638,48 +722,67 @@ export default function App() {
             ) : null}
 
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
-            {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys.</p> : null}
+            {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys. Use Left / Right arrows to change pages.</p> : null}
+            <SectionList
+              deck={deck} page={page} selectedSectionId={selectedSectionId}
+              disabled={desktop.live || desktop.inflight || !!desktop.pending}
+              onSelect={setSelectedSectionId} onAdd={handleAddSection}
+              onRename={handleRenameSection} onRemove={handleRemoveSection}
+              onMove={handleMoveSection} onTheme={handleSectionTheme}
+              onAccent={handleSectionAccent}
+            />
             <div className="deck-workbench">
-              <div className="control-grid">
-                {page.controls.map((control, index) => (
-                  <ControlTile
-                    key={control.id}
-                    control={control}
-                    plugins={plugin.snapshots}
-                    variant="editor"
-                    order={!desktop.live ? { index, total: page.controls.length, move: handleMoveControl } : undefined}
-                    semantics={desktop.live ? "live" : "preview"}
-                    disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}
-                    busy={desktop.busyControlId === control.id}
-                    volume={previewVolumes[control.id] ?? controlVolume(control)}
-                    selected={selectedControlId === control.id}
-                    pressed={pressedId === control.id}
-                    onPrimary={() => {
-                      setSelectedControlId(control.id);
-                      if (desktop.live && effectivePresentation(control, plugin.snapshots) === "button") {
-                        void desktop.press(control.id).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
-                      }
-                    }}
-                    onVolumeChange={(value) => {
-                      if (control.action !== "volume") return;
-                      if (desktop.live) setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }));
-                      else previewVolume(control, value);
-                    }}
-                    onVolumeCommit={(value) => {
-                      if (desktop.live) void desktop.press(control.id, value).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
-                    }}
-                  />
-                ))}
-                {page.controls.length === 0 ? (
-                  <button
-                    type="button"
-                    className="empty-key"
-                    onClick={openActionPicker}
-                  >
-                    <Plus size={20} aria-hidden="true" /> Add your first control
-                  </button>
-                ) : null}
-              </div>
+              {page.sections.map((section) => (
+                <section
+                  key={section.id} className="deck-section"
+                  data-theme={section.theme} style={sectionStyle(section)}
+                  aria-labelledby={`section-${section.id}`}
+                >
+                  <h2 id={`section-${section.id}`} className="section-heading">{section.name}</h2>
+                  <div className="control-grid">
+                    {section.controls.map((control, index) => (
+                      <ControlTile
+                        key={control.id}
+                        control={control}
+                        plugins={plugin.snapshots}
+                        variant="editor"
+                        order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
+                        semantics={desktop.live ? "live" : "preview"}
+                        disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}
+                        busy={desktop.busyControlId === control.id}
+                        volume={previewVolumes[control.id] ?? controlVolume(control)}
+                        selected={selectedControlId === control.id}
+                        pressed={pressedId === control.id}
+                        onPrimary={() => {
+                          setSelectedSectionId(section.id);
+                          setSelectedControlId(control.id);
+                          if (desktop.live && effectivePresentation(control, plugin.snapshots) === "button") {
+                            void desktop.press(control.id).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
+                          }
+                        }}
+                        onVolumeChange={(value) => {
+                          if (control.action !== "volume") return;
+                          if (desktop.live) setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }));
+                          else previewVolume(control, value);
+                        }}
+                        onVolumeCommit={(value) => {
+                          if (desktop.live) void desktop.press(control.id, value).then(() => { if (control.action === "plugin") void plugin.refreshSnapshots(); });
+                        }}
+                      />
+                    ))}
+                    {section.controls.length === 0 ? (
+                      <button
+                        type="button"
+                        className="empty-key"
+                        disabled={pageControls(page).length >= MAX_CONTROLS_PER_PAGE}
+                        onClick={() => { setSelectedSectionId(section.id); openActionPicker(); }}
+                      >
+                        <Plus size={20} aria-hidden="true" /> Add a control
+                      </button>
+                    ) : null}
+                  </div>
+                </section>
+              ))}
             </div>
 
           </section>
@@ -704,7 +807,7 @@ export default function App() {
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
             manifests={enabledPluginManifests(plugin.snapshots)}
-            disabled={page.controls.length >= MAX_CONTROLS_PER_PAGE} onAdd={handleAddControl}
+            disabled={pageControls(page).length >= MAX_CONTROLS_PER_PAGE} onAdd={handleAddControl}
           />
         </main>
       )}
