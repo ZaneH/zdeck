@@ -725,7 +725,7 @@ try {
   check("welcome rehearsal choice carries into build", await firstRun.eval("document.querySelectorAll('.setup-choice input').length === 4 && document.querySelector('.setup-choice input:checked').value === 'volume' && document.querySelector('input[name=\"label\"]').value === 'Volume' && !document.querySelector('input[name=\"scene\"]')"));
   check("configuration shows the chosen action without asking for a second selection", await firstRun.eval("!document.querySelector('.setup-action-change').open && document.querySelector('.setup-action-change summary').textContent.includes('Volume slider')"));
   await chooseSetupAction(firstRun, 'obs-scene');
-  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === 'Scene 1' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
+  check("build step preselects the scene action and its defaults", await firstRun.eval("document.querySelector('.setup-choice input:checked').value === 'obs-scene' && document.querySelector('input[name=\"label\"]').value === '' && document.querySelector('input[name=\"scene\"]').value === 'Scene 1'"));
   await firstRun.eval("[...document.querySelectorAll('.setup-choice input')].find((el) => el.value === 'obs-scene').focus()");
   await pressKey(firstRun, "ArrowRight", "ArrowRight", 39);
   check("arrow keys move through the action radios", await firstRun.waitFor("document.querySelector('.setup-choice input:checked').value === 'mic-mute' && document.querySelector('input[name=\"label\"]').value === 'Mic mute' && !document.querySelector('input[name=\"scene\"]')"));
@@ -750,7 +750,7 @@ try {
   await chooseSetupAction(firstRun, 'obs-scene');
 
   await firstRun.eval(setValue('input[name="label"]', ''));
-  check("blank label blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"label\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
+  check("blank OBS label allows the scene name to supply its title", await firstRun.eval("!document.querySelector('.setup-fields input[name=\"label\"]').required && !document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
   await firstRun.eval(setValue('input[name="label"]', 'Practice scene'));
   await firstRun.eval(setValue('input[name="scene"]', ''));
   check("blank scene blocks the build submit", await firstRun.eval("document.querySelector('.setup-fields input[name=\"scene\"]').validity.valueMissing && document.querySelector('.setup-actions button[type=\"submit\"]').disabled"));
@@ -1119,7 +1119,7 @@ try {
   check('deliberate stop persists native desired off', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === false"));
   await admin.reload();
   check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   await admin.eval("location.hash = '#/settings/general'");
   await admin.waitFor("!document.querySelector('[aria-label=General][role=region]').hidden");
   check('close-to-tray defaults off', await admin.eval("!document.querySelector('[aria-describedby=close-to-tray-help]').checked"));
