@@ -61,6 +61,36 @@ if __name__ == "__main__":
 
 Wire field names remain camelCase (`protocolVersion`, `stateKey`); Python API names are snake_case. The manifest schema, icon limits, control metadata and request/error framing are documented in [the TypeScript SDK](../plugin-sdk/README.md) and [the plugin contract](../../docs/plugins.md). Only one control-bearing field per action is supported. Live state is session-only; persist explicit user configuration in the host, not action results.
 
+## Optional host settings and selections (unreleased)
+
+The updated SDK/app accept `manifest.settings`, at most four identifier keys with
+`{"type": "text" | "secret", "label": "Label"}`. Implement
+`configure(self, settings: SettingsValues, signal: Event)` when declaring it;
+`Settings`, `SettingsField`, `SettingsValues` and `Choice` are exported author types.
+Configure validates setup only, never runs a device action. Its return value is
+ignored: the SDK acknowledges exactly `state: {}`. State/execute are refused until
+a valid configure request succeeds. Settings strings are bounded to 2048 UTF-8
+bytes each; the native OS-store envelope additionally has a 2400 UTF-16-byte total
+budget. No credentials belong in manifests, state, action args, stderr or decks.
+The generic host form persists on Apply through the OS credential store, never
+returns saved secrets, and supports Forget. There is no plaintext fallback or
+sandbox/permission enforcement. Changed packages require explicit re-trust before
+receiving settings saved for their plugin ID.
+
+An integer field may use `choicesKey` instead of `control` to select a stable
+binding from a returned state array. Each `Choice` is exactly
+`{"value": safe_integer, "label": nonempty_string_up_to_160, "available": bool}`.
+The app validates array length ≤256, unique in-range values and safe labels;
+multiple actions may share a state array. SDK/host field validation does not
+validate arbitrary plugin state. The plugin must resolve/validate the chosen
+binding independently before side effects, not use discovery order or execute
+imported metadata. See the [shared settings/selection contract](../plugin-sdk/README.md#declared-connection-settings-and-selections-unreleased).
+
+This is an additive protocol-v1 extension: existing manifests remain valid;
+older apps/SDKs reject the new optional fields. Bundle matching updated SDK and
+app builds. A handler-raised `timeout` stops both Python and JS servers, just like
+the SDK deadline, so subsequent queued actions cannot run.
+
 ## Development and verification
 
 ```sh

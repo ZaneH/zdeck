@@ -2,8 +2,8 @@
 //! The reference Spotify process is exercised with describe ONLY in a temporary
 //! source/artifact snapshot; never state, execute or Automation.
 #![cfg(unix)]
-use std::{fs, os::unix::fs::{symlink, PermissionsExt}, path::PathBuf, sync::atomic::{AtomicU64, Ordering}, time::{Duration, Instant}};
-use zdeck_plugin_host::{plugin::{ConnectionStatus, ErrorKind, Outcome, PluginRegistry}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
+use std::{collections::BTreeMap, fs, os::unix::fs::{symlink, PermissionsExt}, path::PathBuf, sync::{atomic::{AtomicU64, Ordering}, Arc}, time::{Duration, Instant}};
+use zdeck_plugin_host::{plugin::{ConnectionStatus, ErrorKind, Manifest, Outcome, PluginRegistry}, plugin_install::{detect_node, runtime_candidates, InstallStatus, NodeStatus, PluginInstall}};
 use serde_json::{json, Value};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -75,6 +75,27 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
         fs::write(folder.join("main.js"),source).unwrap();folder
     }
     fn calls(&self) -> Vec<String> { fs::read_to_string(self.temp.join("calls")).unwrap_or_default().lines().map(str::to_owned).collect() }
+    fn settings_plugin(&self, id: &str, settings: Value) -> PathBuf {
+        let mut value = manifest(id);
+        value["settings"] = settings;
+        let folder = self.plugin(id, &value);
+        let log = self.temp.join(format!("{id}-settings"));
+        let source = format!("const manifest={},log={};\n", value, json!(log.to_str().unwrap())) + r#"
+const fs=require('node:fs');
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),base={protocolVersion:1,id:r.id,type:'result'};
+ fs.appendFileSync(log,r.type+'\n');
+ if(r.type==='describe'){process.stdout.write(JSON.stringify({...base,manifest})+'\n');return;}
+ if(r.type==='configure'){fs.appendFileSync(log,JSON.stringify(r.settings)+'\n');process.stdout.write(JSON.stringify({...base,state:{}})+'\n');return;}
+ process.stdout.write(JSON.stringify({...base,state:{}})+'\n');
+});
+"#;
+        fs::write(folder.join("main.js"), source).unwrap();
+        folder
+    }
+    fn settings_log(&self, id: &str) -> Vec<String> {
+        fs::read_to_string(self.temp.join(format!("{id}-settings"))).unwrap_or_default().lines().map(str::to_owned).collect()
+    }
     fn protocol_runtime(&self, described: &Value) -> PathBuf {
         let manifest = serde_json::to_string(described).unwrap();
         // All tests use a fixed r1 describe response. Subsequent state/execute would be logged
@@ -91,6 +112,14 @@ done
 }
 impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.temp); } }
 fn manifest(id: &str) -> Value { json!({"id":id,"version":"0.1.0","protocolVersion":1,"actions":[{"id":"play","title":"Play","config":{}}]}) }
+fn settings() -> Value { json!({"user":{"type":"text","label":"User"},"token":{"type":"secret","label":"Token"}}) }
+fn settings_loader(loads: Arc<AtomicU64>) -> Arc<dyn Fn(&str, &Manifest) -> Result<BTreeMap<String, String>, zdeck_plugin_host::plugin::PluginError> + Send + Sync> {
+    Arc::new(move |_: &str, manifest: &Manifest| {
+        assert!(manifest.settings.is_some(), "loader must only see opted-in manifests");
+        loads.fetch_add(1, Ordering::SeqCst);
+        Ok(BTreeMap::from([("user".into(), "alice".into()), ("token".into(), "top-secret".into())]))
+    })
+}
 
 impl Fixture {
     /// Ready identity from a probe-free catalog; never runs a fake runtime in `node` mode.
@@ -531,6 +560,132 @@ async fn diagnostics_explain_source_sdk_link_without_executing_or_exposing_paths
 fn sdk_path(folder:&std::path::Path)->PathBuf{folder.join("node_modules/@zdeck/plugin-sdk")}
 
 #[tokio::test]
+async fn catalog_exposes_declared_settings_metadata_and_omits_legacy_settings() {
+    let f = Fixture::new();
+    f.plugin("legacy", &manifest("legacy"));
+    f.settings_plugin("configured", settings());
+    let catalog = f.install(vec![]).catalog().await.unwrap();
+    let legacy = catalog.plugins.iter().find(|plugin| plugin.id == "legacy").unwrap();
+    assert!(legacy.settings.is_none());
+    assert!(serde_json::to_value(legacy).unwrap().get("settings").is_none());
+    let configured = catalog.plugins.iter().find(|plugin| plugin.id == "configured").unwrap();
+    assert_eq!(configured.settings.as_ref().unwrap().len(), 2);
+    let json = serde_json::to_value(configured).unwrap();
+    assert_eq!(json["settings"]["user"], json!({"type":"text","label":"User"}));
+    assert_eq!(json["settings"]["token"], json!({"type":"secret","label":"Token"}));
+}
+
+#[tokio::test]
+async fn settings_loader_runs_only_after_exact_trust_before_launch_and_sends_values_on_stdin() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", settings());
+    let loads = Arc::new(AtomicU64::new(0));
+    let install = f.install(vec![f.node()]).with_settings_loader(settings_loader(loads.clone()));
+    let registry = PluginRegistry::default();
+    assert_eq!(install.enable(&registry, "fake").await.unwrap_err().code, Some("not_trusted"));
+    assert_eq!(loads.load(Ordering::SeqCst), 0, "trust validation must precede the credential loader");
+    assert!(f.settings_log("fake").is_empty(), "no process may launch before trust");
+    trust_current(&f, &install, "fake").await;
+    assert_eq!(loads.load(Ordering::SeqCst), 0, "trust and catalog work must not read settings");
+    install.enable(&registry, "fake").await.unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 1);
+    let log = f.settings_log("fake");
+    assert_eq!(&log[0..2], ["describe", "configure"]);
+    assert_eq!(log.len(), 3);
+    let configured: Value = serde_json::from_str(&log[2]).unwrap();
+    assert_eq!(configured, json!({"user":"alice","token":"top-secret"}));
+    registry.disconnect("fake").await.unwrap();
+}
+
+#[tokio::test]
+async fn legacy_manifests_never_invoke_the_settings_loader() {
+    let f = Fixture::new();
+    let m = manifest("fake");
+    f.plugin("fake", &m);
+    let loads = Arc::new(AtomicU64::new(0));
+    let install = f.install(vec![f.protocol_runtime(&m)]).with_settings_loader(settings_loader(loads.clone()));
+    trust_current(&f, &install, "fake").await;
+    install.enable(&PluginRegistry::default(), "fake").await.unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 0);
+    assert_eq!(f.calls().len(), 2, "legacy launch only describes");
+}
+
+#[tokio::test]
+async fn unconfigured_or_oversized_settings_fail_safely_without_launch_or_enabled_intent() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", settings());
+    let empty = f.install(vec![f.node()]);
+    trust_current(&f, &empty, "fake").await;
+    assert!(empty.enable(&PluginRegistry::default(), "fake").await.unwrap_err().code == Some("settings_required"), "a declaring manifest requires a loader");
+    for values in [BTreeMap::from([("user".into(), "alice".into())]), BTreeMap::new()] {
+        let loads = Arc::new(AtomicU64::new(0));
+        let values = values.clone();
+        let loader = { let loads = loads.clone(); Arc::new(move |_: &str, _: &Manifest| {
+            loads.fetch_add(1, Ordering::SeqCst);
+            Ok(values.clone())
+        }) };
+        let install = f.install(vec![f.node()]).with_settings_loader(loader);
+        let error = install.enable(&PluginRegistry::default(), "fake").await.unwrap_err();
+        assert_eq!(error.code, Some("settings_required"));
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert!(f.settings_log("fake").is_empty(), "unconfigured settings must not launch the plugin");
+    }
+    // A failed enable must not persist enabled intent for a later restore.
+    f.install(vec![f.node()]).restore(&PluginRegistry::default()).await.unwrap();
+    assert!(f.settings_log("fake").is_empty());
+}
+
+#[tokio::test]
+async fn oversized_combined_settings_are_refused_before_launch() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", json!({"one":{"type":"text","label":"One"},"two":{"type":"text","label":"Two"}}));
+    let loader = Arc::new(|_: &str, _: &Manifest| Ok(BTreeMap::from([
+        ("one".into(), "x".repeat(1200)), ("two".into(), "y".repeat(1200)),
+    ])));
+    let install = f.install(vec![f.node()]).with_settings_loader(loader);
+    trust_current(&f, &install, "fake").await;
+    assert_eq!(install.enable(&PluginRegistry::default(), "fake").await.unwrap_err().code, Some("settings_required"));
+    assert!(f.settings_log("fake").is_empty());
+}
+
+#[tokio::test]
+async fn startup_restore_reuses_the_native_settings_loader() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", settings());
+    let loads = Arc::new(AtomicU64::new(0));
+    let install = f.install(vec![f.node()]).with_settings_loader(settings_loader(loads.clone()));
+    trust_current(&f, &install, "fake").await;
+    let first = PluginRegistry::default();
+    install.enable(&first, "fake").await.unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 1);
+    first.disconnect("fake").await.unwrap();
+    let restarted = PluginRegistry::default();
+    f.install(vec![f.node()]).with_settings_loader(settings_loader(loads.clone())).restore(&restarted).await.unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 2);
+    assert_eq!(restarted.snapshot("fake").await.unwrap().status, ConnectionStatus::Connected);
+    let log = f.settings_log("fake");
+    assert_eq!(log.iter().filter(|line| *line == "configure").count(), 2);
+    assert_eq!(serde_json::from_str::<Value>(&log[5]).unwrap(), json!({"user":"alice","token":"top-secret"}));
+    restarted.disconnect("fake").await.unwrap();
+}
+
+#[tokio::test]
+async fn trusted_manifest_requires_fresh_identity_trust_and_never_launches() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", settings());
+    let install = f.install(vec![f.node()]);
+    assert_eq!(install.trusted_manifest("fake").await.unwrap_err().code, Some("not_trusted"));
+    trust_current(&f, &install, "fake").await;
+    let manifest = install.trusted_manifest("fake").await.unwrap();
+    assert_eq!(manifest.settings.as_ref().unwrap().len(), 2);
+    assert!(f.settings_log("fake").is_empty());
+    assert!(install.trusted_manifest("../fake").await.is_err());
+    fs::write(f.root.join("fake/main.js"), "// changed").unwrap();
+    assert_eq!(install.trusted_manifest("fake").await.unwrap_err().code, Some("not_trusted"));
+    assert!(f.settings_log("fake").is_empty());
+}
+
+#[tokio::test]
 async fn uninstall_preserves_bytes_in_unique_reversible_backups_and_leaves_other_plugin_running() {
     let f=Fixture::new();let alpha=f.fake_plugin("alpha",false);f.fake_plugin("beta",false);
     let original=fs::read(alpha.join("main.js")).unwrap();let install=f.install(vec![f.node()]);let registry=PluginRegistry::default();
@@ -611,4 +766,18 @@ fn open_helper_creates_only_fixed_folder_and_prepares_opener_without_running_it(
     #[cfg(target_os = "linux")]
     assert_eq!(command.get_program(), "/usr/bin/xdg-open");
     assert!(f.calls().is_empty());
+}
+
+#[tokio::test]
+async fn empty_settings_declaration_configure_without_a_loader() {
+    let f = Fixture::new();
+    f.settings_plugin("fake", json!({}));
+    let loads = Arc::new(AtomicU64::new(0));
+    let install = f.install(vec![f.node()]).with_settings_loader(settings_loader(loads.clone()));
+    trust_current(&f, &install, "fake").await;
+    install.enable(&PluginRegistry::default(), "fake").await.unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 0);
+    let log = f.settings_log("fake");
+    assert_eq!(&log[0..2], ["describe", "configure"]);
+    assert_eq!(serde_json::from_str::<Value>(&log[2]).unwrap(), json!({}));
 }

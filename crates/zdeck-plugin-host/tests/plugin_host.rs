@@ -40,6 +40,7 @@ if (mode.startsWith('startup-')) {
   process.exit(7);
 }
 const manifest = {id:'fake',version:'0.0.1',protocolVersion:1,actions:[{id:'go',title:'Go',config:{n:{type:'integer',minimum:0,maximum:9}}}]};
+if (mode.startsWith('settings')) manifest.settings = {token:{type:'secret',label:'Token'},name:{type:'text',label:'Name'}};
 let count = 0;
 const lines = readline.createInterface({input:process.stdin});
 lines.on('line', line => {
@@ -48,8 +49,10 @@ lines.on('line', line => {
   const result = payload => process.stdout.write(JSON.stringify({protocolVersion:1,id:r.id,type:'result',...payload})+'\n');
   if (r.type === 'describe') {
     if (mode === 'bad-manifest') manifest.extra = true;
+    if (mode === 'slow') { setTimeout(()=>result({manifest}),300); return; }
     result({manifest}); return;
   }
+  if (r.type === 'configure') { result({state: mode === 'settings-bad-result' ? {leaked:'secret'} : {}}); return; }
   if (r.type === 'execute') count++;
   if (mode === 'timeout') { setInterval(()=>{}, 1000); return; }
   if (mode === 'exit') process.exit(7);
@@ -131,6 +134,45 @@ async fn registry_independent_io_duplicate_enable_and_cancellation_do_not_leak_h
     task.abort();assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Connected);
     registry.disconnect("alpha").await.unwrap();registry.disconnect("beta").await.unwrap();
     f.reaped("alpha");f.reaped("beta");
+}
+
+#[tokio::test]
+async fn settings_gate_serializes_with_enable_and_refuses_while_connected() {
+    use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+    use zdeck_plugin_host::plugin::{ConnectionStatus, PluginError, PluginRegistry};
+    let f=RegistryFixture::new();
+    let registry=Arc::new(PluginRegistry::default());
+    // Enable holds the gate across a slow describe; the settings write must wait outside it.
+    let enabling={let registry=registry.clone();let node=f.node.clone();let entry=f.entry("alpha","slow");tokio::spawn(async move {registry.connect("alpha",node,entry).await})};
+    tokio::time::timeout(Duration::from_secs(2),async {while !f.calls("alpha").iter().any(|l|l.starts_with("describe:")) {tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    let entered=Arc::new(AtomicBool::new(false));
+    let writing={let registry=registry.clone();let entered=entered.clone();tokio::spawn(async move {
+        registry.with_disabled_settings("alpha",move || async move {entered.store(true,Ordering::SeqCst);Ok::<(),PluginError>(())}).await
+    })};
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!enabling.is_finished());
+    assert!(!entered.load(Ordering::SeqCst),"settings must wait for the enable gate");
+    enabling.await.unwrap().unwrap();
+    assert_eq!(writing.await.unwrap().unwrap_err().code,Some("plugin_connected"));
+    assert!(!entered.load(Ordering::SeqCst),"the connected check runs inside the gate, before the closure");
+    assert_eq!(registry.snapshot("alpha").await.unwrap().status,ConnectionStatus::Connected);
+    registry.disconnect("alpha").await.unwrap();
+    // Disabled settings mutations share that gate too, so they never overlap.
+    let order=Arc::new(Mutex::new(Vec::new()));
+    let run=|label:&'static str| {let registry=registry.clone();let order=order.clone();tokio::spawn(async move {
+        registry.with_disabled_settings("alpha",move || async move {
+            order.lock().unwrap().push(format!("{label}-start"));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            order.lock().unwrap().push(format!("{label}-end"));
+            Ok::<(),PluginError>(())
+        }).await
+    })};
+    let first=run("a");
+    tokio::time::timeout(Duration::from_secs(2),async {while !order.lock().unwrap().iter().any(|s|s=="a-start") {tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
+    let second=run("b");
+    first.await.unwrap().unwrap();second.await.unwrap().unwrap();
+    assert_eq!(*order.lock().unwrap(),["a-start","a-end","b-start","b-end"]);
+    f.reaped("alpha");
 }
 
 #[tokio::test]
@@ -344,4 +386,83 @@ async fn cancellation_does_not_abandon_an_admitted_action() {
     assert_eq!(f.host.state().await.unwrap()["count"],1);
     assert_eq!(f.calls().iter().filter(|s|s.starts_with("execute:")).count(),1);
     f.host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn settings_configure_validates_before_state_and_execute() {
+    use std::collections::BTreeMap;
+    let f = Fixture::new("settings");
+    let manifest = f.host.describe().await.unwrap();
+    assert_eq!(manifest.settings.as_ref().unwrap().len(), 2);
+    assert_eq!(f.host.state().await.unwrap_err().kind, ErrorKind::InvalidArguments);
+    assert_eq!(f.host.execute("go",json!({"n":1})).await.unwrap_err().kind, ErrorKind::InvalidArguments);
+    assert!(!f.calls().iter().any(|line| line.starts_with("state:") || line.starts_with("execute:")));
+    let error = f.host.configure(BTreeMap::from([("token".into(), "x".repeat(2049)), ("name".into(), "Ada".into())])).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidArguments);
+    assert_eq!(f.host.state().await.unwrap_err().kind, ErrorKind::Stopped, "configure validation failure stops the process");
+    assert!(!f.calls().iter().any(|line| line.starts_with("configure:")));
+    f.assert_reaped();
+
+    let f = Fixture::new("settings");
+    f.host.describe().await.unwrap();
+    f.host.configure(BTreeMap::from([("token".into(), "secret-token".into()), ("name".into(), "Ada".into())])).await.unwrap();
+    assert_eq!(f.calls().iter().filter(|line| line.starts_with("configure:")).count(), 1);
+    assert_eq!(f.host.state().await.unwrap()["count"], 0);
+    assert_eq!(f.host.execute("go",json!({"n":1})).await.unwrap()["count"], 1);
+    f.host.stop().await.unwrap();
+    f.assert_reaped();
+}
+
+#[tokio::test]
+async fn configure_requires_declared_settings_and_an_exactly_empty_state() {
+    use std::collections::BTreeMap;
+    let f = Fixture::new("ok");
+    f.host.describe().await.unwrap();
+    assert_eq!(f.host.configure(BTreeMap::from([("token".into(), "x".into())])).await.unwrap_err().kind, ErrorKind::InvalidArguments);
+    assert_eq!(f.host.state().await.unwrap_err().kind, ErrorKind::Stopped);
+    f.assert_reaped();
+
+    let f = Fixture::new("settings-bad-result");
+    f.host.describe().await.unwrap();
+    let error = f.host.configure(BTreeMap::from([("token".into(), "secret-token".into()), ("name".into(), "Ada".into())])).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Protocol);
+    assert!(!serde_json::to_string(&error).unwrap().contains("secret-token"));
+    assert_eq!(f.host.state().await.unwrap_err().kind, ErrorKind::Stopped);
+    f.assert_reaped();
+}
+
+#[tokio::test]
+async fn session_connect_manifest_settings_checks_expected_before_configure() {
+    use std::collections::BTreeMap;
+    use zdeck_plugin_host::plugin::{ConnectionStatus, Manifest};
+    let f = ManagedFixture::new("settings");
+    let expected: Manifest = serde_json::from_value(json!({"id":"fake","version":"0.0.1","protocolVersion":1,
+        "actions":[{"id":"go","title":"Go","config":{"n":{"type":"integer","minimum":0,"maximum":9}}}],
+        "settings":{"token":{"type":"secret","label":"Token"},"name":{"type":"text","label":"Name"}}})).unwrap();
+    let mut wrong = expected.clone(); wrong.id = "other".into();
+    let error = f.manager.connect_manifest_settings(f.program.clone(), f.entrypoint.to_str().unwrap().into(), wrong, Some(BTreeMap::new())).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidManifest);
+    assert_eq!(f.fixture.calls().len(), 1, "expected mismatch must stop before configure");
+    assert!(!f.fixture.calls().iter().any(|line| line.starts_with("configure:")));
+    assert_eq!(f.manager.snapshot().await.status, ConnectionStatus::Stopped);
+    f.fixture.assert_reaped();
+
+    let f = ManagedFixture::new("settings");
+    let error = f.manager.connect_manifest_settings(f.program.clone(), f.entrypoint.to_str().unwrap().into(), expected.clone(), None).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidArguments);
+    assert!(!f.fixture.calls().iter().any(|line| line.starts_with("configure:")));
+    f.fixture.assert_reaped();
+
+    let f = ManagedFixture::new("settings");
+    let snapshot = f.manager.connect_manifest_settings(f.program.clone(), f.entrypoint.to_str().unwrap().into(), expected,
+        Some(BTreeMap::from([("token".into(), "secret-token".into()), ("name".into(), "Ada".into())]))).await.unwrap();
+    assert_eq!(snapshot.status, ConnectionStatus::Connected);
+    assert!(snapshot.state.is_none());
+    let wire = serde_json::to_string(&snapshot).unwrap();
+    assert!(!wire.contains("secret-token") && !wire.contains("Ada"));
+    assert_eq!(f.fixture.calls().iter().filter(|line| line.starts_with("configure:")).count(), 1);
+    assert_eq!(f.manager.state().await.unwrap().state.unwrap()["count"], 0);
+    assert_eq!(f.manager.execute("fake".into(),"go".into(),json!({"n":1})).await.unwrap().state.unwrap()["count"], 1);
+    f.manager.disconnect().await;
+    f.fixture.assert_reaped();
 }

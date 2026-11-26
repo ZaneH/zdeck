@@ -4,10 +4,11 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronDown, Trash2 } from "lucide-react";
 import { ActionIcon } from "./ActionIcon";
+import { Dropdown } from "./Dropdown";
 import { isSpan, MAX_COLUMN_SPAN, MAX_ROW_SPAN } from "../lib/deck";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
 import { IconPicker } from "./IconPicker";
-import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry } from "../lib/plugin";
+import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry, pluginChoices } from "../lib/plugin";
 import type { PluginControl } from "../lib/types";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { PluginErrorNotice } from "./PluginSettingsCard";
@@ -102,12 +103,24 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
       && (!field.control || (Number(drafts[key]) - field.minimum) % field.control.step === 0));
   return <div className="native-control">
     <p>{control.pluginId} · {control.pluginAction}</p>
-    {action ? Object.entries(action.config).map(([key, field]) => field.type === "boolean" ? <label className="field" key={key}>
-      <span>{key}</span><select value={drafts[key] ?? "false"} disabled={busy} onChange={(event) => {
-        const text = event.target.value; setDrafts((current) => ({ ...current, [key]: text }));
+    {action && Object.values(action.config).some((field) => field.type === "integer" && field.choicesKey) ? <div className="plugin-read-control">
+      <button type="button" className="button secondary" disabled={busy || snapshot.status !== "connected" || !!snapshot.lastError} onClick={() => void plugin.readState(control.pluginId)}>Discover / refresh selections</button>
+      <p className="field-note">Last observed values, not live. Saved selections never follow discovery order. Missing or renamed entities must be selected again.</p>
+    </div> : null}
+    {action ? Object.entries(action.config).map(([key, field]) => field.type === "boolean" ? <Dropdown key={key} label={key}
+      value={drafts[key] ?? "false"} options={[{ value: "false", label: "Off" }, { value: "true", label: "On" }]} disabled={busy} onChange={(text) => {
+        setDrafts((current) => ({ ...current, [key]: text }));
         onPatch({ pluginArgs: { ...control.pluginArgs, [key]: text === "true" } });
-      }}><option value="false">Off</option><option value="true">On</option></select>
-    </label> : <label className="field" key={key}>
+      }} /> : field.choicesKey ? <Dropdown key={key} label={key} value={drafts[key] ?? ""}
+        options={(() => {
+          const choices = pluginChoices(snapshot, field) ?? [];
+          const options = choices.map((choice) => ({ value: String(choice.value), label: choice.label + (choice.available ? "" : " — unavailable") }));
+          return options.some((choice) => choice.value === drafts[key]) ? options
+            : [{ value: drafts[key] ?? "", label: "Select an entity (saved selection missing)" }, ...options];
+        })()} disabled={busy || snapshot.status !== "connected"} onChange={(text) => {
+          setDrafts((current) => ({ ...current, [key]: text }));
+          onPatch({ pluginArgs: { ...control.pluginArgs, [key]: Number(text) } });
+        }} /> : <label className="field" key={key}>
       <span>{key} ({field.minimum}–{field.maximum})</span>
       <input type="number" step={field.control?.step ?? 1} min={field.minimum} max={field.maximum} value={drafts[key] ?? ""}
         aria-invalid={!drafts[key]?.trim() || !Number.isSafeInteger(Number(drafts[key])) || Number(drafts[key]) < field.minimum || Number(drafts[key]) > field.maximum

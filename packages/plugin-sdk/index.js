@@ -14,8 +14,12 @@ const errors = {
   app_missing: ['Spotify was not found at /Applications/Spotify.app.', 'Install Spotify desktop in /Applications.'],
   app_not_running: ['Spotify is not running.', 'Open Spotify manually, then try again.'],
   automation_denied: ['macOS denied Spotify Automation access.', 'Allow the launching application to control Spotify in Privacy & Security > Automation.'],
-  command_failed: ['Spotify control failed.', 'Check Spotify is responsive; inspect state before manually retrying an action.'],
-  invalid_state: ['Spotify returned unreadable state.', 'Check Spotify compatibility and restart the plugin.'],
+  command_failed: ['Plugin command failed.', 'Check the integration connection and permissions; inspect state before manually retrying an action.'],
+  invalid_state: ['Plugin returned unreadable state.', 'Check plugin compatibility and restart the plugin.'],
+  authentication_failed: ['Integration authentication failed.', 'Disable the plugin, replace its saved token in connection settings, apply and enable again.'],
+  connection_failed: ['Integration connection failed.', 'Check the configured URL, network and trusted TLS certificate. No automatic retry was made.'],
+  state_required: ['Read state before running this action.', 'After enabling or reconnecting, explicitly read state to inspect devices before deciding whether to send an action.'],
+  entity_unavailable: ['Selected entity is unavailable.', 'Read state and check the device in Home Assistant before deciding whether to run it.'],
   outcome_unknown: ['Action may have applied, but state could not be read.', 'Read state before deciding whether to retry; never automatically retry.'],
 };
 export class PluginError extends Error {
@@ -30,6 +34,9 @@ const identifier = (x) => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test
 const requestId = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x);
 const text = (x) => typeof x === 'string' && x.length > 0 && x.length <= 80 && !/[\x00-\x1f\x7f]/.test(x);
 const integer = Number.isSafeInteger;
+const settingsField = (x) => exact(x, ['type', 'label']) && (x.type === 'text' || x.type === 'secret') && text(x.label);
+const pluginSettings = (x) => record(x) && Object.keys(x).length <= 4
+  && Object.entries(x).every(([key, field]) => identifier(key) && settingsField(field));
 
 function iconSource(value) {
   return typeof value === 'string' && value.length <= 8192 && !value.endsWith(',')
@@ -49,17 +56,21 @@ function pluginIcons(value) {
 function validField(field) {
   if (!record(field)) return false;
   const controlled = Object.hasOwn(field, 'control');
+  const choices = Object.hasOwn(field, 'choicesKey');
   if (field.type === 'boolean') return exact(field, ['type', ...(controlled ? ['control'] : [])])
     && (!controlled || exact(field.control, ['stateKey']) && identifier(field.control.stateKey));
-  return field.type === 'integer' && exact(field, ['type', 'minimum', 'maximum', ...(controlled ? ['control'] : [])])
+  return field.type === 'integer' && exact(field, ['type', 'minimum', 'maximum',
+    ...(controlled ? ['control'] : []), ...(choices ? ['choicesKey'] : [])])
     && integer(field.minimum) && integer(field.maximum) && field.minimum <= field.maximum
+    && !(controlled && choices) && (!choices || identifier(field.choicesKey))
     && (!controlled || exact(field.control, ['step']) && integer(field.control.step) && field.control.step > 0
       && Number.isSafeInteger(field.maximum - field.minimum) && field.control.step <= field.maximum - field.minimum && (field.maximum - field.minimum) % field.control.step === 0);
 }
 
 export function validateManifest(value) {
-  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : []), ...(Object.hasOwn(value, 'icon') ? ['icon'] : [])])
-    && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && (!Object.hasOwn(value, 'icon') || iconSource(value.icon)) && identifier(value.id)
+  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : []), ...(Object.hasOwn(value, 'icon') ? ['icon'] : []), ...(Object.hasOwn(value, 'settings') ? ['settings'] : [])])
+    && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && (!Object.hasOwn(value, 'icon') || iconSource(value.icon))
+    && (!Object.hasOwn(value, 'settings') || pluginSettings(value.settings)) && identifier(value.id)
     && typeof value.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     && value.protocolVersion === 1 && Array.isArray(value.actions) && value.actions.length > 0 && value.actions.length <= 32;
   const seen = new Set();
@@ -87,12 +98,24 @@ export function validateArguments(action, args) {
   return args;
 }
 
+function validateSettings(declared, settings) {
+  if (!record(settings) || Object.keys(settings).length !== Object.keys(declared).length
+    || !Object.keys(declared).every((key) => Object.hasOwn(settings, key)
+      && typeof settings[key] === 'string' && Buffer.byteLength(settings[key]) <= 2048)) {
+    throw new PluginError('invalid_arguments');
+  }
+  return settings;
+}
+
 function validateRequest(value) {
   if (!record(value) || value.protocolVersion !== 1 || !requestId(value.id)
-    || !['describe', 'state', 'execute'].includes(value.type)
+    || !['describe', 'state', 'execute', 'configure'].includes(value.type)
     || !exact(value, value.type === 'execute'
-      ? ['protocolVersion', 'id', 'type', 'action', 'args'] : ['protocolVersion', 'id', 'type'])
-    || (value.type === 'execute' && (!identifier(value.action) || !record(value.args)))) {
+      ? ['protocolVersion', 'id', 'type', 'action', 'args']
+      : value.type === 'configure' ? ['protocolVersion', 'id', 'type', 'settings']
+        : ['protocolVersion', 'id', 'type'])
+    || (value.type === 'execute' && (!identifier(value.action) || !record(value.args)))
+    || (value.type === 'configure' && !record(value.settings))) {
     throw new PluginError('invalid_request');
   }
   return value;
@@ -121,6 +144,7 @@ async function* frames(input) {
 export async function serve(plugin, { input = process.stdin, output = process.stdout } = {}) {
   // Snapshot metadata so a handler cannot silently change the advertised contract.
   const manifest = JSON.parse(JSON.stringify(validateManifest(plugin.manifest)));
+  let configured = false;
   for await (const frame of frames(input)) {
     let id = null, invoked = false, timedOut = false, response;
     try {
@@ -134,6 +158,14 @@ export async function serve(plugin, { input = process.stdin, output = process.st
       let result;
       if (request.type === 'describe') result = { manifest };
       else {
+        if (request.type === 'configure') {
+          configured = false;
+          if (!Object.hasOwn(manifest, 'settings')) throw new PluginError('invalid_request');
+          validateSettings(manifest.settings, request.settings);
+          if (typeof plugin.configure !== 'function') throw new PluginError('internal_error');
+        } else if (Object.hasOwn(manifest, 'settings') && !configured) {
+          throw new PluginError('invalid_request');
+        }
         if (request.type === 'execute') {
           const action = manifest.actions.find((item) => item.id === request.action);
           if (!action) throw new PluginError('unknown_action');
@@ -143,13 +175,18 @@ export async function serve(plugin, { input = process.stdin, output = process.st
         let timer;
         try {
           invoked = request.type === 'execute';
-          result = { state: await Promise.race([
-            Promise.resolve().then(() => request.type === 'state'
-              ? plugin.state(controller.signal) : plugin.execute(request.action, request.args, controller.signal)),
+          const handler = request.type === 'configure' ? () => plugin.configure(request.settings, controller.signal)
+            : request.type === 'state' ? () => plugin.state(controller.signal)
+              : () => plugin.execute(request.action, request.args, controller.signal);
+          const value = await Promise.race([
+            Promise.resolve().then(handler),
             new Promise((_, reject) => { timer = setTimeout(() => {
               timedOut = true; reject(new PluginError('timeout')); controller.abort();
             }, LIMITS.requestTimeoutMs); }),
-          ]) };
+          ]);
+          // Configure returns no state; the protocol always answers with exactly {}.
+          if (request.type === 'configure') { configured = true; result = { state: {} }; }
+          else result = { state: value };
           // State is a JSON object, never undefined, class instances or executable data.
           if (!record(result.state)) throw new PluginError('invalid_state');
           const json = JSON.stringify(result.state);
@@ -160,6 +197,7 @@ export async function serve(plugin, { input = process.stdin, output = process.st
       if (Buffer.byteLength(response) > LIMITS.responseBytes) throw new PluginError('response_too_large');
     } catch (error) {
       const code = error instanceof PluginError && Object.hasOwn(errors, error.code) ? error.code : 'internal_error';
+      if (code === 'timeout') timedOut = true;
       const [message, hint] = errors[code];
       response = JSON.stringify({ protocolVersion: 1, id, type: 'error', error: {
         code, message, hint, outcome: invoked ? 'unknown' : 'not_started',

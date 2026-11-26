@@ -4,6 +4,7 @@ from typing import Literal, TypedDict, Union
 Json = Union[None, bool, int, float, str, list["Json"], dict[str, "Json"]]
 Args = dict[str, Union[int, bool]]
 State = dict[str, Json]
+SettingsValues = dict[str, str]
 
 
 class IntegerControl(TypedDict):
@@ -22,6 +23,7 @@ class _IntegerConfig(TypedDict):
 
 class IntegerConfig(_IntegerConfig, total=False):
     control: IntegerControl
+    choicesKey: str
 
 
 class _BooleanConfig(TypedDict):
@@ -32,10 +34,25 @@ class BooleanConfig(_BooleanConfig, total=False):
     control: BooleanControl
 
 
+class Choice(TypedDict):
+    """Display-only choicesKey array entry; app validates bounds, plugin validates binding."""
+    value: int
+    label: str
+    available: bool
+
+
 class Action(TypedDict):
     id: str
     title: str
     config: dict[str, Union[IntegerConfig, BooleanConfig]]
+
+
+class SettingsField(TypedDict):
+    type: Literal["text", "secret"]
+    label: str
+
+
+Settings = dict[str, SettingsField]
 
 
 class Icon(TypedDict):
@@ -55,3 +72,4 @@ class _Manifest(TypedDict):
 class Manifest(_Manifest, total=False):
     icons: list[Icon]
     icon: str
+    settings: Settings

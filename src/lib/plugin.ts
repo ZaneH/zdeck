@@ -3,10 +3,12 @@ import type { PluginIcon } from "./icons";
 import type { PluginArgs, PluginControl } from "./types";
 
 export type PluginField =
-  | { type: "integer"; minimum: number; maximum: number; control?: { step: number } }
+  | { type: "integer"; minimum: number; maximum: number; control?: { step: number }; choicesKey?: string }
   | { type: "boolean"; control?: { stateKey: string } };
 export interface PluginAction { id: string; title: string; config: Record<string, PluginField> }
-export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[]; icon?: string }
+export type PluginSettingsSchema = Record<string, { type: "text" | "secret"; label: string }>;
+export interface PluginSettingsView { values: Record<string, string>; secretConfigured: Record<string, boolean> }
+export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[]; icon?: string; settings?: PluginSettingsSchema }
 export interface PluginError {
   kind: string;
   code: string | null;
@@ -33,6 +35,7 @@ export interface PluginCatalogEntry {
   trusted: boolean;
   /** Opaque validated package identity for a ready plugin; null otherwise. */
   identity: string | null;
+  settings?: PluginSettingsSchema;
 }
 export interface PluginRuntime { status: "detected" | "not_found" | "unsupported"; version: string | null; path: string | null }
 export interface PluginCatalog {
@@ -111,6 +114,18 @@ const boundedText = (x: unknown, max: number): x is string => typeof x === "stri
 const packageIdentity = (x: unknown): x is string => typeof x === "string" && /^[a-f0-9]{64}$/.test(x);
 const absolutePath = (x: unknown): x is string => boundedText(x, 4096) && new TextEncoder().encode(x).length <= 4096 && /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(x);
 
+export function validPluginSettingsSchema(value: unknown): value is PluginSettingsSchema {
+  return record(value) && Object.keys(value).length <= 4
+    && Object.entries(value).every(([key, field]) => pluginIdentifier(key) && record(field)
+      && exact(field, ["type", "label"]) && ["text", "secret"].includes(field.type as string) && typeof field.label === "string" && field.label.length > 0 && field.label.length <= 80 && !/[\x00-\x1f\x7f]/.test(field.label));
+}
+export function parsePluginSettingsView(value: unknown): PluginSettingsView | null {
+  if (!record(value) || !exact(value, ["values", "secretConfigured"]) || !record(value.values) || !record(value.secretConfigured)) return null;
+  if (Object.keys(value.values).length + Object.keys(value.secretConfigured).length > 4
+    || !Object.entries(value.values).every(([key, text]) => pluginIdentifier(key) && typeof text === "string" && new TextEncoder().encode(text).length <= 2048)
+    || !Object.entries(value.secretConfigured).every(([key, set]) => pluginIdentifier(key) && typeof set === "boolean" && !Object.hasOwn(value.values as object, key))) return null;
+  return value as unknown as PluginSettingsView;
+}
 export function parsePluginCatalog(value: unknown): PluginCatalog | null {
   if (!record(value) || !exact(value, ["directory", "node", "plugins", ...(Object.hasOwn(value, "python") ? ["python"] : [])]) || !absolutePath(value.directory)
     || !record(value.node) || !exact(value.node, ["status", "version", "path"])
@@ -136,7 +151,8 @@ export function parsePluginCatalog(value: unknown): PluginCatalog | null {
   }
   const seen = new Set<string>();
   for (const plugin of value.plugins) {
-    if (!record(plugin) || !exact(plugin, ["id", "name", "version", "protocolVersion", "status", "message", "icon", "trusted", "identity", ...(Object.hasOwn(plugin, "runtime") ? ["runtime"] : [])])
+    if (!record(plugin) || !exact(plugin, ["id", "name", "version", "protocolVersion", "status", "message", "icon", "trusted", "identity", ...(Object.hasOwn(plugin, "runtime") ? ["runtime"] : []), ...(Object.hasOwn(plugin, "settings") ? ["settings"] : [])])
+      || (Object.hasOwn(plugin, "settings") && !validPluginSettingsSchema(plugin.settings))
       || (Object.hasOwn(plugin, "runtime") && plugin.runtime !== "node" && plugin.runtime !== "python")
       || !(plugin.id === "" || pluginIdentifier(plugin.id)) || !boundedText(plugin.name, 80)
       || !(plugin.version === "" || versionString(plugin.version))
@@ -171,7 +187,8 @@ export function validPluginField(field: unknown): field is PluginField {
   const controlled = Object.hasOwn(field, "control");
   if (field.type === "boolean") return exact(field, ["type", ...(controlled ? ["control"] : [])])
     && (!controlled || record(field.control) && exact(field.control, ["stateKey"]) && pluginIdentifier(field.control.stateKey));
-  return field.type === "integer" && exact(field, ["type", "minimum", "maximum", ...(controlled ? ["control"] : [])])
+  return field.type === "integer" && exact(field, ["type", "minimum", "maximum", ...(controlled ? ["control"] : []), ...(Object.hasOwn(field, "choicesKey") ? ["choicesKey"] : [])])
+    && (!Object.hasOwn(field, "choicesKey") || !controlled && pluginIdentifier(field.choicesKey))
     && safeInteger(field.minimum) && safeInteger(field.maximum) && field.minimum <= field.maximum
     && (!controlled || record(field.control) && exact(field.control, ["step"]) && safeInteger(field.control.step)
       && field.control.step > 0 && Number.isSafeInteger(field.maximum - field.minimum) && field.control.step <= field.maximum - field.minimum
@@ -181,7 +198,8 @@ export function pluginControlField(action: PluginAction): [string, PluginField] 
   return Object.entries(action.config).find(([, field]) => field.control) ?? null;
 }
 export function parsePluginManifest(value: unknown): PluginManifest | null {
-  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : []), ...(Object.hasOwn(value, "icon") ? ["icon"] : [])])
+  if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : []), ...(Object.hasOwn(value, "icon") ? ["icon"] : []), ...(Object.hasOwn(value, "settings") ? ["settings"] : [])])
+    || (Object.hasOwn(value, "settings") && !validPluginSettingsSchema(value.settings))
     || (Object.hasOwn(value, "icons") && !isPluginIcons(value.icons))
     || (Object.hasOwn(value, "icon") && !isIconSource(value.icon))
     || !pluginIdentifier(value.id) || typeof value.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
@@ -216,8 +234,17 @@ const CODE_HINTS: Record<string, string> = {
   startup_exit: "The plugin exited before describing its actions. Check its complete packaged folder and required runtime (Node.js 22.18.0+ or Python 3.10+). No action was sent.",
   unsupported_platform: "Spotify control requires macOS.", app_missing: "Install Spotify desktop in /Applications.",
   app_not_running: "Open Spotify manually.", automation_denied: "Allow the launching application to control Spotify in macOS Privacy & Security → Automation.",
-  invalid_state: "Spotify returned unreadable state. Check application compatibility.",
-  command_failed: "Check Spotify is responsive and inspect state before manually retrying.",
+  invalid_state: "Read state and check integration compatibility and the selected entity's capabilities.",
+  invalid_arguments: "Check connection settings and declared arguments, then read state and select an available binding before manually retrying.",
+  command_failed: "Check the integration connection and permissions; inspect state before manually retrying.",
+  authentication_failed: "Authentication failed. Disable the plugin, replace its saved token in connection settings, apply and enable again.",
+  connection_failed: "Check the configured URL, network and trusted TLS certificate. No automatic retry was made.",
+  state_required: "After enabling or reconnecting, explicitly read state before deciding whether to send an action.",
+  entity_unavailable: "The selected entity is unavailable. Read state and check the device before deciding whether to run it.",
+  settings_required: "Trust the package, open Connection settings, load and apply the required values, then enable it.",
+  settings_unavailable: "OS credential storage is unavailable or locked. Check secure storage access, then try again. No plaintext fallback is used.",
+  settings_invalid: "Use only declared settings. Each value is limited to 2048 UTF-8 bytes; the stored settings envelope must fit 2400 UTF-16 bytes.",
+  plugin_connected: "Disable this plugin before changing or forgetting settings. Apply never enables or runs it.",
   outcome_unknown: "The command may have applied but its state could not be read.",
   not_trusted: "Confirm trust for this exact installed package, then enable it. If its files changed, review them again before enabling.",
   stale_identity: "This plugin changed on disk after the confirmation was opened. Refresh the catalog, review the current files, and confirm trust again.",
@@ -233,7 +260,9 @@ export function toPluginError(value: unknown): PluginError {
   const code = known && typeof value.code === "string" && ERROR_CODES.has(value.code) ? value.code : null;
   const outcome = known && value.outcome === "not_started" ? "not_started" : "unknown";
   return { kind, code, outcome, message: ERROR_MESSAGES[kind], hint:
-    `${code && CODE_HINTS[code] ? CODE_HINTS[code] + " " : ""}Refresh the catalog and explicitly enable the trusted plugin after checking its local configuration. Never automatically retry actions.` };
+    code && ["settings_required", "settings_unavailable", "settings_invalid", "plugin_connected", "authentication_failed", "connection_failed", "state_required", "entity_unavailable"].includes(code)
+      ? CODE_HINTS[code]
+      : `${code && CODE_HINTS[code] ? CODE_HINTS[code] + " " : ""}Refresh the catalog and explicitly enable the trusted plugin after checking its local configuration. Never automatically retry actions.` };
 }
 export function parsePluginSnapshot(value: unknown): PluginSnapshot | null {
   if (!record(value) || !exact(value, ["status", "manifest", "state", "lastError"])
@@ -273,9 +302,26 @@ export function pluginArgumentsValid(action: PluginAction, args: PluginArgs): bo
           && (!field.control || (value - field.minimum) % field.control.step === 0));
     });
 }
+export interface PluginChoice { value: number; label: string; available: boolean }
+/** State is untrusted display data, not executable metadata or an action target. */
+export function pluginChoices(snapshot: PluginSnapshot, field: PluginField): PluginChoice[] | null {
+  if (field.type !== "integer" || !field.choicesKey || !snapshot.state) return null;
+  const choices = snapshot.state[field.choicesKey];
+  if (!Array.isArray(choices) || choices.length > 256) return null;
+  const seen = new Set<number>();
+  for (const choice of choices) {
+    if (!record(choice) || !exact(choice, ["value", "label", "available"]) || !safeInteger(choice.value)
+      || choice.value < field.minimum || choice.value > field.maximum || seen.has(choice.value)
+      || !boundedText(choice.label, 160) || typeof choice.available !== "boolean") return null;
+    seen.add(choice.value);
+  }
+  return choices as PluginChoice[];
+}
 export function canRunPlugin(snapshot: PluginSnapshot, control: PluginControl): boolean {
   const action = pluginControlAction(snapshot, control);
-  return snapshot.status === "connected" && !snapshot.lastError && action !== null && pluginArgumentsValid(action, control.pluginArgs);
+  return snapshot.status === "connected" && !snapshot.lastError && action !== null && pluginArgumentsValid(action, control.pluginArgs)
+    && Object.entries(action.config).every(([key, field]) => field.type !== "integer" || !field.choicesKey
+      || pluginChoices(snapshot, field)?.some((choice) => choice.value === control.pluginArgs[key] && choice.available) === true);
 }
 export function pluginLaunchAllowed(program: string, entrypoint: string, trusted: boolean): boolean {
   return trusted && absolutePath(program) && absolutePath(entrypoint);

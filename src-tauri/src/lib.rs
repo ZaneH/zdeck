@@ -8,6 +8,7 @@ mod native_smoke;
 pub use zdeck_obs as obs;
 mod obs_preferences;
 pub use zdeck_plugin_host::{plugin, plugin_install};
+mod plugin_preferences;
 pub mod remote;
 pub use zdeck_system as system;
 mod tray;
@@ -306,7 +307,8 @@ fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::Plugin
         message: "Plugin process unavailable.",
         hint: "Check trusted local configuration and the plugin contract before trying again.",
     })?;
-    plugin_install::PluginInstall::for_home(home)
+    Ok(plugin_install::PluginInstall::for_home(home)?
+        .with_settings_loader(Arc::new(plugin_preferences::load_settings)))
 }
 
 /// Discovery never runs plugin code; runtime detection executes only bounded --version probes.
@@ -544,6 +546,9 @@ pub fn run() {
             plugin_uninstall,
             plugin_state,
             plugin_execute,
+            plugin_preferences::plugin_settings_load,
+            plugin_preferences::plugin_settings_save,
+            plugin_preferences::plugin_settings_forget,
             remote_start,
             remote_stop,
             remote_status,

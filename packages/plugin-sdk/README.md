@@ -66,6 +66,51 @@ Boolean fields accept only JSON booleans. `true` explicitly means **On**, `false
 
 Desktop and phone adjustment commands carry a scalar only (boolean targets use 0/1 on this transport). The server maps it into the sole declared field, converts boolean targets to JSON booleans, and validates presentation compatibility, bounds/step and the complete argument object before execution. Phone snapshots contain manifests and declared observed booleans only, not arbitrary plugin state. No new executable paths, arbitrary phone argument maps or automatic retries are introduced. Keep on-disk and describe manifests identical when packaging.
 
+## Declared connection settings and selections (unreleased)
+
+These optional protocol-v1 extensions require the updated app and SDK source
+bundled together. They are **not in the published npm 0.1.0 artifact**. Older
+apps/SDKs reject them; old manifests without the fields continue to work.
+
+A manifest can declare at most four settings, for example
+`settings: { url: {type: 'text', label: 'Server URL'}, token: {type: 'secret', label: 'Token'} }`.
+Each key is a plugin identifier; labels are 1–80 UTF-16 units without ASCII control
+characters. Implement `configure(settings, signal)` when declaring settings.
+The host verifies the installed/runtime manifest and exact package trust first,
+then sends `{protocolVersion:1,id,type:'configure',settings:{...}}` over stdin.
+Only the declared keys are accepted, each with a string of at most 2048 UTF-8
+bytes. The SDK ignores the handler's return value and returns exactly `state:{}`.
+State/execute are refused before configuration. Configure should validate/setup
+only, never issue device actions; do not return or log credentials.
+
+The desktop supplies a generic opt-in settings form backed by native OS
+credential storage. Stored secret values never return to the form. Apply persists
+immediately; it does not enable, run or test the plugin. Disable before applying
+or forgetting a secret. The complete native credential envelope is capped at
+2400 UTF-16 bytes (Windows credential-store budget), so four individually valid
+values may still exceed the combined limit. Storage failures are visible; there
+is no plaintext fallback. Saved credentials belong to the plugin ID and remain
+available to an explicitly re-trusted update, but never become action arguments,
+manifest data, deck exports or browser storage. This is not permission enforcement
+or a sandbox against trusted plugin code.
+
+An integer action field can declare `choicesKey: 'entities'` instead of `control`.
+Its state array uses `Choice`: `{value: number, label: string, available: boolean}`.
+The **app** validates at most 256 unique safe integer values inside field bounds,
+nonempty labels up to 160 characters without control characters, and availability;
+it renders a shared dropdown and disables unavailable/missing bindings. Multiple
+actions may refer to the same array. The SDK/host validate the key name and normal
+integer arguments, not the arbitrary state object. The plugin must independently
+resolve and validate the binding before any side effect. Never use discovery
+order as identity or execute actions/commands from selection metadata.
+
+The Home Assistant reference uses fixed services and stable origin/entity-ID
+bindings. It requires an explicit successful state read after every enable and
+confirms post-action observation without replaying commands. Generic SDK errors
+remain conservative: once an execute handler is entered, an error reports outcome
+unknown even if the handler failed preflight. A handler-raised `timeout`, like an
+SDK deadline, stops serving further requests in both JS and Python.
+
 ## Maintainer releases
 
 Releases use the public `@zdeck` scope. Authenticate externally and verify permission before publishing. Do not paste credentials into source, chats or logs.

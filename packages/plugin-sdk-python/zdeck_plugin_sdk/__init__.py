@@ -13,10 +13,11 @@ import threading
 from types import MappingProxyType
 from typing import Any, Awaitable, BinaryIO, Protocol
 
-from .types import Action, Args, BooleanConfig, Icon, IntegerConfig, Json, Manifest, State
+from .types import Action, Args, BooleanConfig, Choice, Icon, IntegerConfig, Json, Manifest, Settings, SettingsField, SettingsValues, State
 
 __all__ = ["PROTOCOL_VERSION", "LIMITS", "Action", "Args", "BooleanConfig", "Icon", "IntegerConfig",
-           "Json", "Manifest", "State", "Plugin", "PluginError", "validate_manifest", "validate_arguments", "serve"]
+           "Json", "Manifest", "Choice", "Settings", "SettingsField", "SettingsValues", "State", "Plugin", "PluginError",
+           "validate_manifest", "validate_arguments", "serve"]
 
 PROTOCOL_VERSION = 1
 LIMITS = MappingProxyType({"request_bytes": 16384, "response_bytes": 65536,
@@ -44,7 +45,11 @@ _ERRORS = {
     "app_missing": ("Required application was not found.", "Install the application required by this plugin."),
     "app_not_running": ("Required application is not running.", "Open the application manually, then try again."),
     "automation_denied": ("OS permission was denied.", "Review the application's OS permissions before retrying."),
-    "command_failed": ("Application control failed.", "Check the application is responsive; inspect state before manually retrying an action."),
+    "command_failed": ("Plugin command failed.", "Check the integration connection and permissions; inspect state before manually retrying an action."),
+    "authentication_failed": ("Integration authentication failed.", "Disable the plugin, replace its saved token in connection settings, apply and enable again."),
+    "connection_failed": ("Integration connection failed.", "Check the configured URL, network and trusted TLS certificate. No automatic retry was made."),
+    "state_required": ("Read state before running this action.", "After enabling or reconnecting, explicitly read state to inspect devices before deciding whether to send an action."),
+    "entity_unavailable": ("Selected entity is unavailable.", "Read state and check the device in Home Assistant before deciding whether to run it."),
     "invalid_state": ("Plugin returned unreadable state.", "Check plugin compatibility and restart the plugin."),
     "outcome_unknown": ("Action may have applied, but state could not be read.", "Read state before deciding whether to retry; never automatically retry."),
 }
@@ -86,17 +91,30 @@ def _field(field):
     if type(field) is not dict:
         return False
     controlled = "control" in field
+    choices = "choicesKey" in field
     control = field.get("control")
     if field.get("type") == "boolean":
         return _exact(field, ["type"] + (["control"] if controlled else [])) and (
             not controlled or _exact(control, ["stateKey"]) and _identifier(control["stateKey"]))
-    if not (_exact(field, ["type", "minimum", "maximum"] + (["control"] if controlled else []))
+    if not (_exact(field, ["type", "minimum", "maximum"]
+                   + (["control"] if controlled else []) + (["choicesKey"] if choices else []))
             and field["type"] == "integer" and _integer(field["minimum"])
-            and _integer(field["maximum"]) and field["minimum"] <= field["maximum"]):
+            and _integer(field["maximum"]) and field["minimum"] <= field["maximum"]
+            and not (controlled and choices)
+            and (not choices or _identifier(field["choicesKey"]))):
         return False
     span = field["maximum"] - field["minimum"]
     return not controlled or (_exact(control, ["step"]) and _integer(control["step"])
                               and 0 < control["step"] <= span and _integer(span) and span % control["step"] == 0)
+
+
+def _settings_field(field):
+    return _exact(field, ["type", "label"]) and field["type"] in ("text", "secret") and _text(field["label"])
+
+
+def _settings(value):
+    return type(value) is dict and len(value) <= 4 and all(
+        _identifier(key) and _settings_field(field) for key, field in value.items())
 
 
 def _encode(value):
@@ -117,13 +135,15 @@ def validate_manifest(value: Any) -> Manifest:
         keys = ["id", "version", "protocolVersion", "actions"]
         if type(value) is not dict:
             raise ValueError
-        keys += [key for key in ("icon", "icons") if key in value]
+        keys += [key for key in ("icon", "icons", "settings") if key in value]
         if not (_exact(value, keys) and _identifier(value["id"])
                 and isinstance(value["version"], str) and re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", value["version"])
                 and _integer(value["protocolVersion"]) and value["protocolVersion"] == 1
                 and type(value["actions"]) is list and 1 <= len(value["actions"]) <= 32):
             raise ValueError
         if "icon" in value and not _icon(value["icon"]):
+            raise ValueError
+        if "settings" in value and not _settings(value["settings"]):
             raise ValueError
         if "icons" in value:
             icons = value["icons"]
@@ -171,12 +191,22 @@ def validate_arguments(action: dict, args: Any) -> Args:
 
 
 def _validate_request(value):
+    kind = value.get("type") if type(value) is dict else None
     if not (type(value) is dict and _integer(value.get("protocolVersion")) and value["protocolVersion"] == 1
-            and _request_id(value.get("id")) and value.get("type") in ("describe", "state", "execute")
-            and _exact(value, ["protocolVersion", "id", "type"] + (["action", "args"] if value["type"] == "execute" else []))):
+            and _request_id(value.get("id")) and kind in ("describe", "state", "execute", "configure")
+            and _exact(value, ["protocolVersion", "id", "type"]
+                       + (["action", "args"] if kind == "execute" else ["settings"] if kind == "configure" else []))):
         raise PluginError("invalid_request")
     if value["type"] == "execute" and not (_identifier(value["action"]) and type(value["args"]) is dict):
         raise PluginError("invalid_request")
+    if value["type"] == "configure" and type(value["settings"]) is not dict:
+        raise PluginError("invalid_request")
+
+
+def _validate_settings(declared, settings):
+    if not _exact(settings, declared) or not all(
+            isinstance(value, str) and len(value.encode("utf-8")) <= 2048 for value in settings.values()):
+        raise PluginError("invalid_arguments")
 
 
 def _frames(stream):
@@ -237,6 +267,7 @@ def serve(plugin: Plugin, *, input: BinaryIO | None = None, output: BinaryIO | N
     source = sys.stdin.buffer if input is None else input
     target = sys.stdout.buffer if output is None else output
     manifest = copy.deepcopy(validate_manifest(plugin.manifest))
+    configured = False
     for frame in _frames(source):
         request_id = None
         invoked = timed_out = False
@@ -255,6 +286,15 @@ def serve(plugin: Plugin, *, input: BinaryIO | None = None, output: BinaryIO | N
             if request["type"] == "describe":
                 result = {"manifest": manifest}
             else:
+                if request["type"] == "configure":
+                    configured = False
+                    if "settings" not in manifest:
+                        raise PluginError("invalid_request")
+                    _validate_settings(manifest["settings"], request["settings"])
+                    if not callable(getattr(plugin, "configure", None)):
+                        raise PluginError("internal_error")
+                elif "settings" in manifest and not configured:
+                    raise PluginError("invalid_request")
                 if request["type"] == "execute":
                     action = next((item for item in manifest["actions"] if item["id"] == request["action"]), None)
                     if action is None:
@@ -262,11 +302,16 @@ def serve(plugin: Plugin, *, input: BinaryIO | None = None, output: BinaryIO | N
                     validate_arguments(action, request["args"])
                 invoked = request["type"] == "execute"
                 signal = threading.Event()
-                state = _invoke(plugin.execute if invoked else plugin.state,
-                                (request["action"], request["args"]) if invoked else (), signal)
-                if type(state) is not dict or not _json_value(state):
-                    raise PluginError("invalid_state")
-                result = {"state": state}
+                if request["type"] == "configure":
+                    _invoke(plugin.configure, (request["settings"],), signal)
+                    configured = True
+                    result = {"state": {}}
+                else:
+                    state = _invoke(plugin.execute if invoked else plugin.state,
+                                    (request["action"], request["args"]) if invoked else (), signal)
+                    if type(state) is not dict or not _json_value(state):
+                        raise PluginError("invalid_state")
+                    result = {"state": state}
             response = _encode({"protocolVersion": 1, "id": request_id, "type": "result", **result})
             if len(response) > LIMITS["response_bytes"]:
                 raise PluginError("response_too_large")

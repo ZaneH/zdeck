@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { EMPTY_PLUGIN, pluginEntry, pluginIdentifier, runtimeForPlugin, spotifyState, trustAndEnablePlugin } from "../lib/plugin";
+import { EMPTY_PLUGIN, pluginEntry, pluginIdentifier, runtimeForPlugin, spotifyState, pluginChoices, trustAndEnablePlugin } from "../lib/plugin";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import type { PluginCatalogEntry, PluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { ActionIcon } from "./ActionIcon";
+import { PluginConnectionSettings } from "./PluginConnectionSettings";
 
 export function PluginErrorNotice({ error }: { error: PluginError | null }) {
   if (!error) return null;
@@ -75,6 +76,7 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
         </details>
       </div>
     </div>
+    {entry.settings ? <PluginConnectionSettings key={`${id}:${entry.identity}:${entry.trusted}:${connected}`} id={id} schema={entry.settings} trusted={entry.trusted} connected={connected} /> : null}
     <dialog ref={dialogRef} className="dialog plugin-dialog" aria-labelledby={`plugin-trust-${id || "invalid"}`} onClose={() => setConfirmation(null)}>
       <div className="dialog-heading">
         <h2 id={`plugin-trust-${id || "invalid"}`}>Enable {entry.name}?</h2>
@@ -84,12 +86,13 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
       <p className="field-note">Trust is remembered for this exact installed package. Changing its files revokes trust and asks again.</p>
       <div className="settings-actions">
         <button type="button" className="button primary" disabled={busy || plugin.catalogBusy || !!reason || !trustIdentity}
-          onClick={() => { dialogRef.current?.close(); if (trustIdentity) void trustAndEnablePlugin(plugin, id, trustIdentity); }}>Trust and enable</button>
+          onClick={() => { dialogRef.current?.close(); if (trustIdentity) void (entry.settings ? plugin.trust(id, trustIdentity) : trustAndEnablePlugin(plugin, id, trustIdentity)); }}>{entry.settings ? "Trust package" : "Trust and enable"}</button>
         <button type="button" className="button secondary" onClick={() => dialogRef.current?.close()}>Cancel</button>
       </div>
     </dialog>
     {confirmation === "uninstall" ? <div className="plugin-confirm" role="group" aria-label={`Uninstall ${entry.name}`}>
       <p>Uninstall {entry.name}? This stops only this plugin and removes its folder from the catalog. The folder is moved to <code>~/.config/zdeck/plugin-backups</code> for recovery, not permanently deleted. Saved buttons remain but cannot run until the plugin is restored and explicitly enabled.</p>
+      {entry.settings && Object.values(entry.settings).some((field) => field.type === "secret") ? <p>Saved credentials are not removed by uninstall. Cancel and use Forget in Connection settings first if you want to remove them. Revoke the token at its provider separately.</p> : null}
       <div className="settings-actions"><button type="button" className="button danger" disabled={busy} onClick={() => { setConfirmation(null); void plugin.uninstall(id); }}>Confirm uninstall</button>
         <button type="button" className="button secondary" onClick={() => setConfirmation(null)}>Cancel</button></div>
     </div> : null}
@@ -109,13 +112,18 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
           <h4>Last read state</h4>
           <p className="field-note">Last successful read, not live. No background polling.</p>
           {state ? <dl className="plugin-state-values"><dt>Title</dt><dd>{state.title ?? "No track"}</dd><dt>Artist</dt><dd>{state.artist ?? "No artist"}</dd><dt>Playback</dt><dd>{state.playback}</dd><dt>Spotify volume</dt><dd>{state.volume}%</dd></dl>
-            : <p className="field-note">No supported Spotify state has been read.</p>}
+            : <p className="field-note">{snapshot.state ? "State read. Selections below show the last observed values, not live device state." : "No state has been read. Read state to discover available selections."}</p>}
+          {snapshot.manifest.actions.flatMap((action) => Object.values(action.config)).filter((field, index, fields) => field.type === "integer" && field.choicesKey
+            && fields.findIndex((other) => other.type === "integer" && other.choicesKey === field.choicesKey) === index).map((field, index) => {
+            const choices = pluginChoices(snapshot, field);
+            return choices ? <ul key={index} className="plugin-action-list">{choices.map((choice) => <li key={choice.value}>{choice.label}{!choice.available ? " — unavailable" : ""}</li>)}</ul> : null;
+          })}
           <div className="plugin-read-control">
             <button type="button" className="button secondary" disabled={busy || !connected || !!snapshot.lastError} onClick={() => void plugin.readState(id)}>Read state</button>
-            <p className="field-note">May prompt for macOS Automation permission.</p>
+            <p className="field-note">{id === "spotify" ? "May prompt for macOS Automation permission." : "Reads the configured integration. No actions are sent and nothing is retried."}</p>
           </div>
           <details className="settings-help"><summary className="disclosure">About state reads</summary>
-            <p>Only supported Spotify state is displayed. Arbitrary plugin state is not displayed. Read state explicitly to update the values above.</p>
+            <p>Only supported state and declared selection lists are displayed. Arbitrary plugin state is not dumped. Read state explicitly to update the values above.</p>
           </details>
         </section>
       </div>

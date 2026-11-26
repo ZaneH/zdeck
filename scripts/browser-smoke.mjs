@@ -1415,7 +1415,7 @@ try {
   check('Editor dial surface drags the tile without changing its target or executing', await admin.eval("Number(document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow')) === 200 && window.__desktopCalls.length === 6 && !document.querySelector('.is-dragging')"));
   await admin.eval(click('.add-control')); await admin.waitFor("!!document.querySelector('.action-row')");
   await admin.eval(clickText('.action-row', 'Generic power'));
-  await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
+  await admin.waitFor("!!document.querySelector('.inspector-form .native-control .dropdown-trigger[aria-label=\"enabled: Off\"]')");
   await admin.eval(click('.presentation-picker summary'));
   await admin.eval(clickText('.presentation-picker button', 'Toggle switch'));
   await admin.waitFor("document.querySelector('.status-footer')?.dataset.ready === 'true'");

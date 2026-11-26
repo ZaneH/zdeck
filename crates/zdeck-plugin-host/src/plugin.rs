@@ -90,6 +90,18 @@ pub struct Manifest {
     /// Optional plugin-identity thumbnail (bounded local image data URL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Optional settings the plugin needs before state or execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<BTreeMap<String, SettingsField>>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
+pub enum SettingsField { Text { label: String }, Secret { label: String } }
+impl SettingsField {
+    fn valid(&self) -> bool {
+        let (Self::Text { label } | Self::Secret { label }) = self;
+        text(label)
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,7 +109,11 @@ pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<Stri
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum ConfigField {
-    Integer { minimum: Value, maximum: Value, #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<NumericControl> },
+    Integer {
+        minimum: Value, maximum: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<NumericControl>,
+        #[serde(default, skip_serializing_if = "Option::is_none", rename = "choicesKey")] choices_key: Option<String>,
+    },
     Boolean { #[serde(default, skip_serializing_if = "Option::is_none")] control: Option<BooleanControl> },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -111,8 +127,10 @@ impl ConfigField {
     fn valid(&self) -> bool {
         match self {
             Self::Boolean { control } => control.as_ref().is_none_or(|c| identifier(&c.state_key)),
-            Self::Integer { minimum, maximum, control } => match (integer(minimum), integer(maximum)) {
-                (Some(min), Some(max)) if min <= max => control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|step| step > 0.0 && max - min <= 9_007_199_254_740_991.0 && step <= max - min && (max - min) % step == 0.0)),
+            Self::Integer { minimum, maximum, control, choices_key } => match (integer(minimum), integer(maximum)) {
+                (Some(min), Some(max)) if min <= max => choices_key.as_ref().is_none_or(|key| identifier(key))
+                    && !(control.is_some() && choices_key.is_some())
+                    && control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|step| step > 0.0 && max - min <= 9_007_199_254_740_991.0 && step <= max - min && (max - min) % step == 0.0)),
                 _ => false,
             }
         }
@@ -120,7 +138,7 @@ impl ConfigField {
     fn accepts(&self, value: &Value) -> bool {
         match self {
             Self::Boolean { .. } => value.is_boolean(),
-            Self::Integer { minimum, maximum, control } => matches!((integer(value), integer(minimum), integer(maximum)),
+            Self::Integer { minimum, maximum, control, .. } => matches!((integer(value), integer(minimum), integer(maximum)),
                 (Some(n), Some(min), Some(max)) if n >= min && n <= max && control.as_ref().is_none_or(|c| integer(&c.step).is_some_and(|s| (n-min)%s == 0.0))),
         }
     }
@@ -128,6 +146,10 @@ impl ConfigField {
 
 pub(crate) use zdeck_schema::plugin::{identifier, integer};
 
+fn text(value: &str) -> bool {
+    !value.is_empty() && value.encode_utf16().count() <= 80
+        && !value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+}
 pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
     // JSON.parse/JSON.stringify in the SDK canonicalize integer-valued numbers
     // (including 1.0 and -0) before measuring the manifest.
@@ -144,7 +166,10 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         return Err(ErrorKind::InvalidManifest);
     }
     if value.get("icons").is_some_and(|icons| !icons.is_array()) { return Err(ErrorKind::InvalidManifest); }
-    if value["actions"].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null))))) {
+    if value["actions"].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null) || f.get("choicesKey").is_some_and(Value::is_null))))) {
+        return Err(ErrorKind::InvalidManifest);
+    }
+    if value.get("settings").is_some_and(Value::is_null) {
         return Err(ErrorKind::InvalidManifest);
     }
     let m: Manifest = serde_json::from_value(value).map_err(|_| ErrorKind::InvalidManifest)?;
@@ -157,15 +182,18 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
             return Err(ErrorKind::InvalidManifest);
         }
     }
+    if m.settings.as_ref().is_some_and(|settings| settings.len() > 4 || settings.iter().any(|(key, field)| !identifier(key) || !field.valid())) {
+        return Err(ErrorKind::InvalidManifest);
+    }
     let parts: Vec<_> = m.version.split('.').collect();
     let mut seen = HashSet::new();
     if !identifier(&m.id) || m.protocol_version != 1 || parts.len() != 3
         || !parts.iter().all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|b| b.is_ascii_digit()))
         || m.actions.is_empty() || m.actions.len() > 32 { return Err(ErrorKind::InvalidManifest); }
     for a in &m.actions {
-        if !identifier(&a.id) || !seen.insert(&a.id) || a.title.is_empty()
-            || a.title.encode_utf16().count() > 80 || a.title.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-            || a.config.len() > 8 { return Err(ErrorKind::InvalidManifest); }
+        if !identifier(&a.id) || !seen.insert(&a.id) || !text(&a.title) || a.config.len() > 8 {
+            return Err(ErrorKind::InvalidManifest);
+        }
         if a.config.values().filter(|f| f.controlled()).count() > 1 { return Err(ErrorKind::InvalidManifest); }
         for (key, field) in &a.config {
             if !identifier(key) || !field.valid() { return Err(ErrorKind::InvalidManifest); }
@@ -230,6 +258,13 @@ fn response(value: Value, id: &str, describe: bool, executing: bool) -> Result<V
                 Some("app_missing") => Some(("app_missing", "Spotify was not found at /Applications/Spotify.app.", "Install Spotify desktop in /Applications.")),
                 Some("app_not_running") => Some(("app_not_running", "Spotify is not running.", "Open Spotify manually, then try again.")),
                 Some("automation_denied") => Some(("automation_denied", "macOS denied Spotify Automation access.", "Allow the launching application to control Spotify in Privacy & Security > Automation.")),
+                Some("invalid_arguments") => Some(("invalid_arguments", "Plugin arguments or connection settings are invalid.", "Check the declared connection settings, then read state and select an available binding before manually retrying.")),
+                Some("invalid_state") => Some(("invalid_state", "Plugin returned unreadable or unsupported state.", "Read state and check the integration and selected entity's capabilities.")),
+                Some("command_failed") => Some(("command_failed", "Plugin command failed.", "Check the integration connection and permissions; inspect state before manually retrying an action.")),
+                Some("authentication_failed") => Some(("authentication_failed", "Integration authentication failed.", "Disable the plugin, replace its saved token in connection settings, apply and enable again.")),
+                Some("connection_failed") => Some(("connection_failed", "Integration connection failed.", "Check the configured URL, network and trusted TLS certificate. No automatic retry was made.")),
+                Some("state_required") => Some(("state_required", "Read state before running this action.", "After enabling or reconnecting, explicitly read state to inspect devices before deciding whether to send an action.")),
+                Some("entity_unavailable") => Some(("entity_unavailable", "Selected entity is unavailable.", "Read state and check the device in Home Assistant before deciding whether to run it.")),
                 Some("outcome_unknown") => Some(("outcome_unknown", "Action may have applied, but state could not be read.", "Read state before deciding whether to retry; never automatically retry.")),
                 _ => None,
             };
@@ -277,23 +312,27 @@ async fn startup_diagnostic(mut stderr: tokio::process::ChildStderr) -> Option<L
         Some(LaunchFailure::MissingDependency)
     } else { None }
 }
-struct Inner { launch: TrustedLaunch, process: Option<Process>, manifest: Option<Manifest>, stopped: bool, next_id: u64 }
+struct Inner { launch: TrustedLaunch, process: Option<Process>, manifest: Option<Manifest>, configured: bool, stopped: bool, next_id: u64 }
 /// Cloneable shared host. All operations (including stop) are serialized. Once
 /// stopped/failed it never restarts: explicitly create another host and read
 /// state before deciding whether to manually retry an action.
 #[derive(Clone)]
 pub struct PluginHost { inner: Arc<Mutex<Inner>>, deadline: Duration }
-enum Operation { Describe, State, Execute(String, Value), Stop }
+enum Operation { Describe, Configure(BTreeMap<String, String>), State, Execute(String, Value), Stop }
 impl PluginHost {
     pub fn new(launch: TrustedLaunch) -> Self { Self::with_timeout(launch, Duration::from_secs(12)) }
     /// Short deadlines are useful for local transport tests. Production should
     /// use new() so the SDK's 10-second cooperative timeout can respond first.
     pub fn with_timeout(launch: TrustedLaunch, deadline: Duration) -> Self {
-        Self { inner: Arc::new(Mutex::new(Inner { launch, process: None, manifest: None, stopped: false, next_id: 0 })), deadline }
+        Self { inner: Arc::new(Mutex::new(Inner { launch, process: None, manifest: None, configured: false, stopped: false, next_id: 0 })), deadline }
     }
     pub async fn describe(&self) -> Result<Manifest, PluginError> {
         let v = self.run(Operation::Describe).await?;
         manifest(v).map_err(|k| PluginError::new(k, Outcome::NotStarted))
+    }
+    /// Send the declared settings once; the plugin must answer with exactly `{state:{}}`.
+    pub async fn configure(&self, settings: BTreeMap<String, String>) -> Result<(), PluginError> {
+        self.run(Operation::Configure(settings)).await.map(|_| ())
     }
     pub async fn state(&self) -> Result<Map<String, Value>, PluginError> {
         Ok(self.run(Operation::State).await?.as_object().expect("validated state").clone())
@@ -317,9 +356,10 @@ impl Inner {
         let diagnostic = if let Some(p) = self.process.as_mut() { p.kill().await } else { None };
         self.process = None;
         self.manifest = None;
+        self.configured = false;
         diagnostic
     }
-    async fn exchange(&mut self, kind: &str, action: Option<(&str, &Value)>, deadline: Duration) -> Result<Value, PluginError> {
+    async fn exchange(&mut self, kind: &str, action: Option<(&str, &Value)>, settings: Option<&Value>, deadline: Duration) -> Result<Value, PluginError> {
         let executing = kind == "execute";
         let mut outcome = Outcome::NotStarted;
         let result = timeout(deadline, async {
@@ -327,6 +367,7 @@ impl Inner {
             let id = format!("r{}", self.next_id);
             let mut request = serde_json::json!({"protocolVersion":1,"id":id,"type":kind});
             if let Some((name, args)) = action { request["action"] = name.into(); request["args"] = args.clone(); }
+            if let Some(settings) = settings { request["settings"] = settings.clone(); }
             let mut bytes = serde_json::to_vec(&request).map_err(|_| ErrorKind::Protocol)?;
             if bytes.len() > REQUEST_BYTES { return Err(ErrorKind::InvalidArguments); }
             bytes.push(b'\n');
@@ -360,6 +401,7 @@ impl Inner {
             }
             self.process = None;
             self.manifest = None;
+            self.configured = false;
             return Ok(Value::Null);
         }
         if self.stopped { return Err(PluginError::new(ErrorKind::Stopped, Outcome::NotStarted)); }
@@ -377,20 +419,45 @@ impl Inner {
             self.process = Some(Process { child, stdin: Some(stdin), stdout, stderr });
         }
         if self.manifest.is_none() {
-            let value = self.exchange("describe", None, deadline).await?;
+            let value = self.exchange("describe", None, None, deadline).await?;
             match manifest(value) {
                 Ok(m) => self.manifest = Some(m),
                 Err(k) => { self.terminate().await; return Err(PluginError::new(k, Outcome::NotStarted)); }
             }
         }
+        let settings_declared = self.manifest.as_ref().unwrap().settings.is_some();
+        if settings_declared && !self.configured && !matches!(&op, Operation::Describe | Operation::Configure(_)) {
+            return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+        }
         match op {
             Operation::Describe => Ok(serde_json::to_value(self.manifest.as_ref().unwrap()).expect("serializable manifest")),
-            Operation::State => self.exchange("state", None, deadline).await,
+            Operation::Configure(settings) => {
+                let manifest = self.manifest.as_ref().unwrap();
+                let Some(declared) = &manifest.settings else {
+                    self.terminate().await;
+                    return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+                };
+                if settings.len() != declared.len() || !settings.iter().all(|(key, value)| {
+                    declared.contains_key(key) && value.len() <= 2048
+                }) {
+                    self.terminate().await;
+                    return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+                }
+                let value = serde_json::to_value(settings).map_err(|_| PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted))?;
+                let state = self.exchange("configure", None, Some(&value), deadline).await?;
+                if !state.as_object().is_some_and(Map::is_empty) {
+                    self.terminate().await;
+                    return Err(PluginError::new(ErrorKind::Protocol, Outcome::NotStarted));
+                }
+                self.configured = true;
+                Ok(Value::Null)
+            }
+            Operation::State => self.exchange("state", None, None, deadline).await,
             Operation::Execute(name, args) => {
                 let m = self.manifest.as_ref().unwrap();
                 let a = m.actions.iter().find(|a| a.id == name).ok_or_else(|| PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))?;
                 if !arguments(a, &args) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
-                self.exchange("execute", Some((&name, &args)), deadline).await
+                self.exchange("execute", Some((&name, &args)), None, deadline).await
             }
             Operation::Stop => unreachable!(),
         }
@@ -412,6 +479,11 @@ fn capacity_error() -> PluginError {
     registry_error("capacity", "Runtime capacity is reached: too many plugins are running at once. Disable one plugin, then enable this one again.")
 }
 fn disconnected() -> PluginSnapshot { Session::default().snapshot() }
+fn connected_settings_error() -> PluginError {
+    let mut error = registry_error("plugin_connected", "Disable this plugin, save or forget its settings, then enable it again. Saving never enables or runs a plugin.");
+    error.message = "Plugin settings cannot change while the plugin is enabled.";
+    error
+}
 impl PluginRegistry {
     /// Bounded running-process capacity. Installed and stopped plugins do not count.
     pub fn with_capacity(capacity: usize) -> Self {
@@ -466,6 +538,20 @@ impl PluginRegistry {
     pub async fn disconnect(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
         let result = self.manage(id, false, true, |state| async move { Ok(state.disconnect().await) }).await;
         match result { Err(error) if error.code == Some("not_enabled") => Ok(disconnected()), other => other }
+    }
+    /// Native-only settings guard: the mutation runs under the same per-plugin gate as
+    /// enable/disable/restore, and Connected is checked inside that gate, so an in-flight
+    /// enable cannot race a settings write. Never registered as an IPC command; the
+    /// closure is Rust code, not manifest or plugin metadata.
+    pub async fn with_disabled_settings<F, Fut, T>(&self, id: &str, operation: F) -> Result<T, PluginError>
+    where F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, PluginError>> + Send,
+        T: Send + 'static,
+    {
+        self.manage(id, true, true, move |state| async move {
+            if state.snapshot().await.status == ConnectionStatus::Connected { return Err(connected_settings_error()); }
+            operation().await
+        }).await
     }
     pub async fn snapshot(&self, id: &str) -> Result<PluginSnapshot, PluginError> {
         if !identifier(id) { return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted)); }
@@ -526,7 +612,7 @@ struct Session {
     running: Option<Arc<Semaphore>>,
     permit: Option<OwnedSemaphorePermit>,
 }
-enum SessionOperation { Connect(String, String, Option<Manifest>), Disconnect, State, Execute(String, String, Value, Option<(f64, bool)>) }
+enum SessionOperation { Connect(String, String, Option<Manifest>, Option<BTreeMap<String, String>>), Disconnect, State, Execute(String, String, Value, Option<(f64, bool)>) }
 
 // The phone supplies a scalar only; the trusted manifest chooses the sole writable field.
 fn target_arguments(action: &Action, mut args: Value, value: f64, toggle: bool) -> Result<Value, PluginError> {
@@ -564,10 +650,16 @@ impl PluginState {
     /// invoking this. Program is a locally selected Node or Python runtime; no shell or
     /// caller-supplied flags, and only an absolute entrypoint is passed to it.
     pub async fn connect(&self, program: String, entrypoint: String) -> Result<PluginSnapshot, PluginError> {
-        self.run(SessionOperation::Connect(program, entrypoint, None)).await
+        self.run(SessionOperation::Connect(program, entrypoint, None, None)).await
     }
+    #[allow(dead_code)] // retained for existing callers of the non-settings contract
     pub(crate) async fn connect_manifest(&self, program: String, entrypoint: String, expected: Manifest) -> Result<PluginSnapshot, PluginError> {
-        self.run(SessionOperation::Connect(program, entrypoint, Some(expected))).await
+        self.run(SessionOperation::Connect(program, entrypoint, Some(expected), None)).await
+    }
+    /// Trusted Rust-only helper. The expected manifest is checked before configure;
+    /// settings are sent once and never retained in the session snapshot.
+    pub async fn connect_manifest_settings(&self, program: String, entrypoint: String, expected: Manifest, settings: Option<BTreeMap<String, String>>) -> Result<PluginSnapshot, PluginError> {
+        self.run(SessionOperation::Connect(program, entrypoint, Some(expected), settings)).await
     }
     pub async fn disconnect(&self) -> PluginSnapshot {
         // Only a worker panic can fail disconnect; snapshot still contains no paths.
@@ -605,7 +697,7 @@ impl Session {
                 self.status = ConnectionStatus::Disconnected;
                 return Ok(self.snapshot());
             }
-            SessionOperation::Connect(program, entrypoint, expected) => {
+            SessionOperation::Connect(program, entrypoint, expected, settings) => {
                 self.close().await;
                 self.manifest = None;
                 self.last_error = None;
@@ -621,6 +713,14 @@ impl Session {
                     if expected.as_ref().is_some_and(|expected| expected != &manifest) {
                         let _ = host.stop().await;
                         return Err(PluginError::new(ErrorKind::InvalidManifest, Outcome::NotStarted));
+                    }
+                    match (&manifest.settings, settings) {
+                        (Some(_), Some(settings)) => host.configure(settings).await?,
+                        (None, None) => (),
+                        _ => {
+                            let _ = host.stop().await;
+                            return Err(PluginError::new(ErrorKind::InvalidArguments, Outcome::NotStarted));
+                        }
                     }
                     Ok::<_, PluginError>((host, manifest))
                 }.await;
@@ -730,6 +830,36 @@ mod tests {
             "src":format!("data:image/png;base64,{}", "A".repeat(8000))})).collect();
         v["icons"] = json!(big); assert!(manifest(v).is_err());
         assert!(serde_json::to_value(manifest(sample()).unwrap()).unwrap().get("icons").is_none());
+    }
+    #[test]
+    fn settings_and_choices_match_sdk_bounds() {
+        let mut v = sample();
+        v["settings"] = json!({"token":{"type":"secret","label":"Token"},"name":{"type":"text","label":"Name"}});
+        assert!(manifest(v.clone()).is_ok());
+        v["settings"] = json!({});
+        assert!(manifest(v.clone()).is_ok());
+        for settings in [json!(null), json!({"Bad":{"type":"text","label":"x"}}),
+            json!({"ok":{"type":"password","label":"x"}}), json!({"ok":{"type":"text","label":""}}),
+            json!({"ok":{"type":"text","label":"x".repeat(81)}}),
+            json!({"ok":{"type":"text","label":"OK"},"extra":true}),
+            json!((0..5).map(|i| (format!("field{i}"), json!({"type":"text","label":"Label"}))).collect::<Map<_,_>>())] {
+            let mut bad = sample(); bad["settings"] = settings;
+            assert!(manifest(bad).is_err());
+        }
+        let mut v = sample();
+        v["actions"][0]["config"]["n"]["choicesKey"] = json!("levels");
+        assert!(manifest(v.clone()).is_ok());
+        for choices in [json!(null), json!("../levels"), json!("levels")] {
+            let mut bad = sample();
+            bad["actions"][0]["config"]["n"]["choicesKey"] = choices;
+            if bad["actions"][0]["config"]["n"]["choicesKey"] == json!("levels") {
+                bad["actions"][0]["config"]["n"]["control"] = json!({"step":5});
+            }
+            assert!(manifest(bad).is_err());
+        }
+        let mut bad = sample();
+        bad["actions"][0]["config"]["n"] = json!({"type":"boolean","choicesKey":"levels"});
+        assert!(manifest(bad).is_err());
     }
     #[test]
     fn strict_manifest_and_arguments() {

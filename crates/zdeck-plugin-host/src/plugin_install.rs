@@ -1,13 +1,17 @@
 //! Local discovery, trust and fingerprint-bound enabled preferences.
 //! Runtime probes execute --version, never a shell or a plugin entrypoint.
-use std::{collections::{BTreeMap, HashSet}, fs, io::{Read, Write}, path::{Path, PathBuf}, process::Stdio, time::Duration};
+use std::{collections::{BTreeMap, HashSet}, fs, io::{Read, Write}, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{io::AsyncReadExt, process::Command, time::{timeout, Instant}};
-use crate::plugin::{identifier, manifest, ErrorKind, LaunchFailure, Manifest, Outcome, PluginError, PluginSnapshot, PluginRegistry};
+use crate::plugin::{identifier, manifest, ErrorKind, LaunchFailure, Manifest, Outcome, PluginError, PluginSnapshot, PluginRegistry, SettingsField};
 
 const MAX_RUNTIMES: usize = 32;
+/// Combined settings budget, measured as Windows credential UTF-16 bytes. A single
+/// credential blob stays within the 2560-byte Windows limit and is written atomically.
+pub const MAX_SETTINGS_BYTES: usize = 2400;
+pub const MAX_SETTING_VALUE_BYTES: usize = 2048;
 // Separate installers share one settings file; serialize lifecycle intent and read-modify-write.
 static PREFERENCES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const TRUST_FILE: &str = "plugin-trust.v1.json";
@@ -62,6 +66,9 @@ pub struct InstalledPlugin {
     /// Confirming trust must echo the identity from the reviewed catalog, never re-derive it
     /// from whatever happens to be on disk when the user clicks the button.
     pub identity: Option<String>,
+    /// Declared settings metadata only; omitted when the manifest declares none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<BTreeMap<String, SettingsField>>,
 }
 #[derive(Debug, Serialize)]
 pub struct PluginCatalog {
@@ -78,6 +85,26 @@ fn failure(hint: &'static str) -> PluginError {
     let mut error = PluginError::new(ErrorKind::InvalidLaunch, Outcome::NotStarted);
     error.hint = hint;
     error
+}
+fn settings_required() -> PluginError {
+    let mut error = PluginError::new(ErrorKind::Unavailable, Outcome::NotStarted);
+    error.code = Some("settings_required");
+    error.message = "This plugin needs its settings configured before it can be enabled.";
+    error.hint = "Open the plugin's settings on the desktop, save the declared values, then enable it again.";
+    error
+}
+/// JSON text budget in Windows credential UTF-16 bytes; the same limit guards IPC and storage.
+pub fn settings_within_limit(settings: &BTreeMap<String, String>) -> bool {
+    serde_json::to_string(settings).is_ok_and(|record| record.encode_utf16().count() * 2 <= MAX_SETTINGS_BYTES)
+}
+fn checked_settings(declared: &BTreeMap<String, SettingsField>, values: BTreeMap<String, String>) -> Result<BTreeMap<String, String>, PluginError> {
+    let complete = values.len() == declared.len() && values.iter().all(|(key, value)| {
+        declared.contains_key(key) && value.len() <= MAX_SETTING_VALUE_BYTES
+    });
+    let secret_missing = declared.iter().any(|(key, field)| matches!(field, SettingsField::Secret { .. })
+        && values.get(key).is_none_or(String::is_empty));
+    if !complete || secret_missing || !settings_within_limit(&values) { return Err(settings_required()); }
+    Ok(values)
 }
 fn trust_error() -> PluginError {
     let mut error = PluginError::new(ErrorKind::Unavailable, Outcome::NotStarted);
@@ -100,8 +127,13 @@ fn path_string(path: &Path) -> Result<String, PluginError> {
 }
 
 /// Paths/candidates are trusted desktop configuration, never deserialized from IPC.
+pub type SettingsLoader = Arc<dyn Fn(&str, &Manifest) -> Result<BTreeMap<String, String>, PluginError> + Send + Sync>;
+
 #[derive(Clone)]
-pub struct PluginInstall { directory: PathBuf, candidates: Vec<PathBuf>, python_candidates: Vec<PathBuf> }
+pub struct PluginInstall {
+    directory: PathBuf, candidates: Vec<PathBuf>, python_candidates: Vec<PathBuf>,
+    settings: Option<SettingsLoader>,
+}
 impl PluginInstall {
     /// Also permits isolated tests to inject temporary roots and fake runtimes.
     pub fn new(directory: PathBuf, candidates: Vec<PathBuf>) -> Result<Self, PluginError> {
@@ -109,7 +141,13 @@ impl PluginInstall {
             return Err(failure("Use absolute local plugin and runtime paths."));
         }
         path_string(&directory)?;
-        Ok(Self { directory, candidates, python_candidates: vec![] })
+        Ok(Self { directory, candidates, python_candidates: vec![], settings: None })
+    }
+    /// Optional native credential loader. It runs only after exact package trust validation
+    /// and before launch, and only for manifests that declare settings.
+    pub fn with_settings_loader(mut self, loader: SettingsLoader) -> Self {
+        self.settings = Some(loader);
+        self
     }
     pub fn with_python_candidates(mut self, candidates: Vec<PathBuf>) -> Result<Self, PluginError> {
         if candidates.len() > MAX_RUNTIMES || candidates.iter().any(|p| !p.is_absolute()) {
@@ -303,9 +341,38 @@ impl PluginInstall {
                 _ => Err(failure("The plugin changed during runtime detection. Refresh the catalog before enabling it.")),
             }
         }).await.map_err(|_| failure("Plugin revalidation failed. Refresh the local catalog."))??;
+        // Settings come from the OS credential store only after the exact package is trusted,
+        // and are delivered to the plugin solely through its stdin configure request.
+        let settings = match &expected.settings {
+            None => None,
+            // An empty declaration needs no fields, but the protocol still expects one configure request.
+            Some(declared) if declared.is_empty() => Some(BTreeMap::new()),
+            Some(declared) => {
+                let loader = self.settings.clone().ok_or_else(settings_required)?;
+                let manifest = expected.clone();
+                let id = plugin_id.to_owned();
+                let values = tokio::task::spawn_blocking(move || loader(&id, &manifest)).await
+                    .map_err(|_| settings_required())??;
+                Some(checked_settings(declared, values)?)
+            }
+        };
         // Persist the validated identity, never a fresh fingerprint of changed files.
         if !restoring { self.save_enabled(plugin_id, Some(fingerprint))?; }
-        state.connect_manifest(detected.path.expect("detected runtime"), path_string(&entrypoint)?, expected).await
+        state.connect_manifest_settings(detected.path.expect("detected runtime"), path_string(&entrypoint)?, expected, settings).await
+    }
+    /// Current trusted package metadata for IPC key validation; never launches the plugin.
+    pub async fn trusted_manifest(&self, plugin_id: &str) -> Result<Manifest, PluginError> {
+        if !identifier(plugin_id) { return Err(failure("Choose a valid plugin ID from the local catalog.")); }
+        let install = self.clone();
+        let id = plugin_id.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let root = install.root()?.ok_or_else(|| failure("The plugin directory was removed. Refresh the catalog."))?;
+            let folder = validated_folder(&root, &id)?;
+            let (row, ready) = inspect_folder(&root, &folder, &id);
+            let ready = ready.ok_or_else(|| failure(row.message.unwrap_or("The selected plugin is not ready in the local catalog.")))?;
+            if install.load_trust().get(&id) != Some(&ready.fingerprint) { return Err(trust_error()); }
+            Ok(ready.manifest)
+        }).await.map_err(|_| failure("Plugin discovery failed. Refresh the local catalog."))?
     }
     /// Metadata and runtime --version only: never describes or reads a plugin.
     pub async fn diagnostics(&self, plugin_id: &str) -> Result<PluginDiagnostics, PluginError> {
@@ -454,7 +521,7 @@ fn check_python_sdk(folder: &Path) -> Result<(), &'static str> {
 
 fn inspect_folder(root: &Path, folder: &Path, id: &str) -> (InstalledPlugin, Option<Ready>) {
     let mut row = InstalledPlugin { id: id.to_owned(), name: if id.is_empty() { "Invalid plugin folder".into() } else { id.into() },
-        version: String::new(), protocol_version: 0, status: InstallStatus::Invalid, message: None, icon: None, runtime: PluginRuntime::Node, trusted: false, identity: None };
+        version: String::new(), protocol_version: 0, status: InstallStatus::Invalid, message: None, icon: None, runtime: PluginRuntime::Node, trusted: false, identity: None, settings: None };
     let checked = (|| -> Result<Ready, &'static str> {
         if id.is_empty() { return Err("Folder names must be lowercase plugin identifiers (1–64 characters)."); }
         // Reject symlinks even within the root: no duplicate aliases or escapes.
@@ -481,6 +548,7 @@ fn inspect_folder(root: &Path, folder: &Path, id: &str) -> (InstalledPlugin, Opt
         let m = manifest(value).map_err(|_| "The manifest does not match the plugin contract.")?;
         if m.id != id { return Err("The folder name must equal manifest.id; aliases and duplicate IDs are not supported."); }
         row.version = m.version.clone(); row.protocol_version = protocol; row.icon = m.icon.clone();
+        row.settings = m.settings.clone();
         if protocol != 1 {
             row.status = InstallStatus::Incompatible;
             return Err("This plugin protocol version is not supported; protocol version 1 is required.");

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { PluginSettingsCard } from "./PluginSettingsCard";
 import { EMPTY_PLUGIN, parsePluginDiagnostics, toPluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
@@ -97,4 +98,34 @@ export const PluginErrorWithoutStripe: Story = { args: { initial: "one-failed" }
   const style = getComputedStyle(alert);
   if (style.borderLeftWidth !== "0px") throw new Error("Plugin errors must not carry a colored left stripe.");
   if (parseFloat(style.paddingTop) < 10) throw new Error("Plugin errors need readable padding.");
+}};
+
+function HomeAssistantCard({ width = 720 }: { width?: number }) {
+  const plugin: PluginConsole = {
+    native: true, snapshots: {}, catalogBusy: false, loading: false, sessionsReady: true,
+    catalog: { directory: "/example/zdeck/plugins", node: { status: "detected", version: "22.18.0", path: "/example/bin/node" },
+      plugins: [{ id: "home-assistant", name: "Home Assistant", version: "0.1.0", protocolVersion: 1, status: "ready",
+        message: null, icon: null, trusted: true, identity: "0123456789abcdef".repeat(4),
+        settings: { url: { type: "text", label: "Home Assistant URL" }, token: { type: "secret", label: "Long-lived access token" } } }] },
+    catalogError: null, busy: {}, errors: {}, diagnostics: {}, completedIds: {}, trustEpoch: {}, catalogEpoch: 0,
+    refreshSnapshots: async () => {}, refreshCatalog: async () => {}, openDirectory: async () => {},
+    trust: async () => true, enable: async () => {}, readState: async () => {}, disconnect: async () => {},
+    execute: async () => {}, diagnose: async () => {}, uninstall: async () => {},
+  };
+  return <div style={{ width, maxWidth: "100%" }}><PluginSettingsCard plugin={plugin} /></div>;
+}
+
+// Rendering only: the connection disclosure is closed, so the default native
+// settings IO is never invoked and no credential store is touched.
+export const HomeAssistantConnectionSettings: Story = { render: () => <HomeAssistantCard />, play: async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await userEvent.click(canvas.getByText("Connection settings"));
+  const load = canvas.getByRole("button", { name: "Load settings" });
+  expect(load).toBeEnabled();
+  expect(canvasElement.textContent).not.toContain("example-token");
+}};
+export const HomeAssistantConnectionSettingsNarrow: Story = { render: () => <HomeAssistantCard width={320} />, play: async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await userEvent.click(canvas.getByText("Connection settings"));
+  expect(canvas.getByRole("button", { name: "Load settings" }).getBoundingClientRect().width).toBeLessThanOrEqual(320);
 }};

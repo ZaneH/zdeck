@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PluginArgs } from "./types";
 import { nativeAvailable } from "./native";
-import { isPluginArgs, parsePluginCatalog, parsePluginDiagnostics, parsePluginSnapshot, parsePluginSnapshots, pluginIdentifier, toPluginError } from "./plugin";
-import type { PluginCatalog, PluginDiagnostics, PluginSnapshot, PluginSnapshots } from "./plugin";
+import { isPluginArgs, parsePluginSettingsView, parsePluginCatalog, parsePluginDiagnostics, parsePluginSnapshot, parsePluginSnapshots, pluginIdentifier, toPluginError } from "./plugin";
+import type { PluginCatalog, PluginDiagnostics, PluginSnapshot, PluginSnapshots, PluginSettingsView } from "./plugin";
 
 async function invokeNative(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   if (!nativeAvailable()) throw toPluginError({ kind: "unavailable", outcome: "not_started" });
@@ -51,6 +51,20 @@ export async function pluginUninstall(pluginId: string): Promise<void> {
 }
 export async function pluginOpenDirectory(): Promise<void> {
   if (await invokeNative("plugin_open_directory") !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+}
+export async function pluginSettingsLoad(pluginId: string): Promise<PluginSettingsView> {
+  requireId(pluginId);
+  const view = parsePluginSettingsView(await invokeNative("plugin_settings_load", { pluginId }));
+  if (!view) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+  return view;
+}
+export async function pluginSettingsSave(pluginId: string, values: Record<string, string>, secrets: Record<string, string>): Promise<void> {
+  requireId(pluginId);
+  if (await invokeNative("plugin_settings_save", { pluginId, values, secrets }) !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
+}
+export async function pluginSettingsForget(pluginId: string, key: string): Promise<void> {
+  requireId(pluginId); requireId(key);
+  if (await invokeNative("plugin_settings_forget", { pluginId, key }) !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
 }
 export async function pluginExecute(pluginId: string, actionId: string, args: PluginArgs): Promise<PluginSnapshot> {
   if (!pluginIdentifier(actionId) || !isPluginArgs(args)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });

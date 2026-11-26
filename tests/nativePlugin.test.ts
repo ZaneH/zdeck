@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSnapshot, pluginSnapshots, pluginState, pluginTrust, pluginUninstall } from "../src/lib/nativePlugin";
+import { pluginCatalog, pluginDiagnostics, pluginDisconnect, pluginEnable, pluginExecute, pluginOpenDirectory, pluginSettingsForget, pluginSettingsLoad, pluginSettingsSave, pluginSnapshot, pluginSnapshots, pluginState, pluginTrust, pluginUninstall } from "../src/lib/nativePlugin";
 import { EMPTY_PLUGIN } from "../src/lib/plugin";
 const IDENTITY = "0123456789abcdef".repeat(4);
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), native: vi.fn(() => true) }));
@@ -49,6 +49,40 @@ describe("per-plugin native command bridge", () => {
     expect(mocks.invoke).not.toHaveBeenCalled(); mocks.native.mockReturnValue(false);
     for (const operation of [pluginCatalog, pluginSnapshots, pluginOpenDirectory, () => pluginEnable("spotify"), () => pluginState("spotify"), () => pluginUninstall("spotify")])
       await expect(operation()).rejects.toMatchObject({ kind: "unavailable", outcome: "not_started" });
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+  it("loads only redacted settings and saves or forgets the declared fields separately", async () => {
+    const view = { values: { url: "https://example.invalid" }, secretConfigured: { token: true } };
+    mocks.invoke.mockImplementation(async (command: string) => command === "plugin_settings_load" ? view : null);
+    expect(await pluginSettingsLoad("home-assistant")).toEqual(view);
+    await pluginSettingsSave("home-assistant", { url: "https://example.invalid" }, { token: "example-token" });
+    await pluginSettingsForget("home-assistant", "token");
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["plugin_settings_load", { pluginId: "home-assistant" }],
+      ["plugin_settings_save", { pluginId: "home-assistant", values: { url: "https://example.invalid" }, secrets: { token: "example-token" } }],
+      ["plugin_settings_forget", { pluginId: "home-assistant", key: "token" }],
+    ]);
+    const loaded = await pluginSettingsLoad("home-assistant");
+    expect(JSON.stringify(loaded)).not.toContain("example-token");
+    for (const bad of [{ values: { token: "example-token" }, secretConfigured: { token: true } },
+      { values: { url: 1 }, secretConfigured: {} }, { values: {}, secretConfigured: { token: "yes" } },
+      { values: {}, secretConfigured: {}, extra: true }]) {
+      mocks.invoke.mockResolvedValue(bad);
+      await expect(pluginSettingsLoad("home-assistant")).rejects.toMatchObject({ kind: "protocol" });
+    }
+    mocks.invoke.mockResolvedValue("secret");
+    await expect(pluginSettingsSave("home-assistant", {}, {})).rejects.toMatchObject({ kind: "protocol" });
+    await expect(pluginSettingsForget("home-assistant", "token")).rejects.toMatchObject({ kind: "protocol" });
+  });
+  it("rejects invalid settings IDs and browser operations before invoke", async () => {
+    for (const operation of [pluginSettingsLoad, (id: string) => pluginSettingsSave(id, {}, {}), (id: string) => pluginSettingsForget(id, "token"), (id: string) => pluginSettingsForget("home-assistant", id)]) {
+      await expect(operation("../bad")).rejects.toMatchObject({ kind: "invalid_arguments" });
+    }
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    mocks.native.mockReturnValue(false);
+    for (const operation of [() => pluginSettingsLoad("home-assistant"), () => pluginSettingsSave("home-assistant", {}, {}), () => pluginSettingsForget("home-assistant", "token")]) {
+      await expect(operation()).rejects.toMatchObject({ kind: "unavailable", outcome: "not_started" });
+    }
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
   it("normalizes rejected diagnostics without raw error reflection", async () => {
