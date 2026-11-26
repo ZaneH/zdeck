@@ -41,7 +41,7 @@ Keep zDeck available in the background                 // desktop.tray
 
 ## Pages and sections
 
-Status: implemented with automated migration, persistence, editor and phone-navigation coverage. Version 3 migrates existing pages into one section without changing their controls. Physical-phone gesture verification and native runtime verification on Windows, macOS and Linux remain open; browser checks do not establish native parity.
+Status: implemented with automated migration, persistence, editor and phone-navigation coverage. Phone navigation is swipe-first with focus-revealed accessible alternatives, routine Connected text is hidden, and deck-accent inheritance is fixed on the remote phone and theme-only sections. Version 3 migrates existing pages into one section without changing their controls. Physical-phone gesture verification and native runtime verification on Windows, macOS and Linux remain open; browser checks do not establish native parity.
 
 ```text
 Organize controls into pages and sections              // deck.sections
@@ -54,7 +54,10 @@ Organize controls into pages and sections              // deck.sections
 │   └── Keep at least one section per page; no arbitrary section-count limit
 ├── Navigate on the companion phone                    // deck.sections.phone
 │   ├── Swipe left / right between pages
-│   ├── Swipe up / down between sections, snapping to the next / previous section
+│   ├── One deliberate upward / downward swipe settles on the next / previous section
+│   ├── No persistent footer tabs or page / section counters; controls remain the focus
+│   ├── Keep keyboard / screen-reader navigation available without a permanently visible navigation bar
+│   ├── Hide routine Connected text; keep disconnection, errors and recovery actions visible
 │   ├── Each section fills the available control viewport when its controls fit
 │   ├── Taller sections scroll internally; advance only at their scroll boundary
 │   ├── Sliders and other interactive controls retain their own gestures
@@ -64,7 +67,7 @@ Organize controls into pages and sections              // deck.sections
 │   ├── Left / right arrow keys switch pages without wrapping at the ends
 │   └── Do not intercept keys while typing, editing, or using controls that own those keys
 ├── Configure appearance                               // deck.sections.appearance
-│   ├── Sections inherit the deck theme and accent by default
+│   ├── Sections immediately inherit the saved deck theme and accent on desktop and phone, including new sections
 │   ├── Allow independent optional theme and accent overrides per section
 │   └── Reset an override to resume inheritance; inherited values follow deck changes
 └── Preserve configuration                             // deck.sections.persistence

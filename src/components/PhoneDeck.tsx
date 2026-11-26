@@ -172,9 +172,10 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
 
       <footer className="phone-footer">
         <PhoneSectionNav
-          names={page.sections.map((section) => section.name)}
+          count={page.sections.length}
           index={navigation.sectionIndex}
           onSelect={navigation.goToSection}
+          announcement={navigation.announcement}
         />
         <nav className="phone-pages" aria-label="Deck pages">
           {deck.pages.map((item) => (

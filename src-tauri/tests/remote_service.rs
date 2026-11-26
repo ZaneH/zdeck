@@ -2958,6 +2958,7 @@ mod browser_smoke {
         let store = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
         let mut deck = default_deck();
         deck.pages[0].sections[0].controls[3].label = "Fixture playback".to_string();
+        deck.accent = "#f4b860".to_string();
         store.save(0, deck).await.expect("save fixture deck");
         let runner = Arc::new(FakeRunner::new(vec![]));
         let config = ServiceConfig {

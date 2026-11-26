@@ -339,7 +339,7 @@ async function waitForNewCommands(before, timeout = 8000) {
 /** Waits until the phone is active and no action is in flight. */
 async function settle(page, timeout = 12000) {
   return page.waitFor(
-    "!!document.querySelector('.remote-connection[data-state=\"active\"]') && !document.querySelector('.control-tile.is-disabled')",
+    "!!document.querySelector('.remote-app[data-state=\"active\"]') && !document.querySelector('.control-tile.is-disabled')",
     timeout,
   );
 }
@@ -557,11 +557,21 @@ async function main() {
   await rpc("approve_device", { requestId: pendingDevice.requestId });
   check(
     "explicit approval leads to a real authenticated snapshot",
-    await phone.waitFor("!!document.querySelector('.remote-connection[data-state=\"active\"]')", 15000),
+    await phone.waitFor("!!document.querySelector('.remote-app[data-state=\"active\"]')", 15000),
   );
   const stateEntry = await waitForRequest((e) => e.method === "GET" && e.path === "/api/v1/state" && e.status === 200);
   check("phone fetched /api/v1/state after approval", stateEntry?.status === 200, JSON.stringify(stateEntry));
   check("phone opened a real WebSocket snapshot", proxy.upgrades > 0);
+  check(
+    "active remote applies the deck accent at the root and inherits it into sections",
+    await phone.eval(
+      "(() => { const root = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); const section = getComputedStyle(document.querySelector('[data-phone-section]')).getPropertyValue('--accent').trim(); return root === '#f4b860' && section === '#f4b860'; })()",
+    ),
+  );
+  check(
+    "active remote hides the routine Connected status",
+    await phone.eval("!document.querySelector('.remote-connection[data-state=\"active\"]')"),
+  );
   check(
     "saved fake deck controls are rendered",
     await phone.eval(
@@ -804,7 +814,7 @@ async function main() {
   );
   check(
     "conflict resync returns controls to active",
-    await phone.waitFor("!!document.querySelector('.remote-connection[data-state=\"active\"]')", 15000),
+    await phone.waitFor("!!document.querySelector('.remote-app[data-state=\"active\"]')", 15000),
   );
 
   check("conflict resync does not replay or run the rejected action",
@@ -878,7 +888,7 @@ async function main() {
   await rpc("approve_device", { requestId: pastedPending.requestId });
   check(
     "pasted phone becomes active with the saved deck",
-    await pasted.waitFor("!!document.querySelector('.remote-connection[data-state=\"active\"]')", 15000),
+    await pasted.waitFor("!!document.querySelector('.remote-app[data-state=\"active\"]')", 15000),
   );
   const beforePastedCommand = (await rpc("runner_calls")).calls;
   await rpc("runner_push", { outputs: ["Volume: 0.50", "", "Volume: 0.50 [MUTED]"] });

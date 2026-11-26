@@ -1705,8 +1705,8 @@ try {
   check("phone volume preview updates", volume === "70%", volume);
   const portraitOverflow = await phonePortrait.eval("document.documentElement.scrollWidth - window.innerWidth");
   check("phone portrait has no horizontal overflow", portraitOverflow <= 1, `overflow=${portraitOverflow}px`);
-  check("phone page navigation stays in thumb reach", await phonePortrait.eval("Math.abs(document.querySelector('.phone-footer').getBoundingClientRect().bottom - innerHeight) <= 1"));
-  check("phone page targets are at least 44px", await phonePortrait.eval("[...document.querySelectorAll('.phone-page-tab')].every(el => el.getBoundingClientRect().height >= 44)"));
+  check("phone footer has no persistent layout footprint", await phonePortrait.eval("(() => { const r = document.querySelector('.phone-footer').getBoundingClientRect(); return r.width <= 2 && r.height <= 2; })()"));
+  check("hidden page navigation stays accessible", await phonePortrait.eval("document.querySelector('.phone-pages')?.getAttribute('aria-label') === 'Deck pages' && document.querySelectorAll('.phone-page-tab').length === 2"));
   check("phone fader is horizontal", await phonePortrait.eval("(() => { const r = document.querySelector('.tile-volume input').getBoundingClientRect(); return r.width > r.height && r.height >= 44; })()"));
   await phonePortrait.screenshot("/tmp/deck-smoke-phone-portrait.png");
   await phonePortrait.eval("document.querySelector('.preview-close-narrow').click()");
@@ -1745,10 +1745,32 @@ try {
   await phoneNav.reload();
   await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One'");
   check('phone sections offer accessible previous/next controls', await phoneNav.eval("(() => { const nav = document.querySelector('.phone-section-nav'); return !!nav && nav.getAttribute('aria-label') === 'Page sections' && !!nav.querySelector('[aria-label=\"Previous section\"]:disabled') && !nav.querySelector('[aria-label=\"Next section\"]').disabled; })()"));
-  check('short phone sections fill the available control viewport', await phoneNav.eval("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); return getComputedStyle(main).scrollSnapType.startsWith('y') && section.getBoundingClientRect().height >= main.clientHeight - 60 && section.getBoundingClientRect().height <= main.clientHeight + 1; })()"));
+  check('phone has no persistent footer bar', await phoneNav.eval("(() => { const footer = document.querySelector('.phone-footer'); const r = footer.getBoundingClientRect(); return r.width <= 2 && r.height <= 2 && getComputedStyle(footer).clip !== 'auto'; })()"));
+  check('phone sections page by gesture, not proximity snapping', await phoneNav.eval("getComputedStyle(document.querySelector('.phone-main')).scrollSnapType === 'none'"));
+  check('short phone sections fill the available control viewport', await phoneNav.eval("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); return section.getBoundingClientRect().height >= main.clientHeight - 60 && section.getBoundingClientRect().height <= main.clientHeight + 1; })()"));
+
+  await phoneNav.eval("document.activeElement?.blur()");
+  let navFocused = false;
+  for (let tab = 0; tab < 12 && !navFocused; tab += 1) {
+    await pressKey(phoneNav, "Tab", "Tab", 9);
+    navFocused = await phoneNav.eval("!!document.activeElement.closest('.phone-footer')");
+  }
+  check('keyboard focus reveals the hidden phone navigation', navFocused && await phoneNav.eval("(() => { const footer = document.querySelector('.phone-footer'); const r = footer.getBoundingClientRect(); return r.width > 100 && r.height > 20 && !document.querySelector('.phone-section-current') && !document.querySelector('.phone-section-count'); })()"));
+  await phoneNav.eval("document.activeElement?.blur()");
+  await phoneNav.waitFor("(() => { const footer = document.querySelector('.phone-footer'); const r = footer.getBoundingClientRect(); return r.width <= 2 && r.height <= 2; })()");
+
+  const firstSwipe = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: r.bottom - 120 }; })()");
+  await touchDrag(phoneNav, firstSwipe, { x: firstSwipe.x, y: firstSwipe.y - 150 });
+  check('one upward swipe advances exactly one short section', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && !document.querySelector('[aria-label=\"Previous section\"]').disabled; })()"));
+  const secondSwipe = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s2\"]').getBoundingClientRect(); return { x: r.left + 6, y: r.top + 200 }; })()");
+  await touchDrag(phoneNav, secondSwipe, { x: secondSwipe.x, y: secondSwipe.y + 150 });
+  check('one downward swipe returns exactly one short section', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && document.querySelector('[aria-label=\"Previous section\"]').disabled; })()"));
+  const firstDown = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: r.top + 200 }; })()");
+  await touchDrag(phoneNav, firstDown, { x: firstDown.x, y: firstDown.y + 150 });
+  check('a downward swipe on the first section does not wrap', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('[aria-label=\"Previous section\"]').disabled"));
   await phoneNav.eval(click('[aria-label="Next section"]'));
-  check('next section control scrolls to the second snap section', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); const nav = document.querySelector('.phone-section-current'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && nav.textContent.includes('Second') && !nav.previousElementSibling.disabled; })()"));
-  check('last section disables next and names the current section', await phoneNav.eval("document.querySelector('[aria-label=\"Next section\"]').disabled && document.querySelector('.phone-section-current').textContent.includes('Second')"));
+  check('next section control scrolls to the second section', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && !document.querySelector('[aria-label=\"Previous section\"]').disabled; })()"));
+  check('last section disables next', await phoneNav.eval("document.querySelector('[aria-label=\"Next section\"]').disabled"));
   const headingSwipe = await phoneNav.eval(rectOf('[data-phone-section="s2"] .section-heading'));
   await touchDrag(phoneNav, { x: headingSwipe.right - 10, y: headingSwipe.cy }, { x: headingSwipe.left + 10, y: headingSwipe.cy });
   check('swipe left moves to the next page without wrapping', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
@@ -1761,19 +1783,65 @@ try {
   await touchDrag(phoneNav, { x: twoSwipe.right - 10, y: twoSwipe.cy }, { x: twoSwipe.left + 10, y: twoSwipe.cy });
   check('page swipes stop at the last page', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'Two'"));
   await phoneNav.eval(clickText('.phone-page-tab', 'One'));
-  check('page tabs remain an alternative and reset the section position', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('.phone-section-current').textContent.includes('First') && document.querySelector('.phone-main').scrollTop === 0"));
+  check('hidden page navigation remains an alternative and resets the section position', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('.phone-main').scrollTop === 0"));
   await phoneNav.screenshot('/tmp/deck-smoke-phone-sections.png');
+  const threeSectionDeck = structuredClone(navDeck);
+  threeSectionDeck.pages[0].sections.push({ id: 's5', name: 'Fifth', controls: [] });
+  await phoneNav.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(threeSectionDeck))})`);
+  await phoneNav.reload();
+  await phoneNav.waitFor("document.querySelectorAll('[data-phone-section]').length === 3");
+  await phoneNav.eval("window.__preventedSectionScroll = false; document.querySelector('.phone-main').addEventListener('touchmove', event => { if (event.defaultPrevented) window.__preventedSectionScroll = true; })");
+  const tripleSwipe = await phoneNav.eval("(() => { const main = document.querySelector('.phone-main').getBoundingClientRect(); return { x: main.right - 5, y: main.top + 250 }; })()");
+  await touchDrag(phoneNav, tripleSwipe, { x: tripleSwipe.x, y: tripleSwipe.y - 20 });
+  check('a short vertical gesture does not leave the section between panels', await phoneNav.eval("document.querySelector('.phone-main').scrollTop === 0"));
+  await touchDrag(phoneNav, tripleSwipe, { x: tripleSwipe.x, y: tripleSwipe.y - 180 });
+  check('section paging cancels native boundary scrolling before momentum starts', await phoneNav.eval("window.__preventedSectionScroll === true"));
+  check('one swipe advances only one section even when more follow', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const target = document.querySelector('[data-phone-section=\"s2\"]'); return Math.abs(target.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && !document.querySelector('[aria-label=\"Next section\"]').disabled; })()"));
   const tallDeck = structuredClone(navDeck);
   tallDeck.pages[0].sections[0].controls = Array.from({ length: 16 }, (_, index) => ({ id: `tall-${index}`, label: `Control ${index}`, action: 'mic-mute' }));
   await phoneNav.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(tallDeck))})`);
   await phoneNav.reload();
   await phoneNav.waitFor("document.querySelectorAll('[data-phone-section=\"s1\"] .control-tile').length === 16");
   check('tall sections retain full-sized controls and exceed the viewport', await phoneNav.eval("document.querySelector('[data-phone-section=\"s1\"]').clientHeight > document.querySelector('.phone-main').clientHeight"));
+  const tallHeading = await phoneNav.eval(rectOf('[data-phone-section="s1"] .section-heading'));
+  await touchDrag(phoneNav, { x: tallHeading.cx, y: tallHeading.cy }, { x: tallHeading.cx, y: tallHeading.cy - 150 });
+  check('an upward swipe at the top of a tall section scrolls inside it instead of paging', await phoneNav.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('.phone-main').scrollTop > 100 && document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect().top < 0"));
   await phoneNav.eval("document.querySelector('.phone-main').scrollTop = 350");
-  check('scrolling within a tall section does not advance its section indicator', await phoneNav.waitFor("document.querySelector('.phone-main').scrollTop >= 300 && document.querySelector('.phone-section-current').textContent.includes('First')"));
-  await phoneNav.eval(click('[aria-label="Next section"]'));
-  check('a tall section can advance to the next section without a scroll trap', await phoneNav.waitFor("document.querySelector('.phone-section-current').textContent.includes('Second') && document.querySelector('.phone-main').scrollTop > 900"));
+  check('scrolling within a tall section stays in that section', await phoneNav.waitFor("document.querySelector('.phone-main').scrollTop >= 300 && document.querySelector('.phone-page-heading h1')?.textContent === 'One' && document.querySelector('[aria-label=\"Previous section\"]').disabled"));
+  const tallLeft = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: Math.max(r.top + 10, 160) }; })()");
+  await touchDrag(phoneNav, tallLeft, { x: tallLeft.x, y: tallLeft.y - 150 });
+  check('an upward swipe in the middle of a tall section does not page', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'One'"));
+  await phoneNav.eval("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); const pad = parseFloat(getComputedStyle(main).paddingBottom); main.scrollTop += section.getBoundingClientRect().bottom - (main.getBoundingClientRect().bottom - pad); return main.scrollTop; })()");
+  const tallBottom = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: Math.min(r.bottom - 10, 700) }; })()");
+  await touchDrag(phoneNav, tallBottom, { x: tallBottom.x, y: tallBottom.y - 150 });
+  check('an upward swipe at the bottom of a tall section advances one section without a trap', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && document.querySelector('[aria-label=\"Next section\"]').disabled; })()"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: navCtx });
+
+  // ------------------------------------------------------------ phone theme and section accent inheritance
+  const { browserContextId: themeCtx } = await cdp.send('Target.createBrowserContext');
+  const phoneTheme = await openPage('phone-theme', `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, themeCtx);
+  livePages.push(phoneTheme);
+  const themeDeck = {
+    version: 3, theme: 'light', accent: '#f4b860', activePageId: 'p1',
+    pages: [{ id: 'p1', name: 'Amber', sections: [
+      { id: 's1', name: 'Theme only', theme: 'dark', controls: [{ id: 'c1', label: 'Mute', action: 'mic-mute' }] },
+      { id: 's2', name: 'Rose', theme: 'dark', accent: '#ff7a9c', controls: [{ id: 'c2', label: 'Play', action: 'media-play-pause' }] },
+    ] }],
+  };
+  await phoneTheme.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(themeDeck))})`);
+  await phoneTheme.reload();
+  await phoneTheme.waitFor("!!document.querySelector('[data-phone-section=\"s1\"]')");
+  check("phone root applies a non-default Amber deck accent", await phoneTheme.eval("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#f4b860'"));
+  check("a theme-only dark section inherits Amber instead of resetting to blue", await phoneTheme.eval("getComputedStyle(document.querySelector('[data-phone-section=\"s1\"]')).getPropertyValue('--accent').trim() === '#f4b860'"));
+  check("an explicit Rose section accent still overrides the deck", await phoneTheme.eval("getComputedStyle(document.querySelector('[data-phone-section=\"s2\"]')).getPropertyValue('--accent').trim() === '#ff7a9c'"));
+  const resetThemeDeck = structuredClone(themeDeck);
+  resetThemeDeck.accent = '#a78bfa';
+  delete resetThemeDeck.pages[0].sections[1].accent;
+  await phoneTheme.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(resetThemeDeck))})`);
+  await phoneTheme.reload();
+  await phoneTheme.waitFor("getComputedStyle(document.querySelector('[data-phone-section=\"s2\"]')).getPropertyValue('--accent').trim() === '#a78bfa'");
+  check("removing a section accent follows the deck accent", await phoneTheme.eval("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#a78bfa' && getComputedStyle(document.querySelector('[data-phone-section=\"s1\"]')).getPropertyValue('--accent').trim() === '#a78bfa'"));
+  await cdp.send('Target.disposeBrowserContext', { browserContextId: themeCtx });
 
   // ------------------------------------------------------------ desktop phone preview orientation
   const { browserContextId: previewCtx } = await cdp.send('Target.createBrowserContext');
@@ -1803,7 +1871,7 @@ try {
   check("desktop portrait frame is ~390px wide and under 780px tall", Math.abs(desktopPortraitBox.width - 390) <= 1 && desktopPortraitBox.height <= 781, JSON.stringify(desktopPortraitBox));
   check("portrait toggle reports its pressed state", await desktopPhone.eval("document.querySelector('[aria-label=\"Preview orientation\"] [aria-pressed=\"true\"]').textContent === 'Portrait'"));
   check("long pages scroll inside the desktop frame", await desktopPhone.eval("(() => { const main = document.querySelector('.phone-main'); return main.scrollHeight > main.clientHeight; })()"));
-  check("page navigation stays reachable inside the frame", await desktopPhone.eval("(() => { const footer = document.querySelector('.phone-footer'); const shell = document.querySelector('.phone-shell'); return !!footer.querySelector('.phone-page-tab') && footer.getBoundingClientRect().bottom <= shell.getBoundingClientRect().bottom + 1; })()"));
+  check("keyboard focus reveals page navigation inside the frame", await desktopPhone.eval("(() => { const footer = document.querySelector('.phone-footer'); const shell = document.querySelector('.phone-shell'); const tab = footer.querySelector('.phone-page-tab'); tab.focus(); const r = footer.getBoundingClientRect(); const s = shell.getBoundingClientRect(); const ok = r.width > 100 && r.height > 20 && r.bottom <= s.bottom + 1 && r.top >= s.top - 1; tab.blur(); return ok; })()"));
   check("desktop preview puts a 44px Close preview in the outer chrome", await desktopPhone.eval("(() => { const el = document.querySelector('.preview-close-desktop'); const bar = document.querySelector('.phone-preview-bar'); if (!el || !bar) return false; const r = el.getBoundingClientRect(); return bar.contains(el) && getComputedStyle(document.querySelector('.preview-close-narrow')).display === 'none' && el.getAttribute('aria-label') === 'Close preview' && el.getAttribute('title') === 'Close preview' && r.width >= 44 && r.height >= 44; })()"));
   await desktopPhone.screenshot('/tmp/deck-design-preview-portrait.png');
   await desktopPhone.eval("document.querySelector('.preview-close-desktop').click()");

@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
 import { activePage, findPage, pageControls } from "../lib/deck";
 import { sectionStyle } from "../lib/sections";
+import { applyTheme } from "../lib/theme";
 import { useRemotePhone } from "../lib/useRemotePhone";
 import type { RemotePhase } from "../lib/remotePhone";
 import { BrandMark } from "./BrandMark";
@@ -172,6 +173,12 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const page = deck
     ? (remote.pageId ? findPage(deck, remote.pageId) ?? activePage(deck) : activePage(deck))
     : null;
+  const theme = deck?.theme;
+  const accent = deck?.accent;
+  // Unconditional: this component returns early for pairing, so keep the hook above those paths.
+  useEffect(() => {
+    if (theme && accent) applyTheme(theme, accent);
+  }, [theme, accent]);
   const navigation = usePhoneNavigation({
     pageId: page?.id ?? "",
     pageIds: deck?.pages.map((item) => item.id) ?? [],
@@ -268,12 +275,14 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const latestActivity = remote.activity[0];
 
   return (
-    <div className="remote-app">
+    <div className="remote-app" data-state={remote.phase}>
       <header className="phone-header remote-header">
         <div className="phone-brand"><BrandMark /></div>
-        <span className="remote-connection" data-state={remote.phase}>
-          {connectionLabel(remote.phase)}
-        </span>
+        {active ? null : (
+          <span className="remote-connection" data-state={remote.phase}>
+            {connectionLabel(remote.phase)}
+          </span>
+        )}
       </header>
 
       <main className="phone-main" id="main" ref={scrollerRef} {...navigation.pagerProps}>
@@ -358,9 +367,10 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
 
       <footer className="phone-footer">
         <PhoneSectionNav
-          names={page.sections.map((section) => section.name)}
+          count={page.sections.length}
           index={navigation.sectionIndex}
           onSelect={navigation.goToSection}
+          announcement={navigation.announcement}
         />
         <nav className="phone-pages" aria-label="Deck pages">
           {deck.pages.map((item) => (
