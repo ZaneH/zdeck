@@ -12,6 +12,36 @@ import { ControlTile } from "../src/components/ControlTile";
 const control: Control = { id: "volume", label: "Volume", action: "volume", volume: 50, presentation: "dial" };
 const event = (extra = {}) => ({ preventDefault: vi.fn(), stopPropagation: vi.fn(), ...extra });
 
+describe("Native slider gestures", () => {
+  it.each(["preview", "live", "remote"] as const)("leaves native thumb capture alone in %s and commits once on release", (semantics) => {
+    const commit = vi.fn();
+    const tile = ControlTile({ control: { ...control, presentation: "slider" }, variant: "phone", volume: 50,
+      semantics, onVolumeCommit: commit });
+    const input = tile.props.children[2].props.children[1];
+    const currentTarget = { value: "75", setPointerCapture: vi.fn() };
+    const pointer = event({ pointerId: 1, button: 0, isPrimary: true, currentTarget });
+    input.props.onPointerDown(pointer);
+    expect(currentTarget.setPointerCapture).not.toHaveBeenCalled();
+    input.props.onChange({ target: currentTarget });
+    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 0 : 1);
+    input.props.onPointerUp(pointer);
+    input.props.onPointerUp(pointer);
+    expect(commit).toHaveBeenCalledExactlyOnceWith(75);
+  });
+
+  it("does not commit a cancelled native slider gesture", () => {
+    const commit = vi.fn();
+    const tile = ControlTile({ control: { ...control, presentation: "slider" }, variant: "phone", volume: 50,
+      onVolumeCommit: commit });
+    const input = tile.props.children[2].props.children[1];
+    const pointer = event({ pointerId: 1, button: 0, isPrimary: true, currentTarget: { value: "75" } });
+    input.props.onPointerDown(pointer);
+    input.props.onPointerCancel();
+    input.props.onPointerUp(pointer);
+    expect(commit).not.toHaveBeenCalled();
+  });
+});
+
 describe("Editor tile interactions", () => {
   it("captures Alt + arrows before nested sliders/dials can change their targets", () => {
     const move = vi.fn();

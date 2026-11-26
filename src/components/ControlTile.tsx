@@ -191,10 +191,8 @@ export function ControlTile({
             onChange={(event) => changeValue(Number(event.target.value))}
             onPointerDown={(event) => {
               volumeGesture.current = !disabled && event.button === 0 && event.isPrimary ? `pointer:${event.pointerId}` : null;
-              if (volumeGesture.current) {
-                sentValue.current = null;
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }
+              // Native ranges own thumb capture and release; do not replace it with input capture.
+              if (volumeGesture.current) sentValue.current = null;
             }}
             onPointerUp={(event) => {
               const commit = volumeGesture.current === `pointer:${event.pointerId}` && event.button === 0 && !disabled;

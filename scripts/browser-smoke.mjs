@@ -1336,6 +1336,9 @@ try {
   await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.right-10,y:liveSlider.cy,button:'left',buttons:1});
   const pointerFinal = await admin.eval("Number(document.querySelector('.control-tile.is-selected input').value)");
   await admin.send('Input.dispatchMouseEvent', {type:'mouseReleased',x:liveSlider.right-10,y:liveSlider.cy,button:'left',clickCount:1});
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.left+10,y:liveSlider.cy,buttons:0});
+  check('released slider stops following the mouse', await admin.eval(`Number(document.querySelector('.control-tile.is-selected input').value) === ${pointerFinal}`));
+  check('slider drag does not select control labels', await admin.eval("window.getSelection().toString() === '' && [...document.querySelectorAll('.control-tile')].every(tile => getComputedStyle(tile).userSelect === 'none')"));
   await admin.eval('window.__holdDesktop = false; window.__finishDesktop()');
   check('busy pointer slider coalesces movement and release into the final target', await admin.waitFor(`window.__desktopCalls.length === 4 && window.__desktopCalls.at(-1).value === ${pointerFinal}`));
   await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
