@@ -583,6 +583,8 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .toggle-state { min-width: 0; }
 .tile-toggle:not([aria-checked]):not([aria-pressed]) .toggle-state { font-size: 11px; font-weight: 450; }
 .tile-toggle:disabled, .tile-toggle[aria-disabled="true"], .dial-face[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.control-grid:has(.control-tile.is-busy) .control-tile.is-disabled,
+.control-grid:has(.control-tile.is-busy) .control-tile.is-disabled .tile-toggle:disabled { opacity: 1; }
 .copy-command { width: 36px; height: 36px; border: 1px solid var(--border); }
 .copy-command.is-copied { color: #6ee7b7; }
 [data-theme="light"] .copy-command.is-copied { color: #187649; }
