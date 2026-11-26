@@ -21,6 +21,8 @@ Commit completed work incrementally: one coherent, independently reviewable/reve
 
 ## Design invariant
 
+Interactive elements use context-appropriate cursors: `pointer` for actions, `grab`/`grabbing` for dragging, axis-specific cursors for resizing, `text` for text entry, and `not-allowed` when disabled. Clickable labels match their controls.
+
 Checkbox rows align the box and any inline help icon with the vertical center of the label's first line, including wrapped labels. The box and its clickable label use the same pointer cursor; disabled controls and labels consistently use the disabled cursor. Do not rely on browser-default checkbox margins or cursors.
 
 Routine settings explanations stay out of the main reading flow. Use concise labels and compact, keyboard- and touch-accessible help for optional details; keep actual errors, uncertain outcomes, and necessary safety/setup instructions visible. Tooltips show their actual help on hover or keyboard focus, not only on click. Never layer a native `title` tooltip over a custom tooltip. Keep hover help reachable, dismissible with Escape, and gently animated with reduced-motion support.
