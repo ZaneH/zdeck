@@ -308,6 +308,12 @@ async function pressKey(page, key, code, vk, text) {
   await page.send("Input.dispatchKeyEvent", { type: text === undefined ? "rawKeyDown" : "keyDown", ...base, ...(text === undefined ? {} : { text }) });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
 }
+async function altArrow(page, key) {
+  const vk = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }[key];
+  await page.send('Page.bringToFront');
+  await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: key, windowsVirtualKeyCode: vk, modifiers: 1 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: vk, modifiers: 1 });
+}
 async function pointerClick(page, x, y) {
   await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1, buttons: 1 });
   await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1, buttons: 1 });
@@ -586,23 +592,17 @@ try {
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
   check('sidebar sections collapse with the keyboard', await editor.waitFor("(() => { const section = document.querySelector('.span-fields').parentElement; return !section.open && section.getBoundingClientRect().height <= section.querySelector('summary').getBoundingClientRect().height + 14; })()"));
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
-  check('Inspector offers a labelled position alternative without drag handles', await editor.eval("!document.querySelector('.tile-order') && !!document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]')"));
-  const orderBefore = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
-  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '3'));
-  const orderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
-  check('position menu moves a control without swapping intervening controls', orderAfter === 'Starting soon|Mic mute|Play / pause|Go live edited', `${orderBefore} -> ${orderAfter}`);
-  const keyboardOrderBefore = orderAfter;
-  await editor.eval("document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]').focus()");
-  await pressKey(editor, 'Home', 'Home', 36);
-  await pressKey(editor, 'Enter', 'Enter', 13, '\r');
-  const keyboardOrderAfter = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|')");
-  check('keyboard selection of a position reorders the control', keyboardOrderBefore !== keyboardOrderAfter, `${keyboardOrderBefore} -> ${keyboardOrderAfter}`);
-
+  check('Inspector has no Position dropdown or drag handles', await editor.eval("!document.querySelector('.tile-order') && !document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]')"));
   await editor.eval("document.querySelector('.control-tile.is-selected .tile-primary').focus()");
-  await editor.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, modifiers: 1 });
-  await editor.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, modifiers: 1 });
-  check('Alt + arrow reorders a focused tile without pressing it', await editor.waitFor("document.querySelectorAll('.control-tile')[1].classList.contains('is-selected') && document.activeElement.matches('.control-tile.is-selected .tile-primary') && !document.querySelector('.is-pressed')"));
-  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '0'));
+  await altArrow(editor, 'ArrowRight');
+  await altArrow(editor, 'ArrowRight');
+  check('horizontal Alt arrows move one slot without swapping intervening controls', await editor.waitFor("[...document.querySelectorAll('.control-tile .tile-label')].map(n => n.textContent).join('|') === 'Starting soon|Mic mute|Play / pause|Go live edited'"));
+  for (let i = 0; i < 3; i++) await altArrow(editor, 'ArrowLeft');
+  check('keyboard reordering keeps focus and does not post a footer message', await editor.waitFor("document.querySelector('.control-tile').classList.contains('is-selected') && document.activeElement.matches('.control-tile.is-selected .tile-primary') && !document.querySelector('.is-pressed') && !document.querySelector('.preview-feedback')"));
+  check('editor tiles do not replay entrance animations on reorder', await editor.eval("[...document.querySelectorAll('.control-grid .control-tile')].every(tile => getComputedStyle(tile).animationName === 'none')"));
+  await altArrow(editor, 'ArrowUp');
+  await altArrow(editor, 'ArrowDown');
+  check('vertical arrows do not wrap a single row sideways', await editor.eval("document.querySelector('.control-tile').classList.contains('is-selected')"));
 
   // Real pointer input catches failures that synthetic native drag events miss.
   await editor.eval("document.querySelector('.control-tile').scrollIntoView({block:'center'})");
@@ -617,8 +617,9 @@ try {
   check('placement preview uses a solid translucent fill and grabbing cursor', await editor.eval("(() => { const target = document.querySelector('.is-drop-target'); const preview = getComputedStyle(target, '::after'); return preview.borderTopStyle === 'solid' && preview.borderTopWidth === '3px' && preview.backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(target).cursor === 'grabbing'; })()"));
   await editor.screenshot('/tmp/zdeck-control-drag-feedback.png');
   await editor.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: reorderTarget.cx, y: reorderTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
-  check('drop reorders without pressing a control', await editor.waitFor("document.querySelector('.workspace-feedback').textContent.includes('Moved Go live edited to position 2') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
-  await editor.eval(setSelect('.inspector-dock select[aria-label^="Position of"]', '0'));
+  check('drop reorders without pressing a control or flashing a message', await editor.waitFor("document.querySelectorAll('.control-tile')[1].classList.contains('is-selected') && !document.querySelector('.preview-feedback') && !document.querySelector('.is-dragging') && !document.querySelector('.is-drop-target') && !document.querySelector('.is-pressed')"));
+  await editor.eval("document.querySelector('.control-tile.is-selected .tile-primary').focus()");
+  await altArrow(editor, 'ArrowLeft');
   const clickTile = await editor.eval(rectOf('.control-tile.is-selected .tile-primary'));
   await pointerClick(editor, clickTile.cx, clickTile.cy);
   check('clicking a tile without dragging selects without pressing', await editor.waitFor("!!document.querySelector('.control-tile.is-selected') && !document.querySelector('.is-pressed')"));
@@ -626,6 +627,7 @@ try {
   check('clicking elsewhere clears the selection', await editor.waitFor("!document.querySelector('.control-tile.is-selected') && !document.querySelector('.inspector-form')"));
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
   await editor.eval(click('[aria-label="Collapse Inspector sidebar"]'));
+  check('sidebar toggle is a subtle chevron on the divider, not in the toolbar', await editor.eval("(() => { const button = document.querySelector('.inspector-toggle'); const r = button.getBoundingClientRect(); const divider = document.querySelector('.inspector-region').getBoundingClientRect(); return !document.querySelector('.topbar [aria-controls=\"inspector-sidebar\"]') && Math.abs(r.left + r.width/2 - divider.left) < 2 && !!button.querySelector('.lucide-chevron-left'); })()"));
   check('sidebar collapses with an always-reachable expand toggle', await editor.waitFor("document.querySelector('.inspector-dock').hidden && document.querySelector('[aria-label=\"Expand Inspector sidebar\"]').getAttribute('aria-expanded') === 'false'"));
   await editor.reload();
   check('explicit collapsed sidebar choice survives reload', await editor.waitFor("document.querySelector('.inspector-dock').hidden"));
@@ -669,7 +671,7 @@ try {
   await editor.reload();
   await editor.waitFor("!!document.querySelector('.app-shell')");
   const persisted = await editor.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((n) => n.textContent).join('|')");
-  check("refresh keeps the edited deck", persisted === keyboardOrderAfter, persisted);
+  check("refresh keeps the edited deck", persisted === 'Go live edited|Starting soon|Mic mute|Play / pause', persisted);
   check("saved deck no longer shows onboarding", await editor.eval("!document.querySelector('.setup-shell')"));
   check('custom icon survives reload', await editor.eval("!!document.querySelector('.control-tile .lucide-star')"));
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
@@ -1462,6 +1464,7 @@ try {
   await admin.eval("window.__holdSave = true");
   await admin.eval(setSelect('#page-switcher', 'page_media'));
   check('page edits immediately disarm controls and block re-arming while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.status-footer').dataset.ready === 'false'"));
+  check('routine native saves do not flash a saving or readiness message', await admin.eval("!document.querySelector('.desktop-mode-note') && !document.querySelector('.preview-feedback') && !document.querySelector('.workspace-feedback').textContent.includes('Saving')"));
   await admin.eval("window.__holdSave = false; window.__finishSave()");
   await admin.waitFor("document.querySelector('.status-footer').dataset.ready === 'true'");
   await chooseDesktopMode(admin, 'Live');
@@ -1551,8 +1554,9 @@ try {
   const pageBox = await manage.eval(rectOf('.page-dialog'));
   await pointerClick(manage, pageBox.cx, pageBox.top + 6);
   check("clicking inside the page manager padding keeps it open", await manage.eval("document.querySelector('.page-dialog').open"));
+  await manage.eval("window.__pageManagerClosed = false; document.querySelector('.page-dialog').addEventListener('close', () => { window.__pageManagerClosed = true; }, { once: true })");
   await pointerClick(manage, Math.max(5, pageBox.left - 40), pageBox.cy);
-  check("a backdrop click closes the page manager", await manage.waitFor("!document.querySelector('.page-dialog').open"));
+  check("a backdrop click closes the page manager", await manage.waitFor("!document.querySelector('.page-dialog').open && window.__pageManagerClosed"));
   check("focus returns to the Manage pages button", await manage.eval("document.activeElement.getAttribute('aria-label') === 'Manage pages'"));
   await manage.eval(click('[aria-label="Manage pages"]'));
   await manage.waitFor("document.querySelector('.page-dialog').open");
@@ -1730,7 +1734,22 @@ try {
   const touchOrderHandle = await narrow.eval(rectOf('.control-tile'));
   await narrow.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x:touchOrderHandle.cx,y:touchOrderHandle.cy}] });
   await narrow.send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] });
-  check('touch selects with a labelled position alternative without pressing the key', await narrow.waitFor("!!document.querySelector('.control-tile.is-selected') && !!document.querySelector('.inspector-dock select[aria-label]') && !document.querySelector('.is-pressed')"));
+  check('touch selects a tile directly without a Position dropdown or pressing the key', await narrow.waitFor("!!document.querySelector('.control-tile.is-selected') && !document.querySelector('.inspector-dock select[aria-label^=\"Position of\"]') && !document.querySelector('.is-pressed')"));
+  await narrow.eval("document.querySelector('.control-tile.is-selected .tile-primary').focus()");
+  await altArrow(narrow, 'ArrowDown');
+  check('Alt Down moves a full visual row in a two-column layout', await narrow.waitFor("document.querySelectorAll('.control-tile')[2].classList.contains('is-selected') && document.activeElement.matches('.control-tile.is-selected .tile-primary') && !document.querySelector('.preview-feedback')"));
+  await altArrow(narrow, 'ArrowUp');
+  check('Alt Up returns to the previous visual row', await narrow.waitFor("document.querySelector('.control-tile').classList.contains('is-selected')"));
+  for (const [width, columns] of [[960, 4], [600, 3]]) {
+    await narrow.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: false });
+    await narrow.waitFor(`getComputedStyle(document.querySelector('.control-grid')).gridTemplateColumns.split(' ').length === ${columns}`);
+    await narrow.eval("document.querySelector('.control-tile.is-selected .tile-primary').focus()");
+    await altArrow(narrow, 'ArrowDown');
+    check(`Alt Down follows the rendered ${columns}-column layout`, await narrow.waitFor(`document.querySelectorAll('.control-tile')[${columns}].classList.contains('is-selected') && !document.querySelector('.preview-feedback')`));
+    await altArrow(narrow, 'ArrowUp');
+    check(`Alt Up follows the rendered ${columns}-column layout`, await narrow.waitFor("document.querySelector('.control-tile').classList.contains('is-selected')"));
+  }
+  await narrow.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 844, deviceScaleFactor: 1, mobile: true });
   await narrow.eval("location.hash = '#/phone'");
   await narrow.waitFor("!!document.querySelector('.phone-shell')");
   check('full phone deck with long names fits a 320px viewport', await narrow.eval("document.querySelectorAll('.control-tile').length === 24 && document.documentElement.scrollWidth <= innerWidth"));

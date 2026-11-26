@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Moon, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone, Sun } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Moon, Plus, Settings, Smartphone, Sun } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -348,7 +348,7 @@ export default function App() {
     const next = moveControl(deck, page.id, controlId, targetIndex - index);
     if (next === deck) return;
     commitDeck(next);
-    setPreviewNotice(`Moved ${page.controls[index].label} to position ${targetIndex + 1} of ${page.controls.length}.`);
+    setPreviewNotice(null);
   };
 
   const handleSelectPage = (pageId: string) => {
@@ -449,7 +449,7 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
       onClick={(event) => {
         if (route === "editor" && event.target instanceof Element &&
-          !event.target.closest(".control-tile, .inspector-dock, .status-footer, dialog")) setSelectedControlId(null);
+          !event.target.closest(".control-tile, .inspector-region, .status-footer, dialog")) setSelectedControlId(null);
       }}
     >
       <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
@@ -467,12 +467,6 @@ export default function App() {
             <Plus size={15} aria-hidden="true" /> Add control
           </button>
         ) : null}
-
-        {route === "editor" ? <button type="button" className="icon-button"
-          aria-label={sidebar.collapsed ? "Expand Inspector sidebar" : "Collapse Inspector sidebar"}
-          aria-expanded={!sidebar.collapsed} aria-controls="inspector-sidebar" onClick={toggleSidebar}>
-          {sidebar.collapsed ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />}
-        </button> : null}
 
         <a
           className="button secondary"
@@ -639,7 +633,6 @@ export default function App() {
             ) : null}
 
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
-            {nativeMode && !desktop.ready ? <p className="desktop-mode-note">Save a valid synchronized deck before arming controls.</p> : null}
             {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys.</p> : null}
             <div className="deck-workbench">
               <div className="control-grid">
@@ -686,24 +679,13 @@ export default function App() {
 
           </section>
 
+          <div className="inspector-region">
+          <button type="button" className="inspector-toggle"
+            aria-label={sidebar.collapsed ? "Expand Inspector sidebar" : "Collapse Inspector sidebar"}
+            aria-expanded={!sidebar.collapsed} aria-controls="inspector-sidebar" onClick={toggleSidebar}>
+            {sidebar.collapsed ? <ChevronLeft size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          </button>
           <section className="inspector-dock" id="inspector-sidebar" aria-label="Control properties" hidden={sidebar.collapsed}>
-            {selectedControl && !desktop.live ? <label className="field"><span>Position</span>
-              <select aria-label={`Position of ${selectedControl.label}`} value={page.controls.indexOf(selectedControl)}
-                disabled={desktop.inflight || !!desktop.pending}
-                onChange={(event) => handleMoveControl(selectedControl.id, Number(event.target.value))}
-                onKeyDown={(event) => {
-                  if (event.altKey || event.ctrlKey || event.metaKey) return;
-                  const index = page.controls.indexOf(selectedControl);
-                  const target = event.key === "Home" ? 0 : event.key === "End" ? page.controls.length - 1
-                    : event.key === "ArrowUp" ? Math.max(0, index - 1)
-                    : event.key === "ArrowDown" ? Math.min(page.controls.length - 1, index + 1) : null;
-                  if (target === null) return;
-                  event.preventDefault();
-                  handleMoveControl(selectedControl.id, target);
-                }}>
-                {page.controls.map((control, index) => <option key={control.id} value={index}>{index + 1} of {page.controls.length}</option>)}
-              </select>
-            </label> : null}
             <Inspector
               key={selectedControl?.id ?? "empty"}
               control={selectedControl}
@@ -720,6 +702,7 @@ export default function App() {
               }
             />
           </section>
+          </div>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
             manifests={enabledPluginManifests(plugin.snapshots)}

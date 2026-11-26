@@ -5,6 +5,7 @@ import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
+import { verticalReorderIndex } from "../lib/tileNavigation";
 
 const VOLUME_COMMIT_KEYS = new Set([
   "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
@@ -141,11 +142,16 @@ export function ControlTile({
       onKeyDownCapture={(event) => {
         if (event.key === "Escape") clearDrag();
         if (!order || disabled || !event.altKey || event.ctrlKey || event.metaKey) return;
-        const target = event.key === "ArrowUp" || event.key === "ArrowLeft" ? order.index - 1
-          : event.key === "ArrowDown" || event.key === "ArrowRight" ? order.index + 1 : null;
-        if (target === null) return;
+        if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
         event.preventDefault();
         event.stopPropagation();
+        const tiles = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLElement>(".control-tile") ?? []);
+        const target = event.key === "ArrowLeft" ? order.index - 1 : event.key === "ArrowRight" ? order.index + 1
+          : verticalReorderIndex(tiles.map(tile => ({
+            // Layout bounds ignore entrance/press transforms while keys are moving.
+            top: tile.offsetTop, bottom: tile.offsetTop + tile.offsetHeight,
+            left: tile.offsetLeft, right: tile.offsetLeft + tile.offsetWidth,
+          })), order.index, event.key === "ArrowUp" ? "up" : "down");
         order.move(control.id, Math.max(0, Math.min(order.total - 1, target)));
       }}
     >
@@ -155,7 +161,7 @@ export function ControlTile({
         <button
           type="button" className="tile-primary" onClick={onPrimary} disabled={disabled || (semantics !== "preview" && (!presentationCompatible(control, plugins) || busy))}
           aria-label={busy ? `${primaryLabel} — running` : primaryLabel}
-          aria-description={order ? "Drag to reorder, or use Alt + arrow keys. Position is also available in the Inspector." : undefined}
+          aria-description={order ? "Drag tiles to reorder, or use Alt + arrow keys." : undefined}
           aria-keyshortcuts={order ? "Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight" : undefined}
           aria-pressed={variant === "editor" ? selected : undefined} title={controlSummary(control)}
         >

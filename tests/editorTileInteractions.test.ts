@@ -15,12 +15,28 @@ const event = (extra = {}) => ({ preventDefault: vi.fn(), stopPropagation: vi.fn
 describe("Editor tile interactions", () => {
   it("captures Alt + arrows before nested sliders/dials can change their targets", () => {
     const move = vi.fn();
-    const tile = ControlTile({ control, variant: "editor", volume: 50, order: { index: 1, total: 3, move } });
-    const key = event({ key: "ArrowDown", altKey: true, ctrlKey: false, metaKey: false });
+    const tiles = Array.from({ length: 6 }, (_, index) => ({
+      offsetLeft: index % 2 * 110, offsetWidth: 100,
+      offsetTop: Math.floor(index / 2) * 106, offsetHeight: 96,
+      getBoundingClientRect: () => { throw new Error("Animated bounds must not determine the row"); },
+    }));
+    const tile = ControlTile({ control, variant: "editor", volume: 50, order: { index: 1, total: 6, move } });
+    const key = event({ key: "ArrowDown", altKey: true, ctrlKey: false, metaKey: false,
+      currentTarget: { parentElement: { querySelectorAll: () => tiles } } });
     tile.props.onKeyDownCapture(key);
-    expect(move).toHaveBeenCalledWith(control.id, 2);
+    expect(move).toHaveBeenCalledWith(control.id, 3);
     expect(key.preventDefault).toHaveBeenCalledOnce();
     expect(key.stopPropagation).toHaveBeenCalledOnce();
+  });
+
+  it("keeps horizontal arrows as single-slot moves and clamps at the edge", () => {
+    const move = vi.fn();
+    const tile = ControlTile({ control, variant: "editor", volume: 50, order: { index: 0, total: 3, move } });
+    const currentTarget = { parentElement: null };
+    tile.props.onKeyDownCapture(event({ key: "ArrowRight", altKey: true, currentTarget }));
+    expect(move).toHaveBeenLastCalledWith(control.id, 1);
+    tile.props.onKeyDownCapture(event({ key: "ArrowLeft", altKey: true, currentTarget }));
+    expect(move).toHaveBeenLastCalledWith(control.id, 0);
   });
 
   it("captures Editor tile clicks as selection, not a nested target/action gesture", () => {
