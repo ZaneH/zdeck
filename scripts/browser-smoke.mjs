@@ -1227,11 +1227,13 @@ try {
   await admin.screenshot('/tmp/zdeck-custom-icons-plugin-narrow.png');
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
   check('actual Spotify metadata creates a slider with a sensible volume default', await admin.eval("document.querySelector('.inspector-form .native-control input').value === '50' && document.querySelector('.control-tile.is-selected input[type=range]')?.step === '1'"));
-  const spotifyPresentation = "[...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select')";
-  check('Spotify Presentation chooser is reachable with button, slider and dial', await admin.eval(`(() => { const select = ${spotifyPresentation}; const r = select.getBoundingClientRect(); return r.width > 0 && r.height > 0 && [...select.options].map(o => o.value).join(',') === 'button,slider,dial'; })()`));
-  await admin.eval(`{ const select = ${spotifyPresentation}; select.value='button'; select.dispatchEvent(new Event('change',{bubbles:true})); }`);
+  await admin.eval(click('.presentation-picker summary'));
+  check('Spotify Presentation picker matches Action with button, slider and dial', await admin.eval("(() => { const picker = document.querySelector('.presentation-picker'); const r = picker.getBoundingClientRect(); return picker.matches('.icon-picker.action-picker') && r.width > 0 && r.height > 0 && [...picker.querySelectorAll('button')].map(b => b.textContent).join(',') === 'Button,Slider,Dial'; })()"));
+  await admin.eval(clickText('.presentation-picker button', 'Button'));
   check('saved Spotify actions can explicitly use a button', await admin.waitFor("document.querySelector('.control-tile.is-selected')?.dataset.presentation === 'button'"));
-  await admin.eval(`{ const select = ${spotifyPresentation}; select.value='slider'; select.dispatchEvent(new Event('change',{bubbles:true})); }`);
+  check('Presentation selection closes picker and restores summary focus', await admin.eval("!document.querySelector('.presentation-picker').open && document.activeElement === document.querySelector('.presentation-picker summary')"));
+  await admin.eval(click('.presentation-picker summary'));
+  await admin.eval(clickText('.presentation-picker button', 'Slider'));
   check('selecting Spotify Slider updates the tile', await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')"));
   await admin.eval(setValue('.inspector-form .native-control input', '101'));
   check('invalid plugin bounds disable Run', await admin.eval("document.querySelector('.inspector-form .native-control .button.primary').disabled"));
@@ -1275,7 +1277,8 @@ try {
   check('busy pointer slider coalesces movement and release into the final target', await admin.waitFor(`window.__desktopCalls.length === 4 && window.__desktopCalls.at(-1).value === ${pointerFinal}`));
   await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
   await admin.eval(clickText('.desktop-mode button', 'Preview'));
-  await admin.eval("[...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').value = 'dial'; [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').dispatchEvent(new Event('change',{bubbles:true}))");
+  await admin.eval(click('.presentation-picker summary'));
+  await admin.eval(clickText('.presentation-picker button', 'Dial'));
   await admin.waitFor("!!document.querySelector('.control-tile.is-selected .dial-face')");
   await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
   await pressKey(admin, 'End', 'End', 35);
@@ -1307,7 +1310,8 @@ try {
   await admin.eval(click('.add-control')); await admin.waitFor("!!document.querySelector('.action-row')");
   await admin.eval(clickText('.action-row', 'Generic power'));
   await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
-  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-switch'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  await admin.eval(click('.presentation-picker summary'));
+  await admin.eval(clickText('.presentation-picker button', 'Toggle switch'));
   await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
   await admin.eval(clickText('.desktop-mode button', 'Live'));
   check('live unknown toggle is disabled without claiming Off', await admin.eval("document.querySelector('.control-tile.is-selected .tile-toggle').disabled && !document.querySelector('.control-tile.is-selected .tile-toggle').hasAttribute('aria-checked') && document.querySelector('.control-tile.is-selected .tile-toggle').textContent.includes('State unknown')"));
@@ -1325,7 +1329,8 @@ try {
   check('switch respects reduced motion', await admin.eval("parseFloat(getComputedStyle(document.querySelector('.control-tile.is-selected .toggle-track span')).transitionDuration) <= .001"));
   await admin.send('Emulation.setEmulatedMedia', {features:[]});
   await admin.eval(clickText('.desktop-mode button', 'Preview'));
-  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-button'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  await admin.eval(click('.presentation-picker summary'));
+  await admin.eval(clickText('.presentation-picker button', 'Toggle button'));
   check('toggle button exposes observed pressed state', await admin.waitFor("document.querySelector('.control-tile.is-selected .tile-toggle')?.getAttribute('aria-pressed') === 'true'"));
   check('all presentations stay within their configured key height', await admin.eval("[...document.querySelectorAll('.control-tile')].every(tile => [...tile.children].filter(child => !child.matches('.tile-order')).every(child => child.getBoundingClientRect().bottom <= tile.getBoundingClientRect().bottom + 1))"));
   await admin.screenshot('/tmp/zdeck-control-presentations.png');

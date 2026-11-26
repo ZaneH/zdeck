@@ -32,7 +32,9 @@ describe("actual Spotify set-volume presentation", () => {
       plugin: { native: true, snapshots: plugins, busy: {}, errors: {}, completedIds: {} },
       onPatch: vi.fn(), onRemove: vi.fn(), onPreviewPress: vi.fn(), onPreviewVolume: vi.fn(),
     } as unknown as ComponentProps<typeof Inspector>));
-    expect(html).toMatch(/<details class="inspector-section" open="">[\s\S]*<span>Presentation<\/span><select>[\s\S]*<option value="slider">Slider<\/option>/);
+    expect(html).toContain('class="icon-picker action-picker presentation-picker"');
+    expect(html).toMatch(/<summary><span>Presentation<\/span><span class="icon-picker-status">Button<\/span>/);
+    expect(html).toMatch(/aria-label="Choose presentation"><button type="button" aria-pressed="true">Button<\/button><button type="button" aria-pressed="false">Slider<\/button>/);
   });
 
   it("round-trips the chosen slider without changing saved args and dispatches only the scalar target", async () => {

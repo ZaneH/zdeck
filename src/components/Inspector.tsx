@@ -17,6 +17,10 @@ import { formatPercent } from "../lib/useSystemConsole";
 import { useMediaPermission } from "../lib/useMediaPermission";
 import type { ApplyFeedback, SystemConsole } from "../lib/useSystemConsole";
 
+const PRESENTATION_LABELS: Record<Presentation, string> = {
+  button: "Button", slider: "Slider", dial: "Dial", "toggle-switch": "Toggle switch", "toggle-button": "Toggle button",
+};
+
 interface InspectorProps {
   control: Control | null;
   pageName: string;
@@ -213,13 +217,22 @@ export function Inspector({
               </div>
             </details>
 
-            <label className="field"><span>Presentation</span>
-              <select value={effectivePresentation(control, plugin.snapshots)} onChange={(event) => onPatch({ presentation: event.target.value as Presentation })}>
-                {compatiblePresentations(control, plugin.snapshots).map((value) => <option key={value} value={value}>
-                  {{ button: "Button", slider: "Slider", dial: "Dial", "toggle-switch": "Toggle switch", "toggle-button": "Toggle button" }[value]}
-                </option>)}
-              </select>
-            </label>
+            <details className="icon-picker action-picker presentation-picker">
+              <summary><span>Presentation</span>
+                <span className="icon-picker-status">{PRESENTATION_LABELS[effectivePresentation(control, plugin.snapshots)]}</span>
+                <ChevronDown className="icon-picker-toggle" size={16} aria-hidden="true" />
+              </summary>
+              <div className="icon-picker-body" role="group" aria-label="Choose presentation">
+                {compatiblePresentations(control, plugin.snapshots).map((value) => <button type="button" key={value}
+                  aria-pressed={effectivePresentation(control, plugin.snapshots) === value}
+                  onClick={(event) => {
+                    onPatch({ presentation: value });
+                    const details = event.currentTarget.closest("details")!;
+                    details.open = false;
+                    details.querySelector("summary")?.focus();
+                  }}>{PRESENTATION_LABELS[value]}</button>)}
+              </div>
+            </details>
             <IconPicker key={control.id} control={control} manifests={enabledPluginManifests(plugin.snapshots)} onPatch={onPatch} />
 
               </div>
