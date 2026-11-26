@@ -1,6 +1,9 @@
 import { newId } from "./actions";
 import { activePage, findPage, isDeck, isRecord } from "./deck";
 import type { Control, Deck } from "./types";
+import { parsePluginSnapshots } from "./plugin";
+import type { PluginSnapshots } from "./plugin";
+import { effectivePresentation, presentationCompatible, validControlValue } from "./presentations";
 
 /**
  * Authenticated phone client for the private desktop service.
@@ -60,6 +63,7 @@ export interface ActivityEntry {
 export interface RemotePhoneSnapshot {
   phase: RemotePhase;
   deck: Deck | null;
+  plugins: PluginSnapshots;
   revision: number | null;
   pageId: string | null;
   invite: string | null;
@@ -198,6 +202,7 @@ export function validateDeviceName(name: string): string | null {
 export interface RemoteSnapshot {
   revision: number;
   deck: Deck;
+  plugins?: PluginSnapshots;
 }
 
 /** Protocol/shape check. Fails closed on anything but a valid desktop deck. */
@@ -210,7 +215,9 @@ export function parseSnapshot(payload: unknown): RemoteSnapshot | null {
     return null;
   }
   if (!isDeck(payload.deck)) return null;
-  return { revision, deck: payload.deck };
+  const plugins = payload.plugins === undefined ? undefined : parsePluginSnapshots(payload.plugins);
+  if (plugins === null) return null;
+  return { revision, deck: payload.deck, ...(plugins ? { plugins } : {}) };
 }
 
 export function sanitizeMessage(value: unknown): string | null {
@@ -254,7 +261,7 @@ export function parseCommandResult(payload: unknown, expectedId?: string): Comma
 }
 
 /**
- * Build the exact command payload. Only volume carries a `value`; action kinds,
+ * Build the exact command payload. Only a bounded scalar target is sent; action kinds,
  * scenes, and executables are never sent from the phone.
  */
 export function buildCommandPayload(
@@ -265,7 +272,7 @@ export function buildCommandPayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = { id, revision, controlId };
   if (value !== undefined) {
-    if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error("Invalid volume target.");
+    if (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER) throw new Error("Invalid control target.");
     payload.value = value;
   }
   return payload;
@@ -284,6 +291,7 @@ function initialSnapshot(): RemotePhoneSnapshot {
   return {
     phase: "checking",
     deck: null,
+    plugins: {},
     revision: null,
     pageId: null,
     invite: null,
@@ -321,6 +329,7 @@ export class RemotePhoneConnection {
   private statusInFlight = false;
   private pairInFlight = false;
   private commandInFlight = false;
+  private queuedValue: { controlId: string; value: number; revision: number } | null = null;
   private reconnectAttempt = 0;
   private lastRevision = 0;
   private approved = false;
@@ -354,6 +363,7 @@ export class RemotePhoneConnection {
   }
 
   private nextEpoch(): void {
+    this.queuedValue = null;
     this.epoch += 1;
     for (const controller of this.requests) controller.abort();
     this.requests.clear();
@@ -689,6 +699,7 @@ export class RemotePhoneConnection {
       deck: snapshot.deck,
       revision: snapshot.revision,
       pageId: this.choosePage(snapshot.deck),
+      plugins: snapshot.plugins ?? {},
       phase: "connecting",
       statusText: "Waiting for a live update…",
     });
@@ -754,6 +765,7 @@ export class RemotePhoneConnection {
     this.reconnectAttempt = 0;
     this.update({
       deck: snapshot.deck,
+      plugins: snapshot.plugins ?? {},
       revision: snapshot.revision,
       pageId: this.choosePage(snapshot.deck),
       phase: "active",
@@ -819,6 +831,12 @@ export class RemotePhoneConnection {
     }, delay);
   }
 
+  private takeQueuedValue() {
+    const queued = this.queuedValue;
+    this.queuedValue = null;
+    return queued;
+  }
+
   /** Non-mutating resync after a stale-revision conflict. */
   private resync(): void {
     if (this.stopped || !this.foreground) return;
@@ -853,8 +871,16 @@ export class RemotePhoneConnection {
   private async sendCommand(controlId: string, value?: number): Promise<void> {
     if (this.stopped || this.snap.phase !== "active" || this.snap.revision === null) return;
     const saved = this.snap.deck?.pages.flatMap((page) => page.controls).find((control) => control.id === controlId);
-    if (!saved || (value !== undefined && saved.action !== "volume")) return;
-    if (this.commandInFlight) return;
+    if (!saved || !presentationCompatible(saved, this.snap.plugins)
+      || (value === undefined ? effectivePresentation(saved, this.snap.plugins) !== "button"
+        : !validControlValue(saved, value, this.snap.plugins))) return;
+    if (this.commandInFlight || this.snap.busyControlId !== null) {
+      if (value !== undefined && ["slider", "dial"].includes(effectivePresentation(saved, this.snap.plugins))) {
+        this.queuedValue = { controlId, value, revision: this.snap.revision };
+      }
+      return;
+    }
+    this.queuedValue = null;
     const epoch = this.epoch;
     const revision = this.snap.revision;
     const id = this.deps.randomId();
@@ -951,17 +977,23 @@ export class RemotePhoneConnection {
     this.update({ busyControlId: null, result: parsed, resultKind: parsed.state });
     if (parsed.state === "unknown") this.flagUnknown(controlId, parsed.message);
     else this.recordActivity(controlId, parsed.state, parsed.message);
+    const queued = this.takeQueuedValue();
+    if (parsed.state === "confirmed" && queued && queued.revision === this.snap.revision) {
+      await this.sendCommand(queued.controlId, queued.value);
+    } else if (saved.action === "plugin" && ["toggle-switch", "toggle-button"].includes(effectivePresentation(saved, this.snap.plugins))) {
+      this.resync();
+    }
   }
 
-  /** A tapped control. Volume never sends through this path. */
+  /** Only button presentations send through the primary-press path. */
   pressControl(control: Control): void {
-    if (control.action === "volume") return;
+    if (effectivePresentation(control, this.snap.plugins) !== "button") return;
     void this.sendCommand(control.id);
   }
 
-  /** Deliberate slider release / key-up. Value is the target, not a reading. */
+  /** Deliberate adjustment or explicit boolean target (0/1), never a device reading. */
   commitVolume(control: Control, value: number): void {
-    if (control.action !== "volume" || !Number.isFinite(value) || value < 0 || value > 100) return;
+    if (!validControlValue(control, value, this.snap.plugins)) return;
     void this.sendCommand(control.id, value);
   }
 

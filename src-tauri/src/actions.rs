@@ -62,8 +62,8 @@ pub(crate) fn validate_command_fields(id: &str, control_id: &str, value: Option<
     fn valid_id(s: &str) -> bool { !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control) }
     if !valid_id(id) { return Err(ActionError::invalid("The command ID is invalid.")); }
     if !valid_id(control_id) { return Err(ActionError::invalid("The control ID is invalid.")); }
-    if value.is_some_and(|v| !v.is_finite() || !(0.0..=100.0).contains(&v)) {
-        return Err(ActionError::invalid("Volume must be a finite number between 0 and 100."));
+    if value.is_some_and(|v| !v.is_finite() || v.abs() > 9_007_199_254_740_991.0) {
+        return Err(ActionError::invalid("Target must be a finite safe number."));
     }
     Ok(())
 }
@@ -71,13 +71,19 @@ pub(crate) fn find_control<'a>(deck: &'a Deck, id: &str) -> Option<&'a Control> 
     deck.pages.iter().flat_map(|page| &page.controls).find(|control| control.id == id)
 }
 pub(crate) fn validate_action_value(control: &Control, value: Option<f64>) -> Result<(), ActionError> {
+    if value.is_some() && control.presentation.as_deref() == Some("button") {
+        return Err(ActionError::invalid("Button presentations use their saved configuration."));
+    }
     match control.action {
         ControlAction::Volume { .. } => {
             if value.is_some_and(|v| !v.is_finite() || !(0.0..=100.0).contains(&v)) {
                 return Err(ActionError::invalid("Volume must be a finite number between 0 and 100."));
             }
         }
-        _ if value.is_some() => return Err(ActionError::invalid("Only a volume control accepts a value.")),
+        ControlAction::Plugin { .. } if matches!(control.presentation.as_deref(), Some("slider" | "dial" | "toggle-switch" | "toggle-button")) => {
+            if value.is_none() { return Err(ActionError::invalid("This presentation requires an explicit target.")); }
+        }
+        _ if value.is_some() => return Err(ActionError::invalid("This control does not accept a target value.")),
         _ => (),
     }
     Ok(())
@@ -95,6 +101,28 @@ pub struct ActionDispatcher {
 impl ActionDispatcher {
     pub fn new(obs: Arc<ObsState>, system: Arc<SystemState>, plugin: Arc<PluginRegistry>) -> Self {
         Self { obs, system, plugin, effect: Mutex::new(()) }
+    }
+    /// Only declared observed booleans accompany remote presentation metadata.
+    pub async fn presentation_plugins(&self) -> std::collections::BTreeMap<String, crate::plugin::PluginSnapshot> {
+        let mut snapshots = self.plugin.snapshots().await;
+        for snapshot in snapshots.values_mut() {
+            let mut observed = serde_json::Map::new();
+            if snapshot.last_error.is_none() && snapshot.status == crate::plugin::ConnectionStatus::Connected {
+                if let (Some(manifest), Some(state)) = (&snapshot.manifest, &snapshot.state) {
+                    for action in &manifest.actions {
+                        for field in action.config.values() {
+                            if let crate::plugin::ConfigField::Boolean { control: Some(control) } = field {
+                                if let Some(value) = state.get(&control.state_key).filter(|v| v.is_boolean()) {
+                                    observed.insert(control.state_key.clone(), value.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            snapshot.state = (snapshot.status == crate::plugin::ConnectionStatus::Connected).then_some(observed);
+        }
+        snapshots
     }
     /// Rust-only dispatcher. Transports must resolve the control from DeckStore
     /// and bound admission before calling; this is not a frontend action API.
@@ -137,7 +165,13 @@ impl ActionDispatcher {
                 Err(error) => system_error_result(id, error),
             },
             ControlAction::Plugin { plugin_id, plugin_action, plugin_args } => {
-                match self.plugin.execute(plugin_id.clone(), plugin_action.clone(), Value::Object(plugin_args.clone())).await {
+                let outcome = if let Some(value) = value {
+                    self.plugin.execute_value(plugin_id.clone(), plugin_action.clone(), Value::Object(plugin_args.clone()), value,
+                        matches!(control.presentation.as_deref(), Some("toggle-switch" | "toggle-button"))).await
+                } else {
+                    self.plugin.execute(plugin_id.clone(), plugin_action.clone(), Value::Object(plugin_args.clone())).await
+                };
+                match outcome {
                     Ok(snapshot) => CommandResult {
                         id: id.to_string(), state: CommandState::Confirmed,
                         message: "Plugin action completed and state was read.".to_string(),

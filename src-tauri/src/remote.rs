@@ -1145,6 +1145,7 @@ async fn state(State(inner): State<Arc<Inner>>, headers: HeaderMap) -> Result<Re
             "protocolVersion": PROTOCOL_VERSION,
             "revision": snapshot.revision,
             "deck": snapshot.deck,
+            "plugins": inner.actions.presentation_plugins().await,
         }),
     ))
 }
@@ -1247,7 +1248,7 @@ async fn run_socket(
             .await;
         return Ok(());
     }
-    if send_snapshot(&mut sink, &initial).await.is_err() {
+    if send_snapshot(&mut sink, &initial, &inner.actions).await.is_err() {
         return Ok(());
     }
 
@@ -1288,7 +1289,7 @@ async fn run_socket(
                 }
                 match load_saved_deck(inner.as_ref()).await {
                     Ok(snapshot) => {
-                        if send_snapshot(&mut sink, &snapshot).await.is_err() {
+                        if send_snapshot(&mut sink, &snapshot, &inner.actions).await.is_err() {
                             break;
                         }
                     }
@@ -1319,7 +1320,7 @@ async fn run_socket(
     Ok(())
 }
 
-async fn send_snapshot<S>(sink: &mut S, snapshot: &crate::deck::DeckSnapshot) -> Result<(), ()>
+async fn send_snapshot<S>(sink: &mut S, snapshot: &crate::deck::DeckSnapshot, actions: &ActionDispatcher) -> Result<(), ()>
 where
     S: Sink<Message, Error = tokio_websockets::Error> + Unpin,
 {
@@ -1328,6 +1329,7 @@ where
         "protocolVersion": PROTOCOL_VERSION,
         "revision": snapshot.revision,
         "deck": snapshot.deck,
+        "plugins": actions.presentation_plugins().await,
     });
     let text = serde_json::to_string(&payload).map_err(|_| ())?;
     sink.send(Message::text(text)).await.map_err(|_| ())

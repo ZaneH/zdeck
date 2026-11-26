@@ -25,7 +25,12 @@ export const ACTION_KINDS = [
 
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
+export const PRESENTATIONS = ["button", "slider", "dial", "toggle-switch", "toggle-button"] as const;
+export type Presentation = (typeof PRESENTATIONS)[number];
+export type PluginArgs = Record<string, number | boolean>;
+
 interface ControlBase {
+  presentation?: Presentation;
   id: string;
   label: string;
   icon?: ControlIcon;
@@ -57,17 +62,18 @@ export interface PluginControl extends ControlBase {
   action: "plugin";
   pluginId: string;
   pluginAction: string;
-  pluginArgs: Record<string, number>;
+  pluginArgs: PluginArgs;
 }
 
 export type ControlOptions = {
   autoLabel?: boolean;
+  presentation?: Presentation;
   label?: string;
   scene?: string;
   volume?: number;
   pluginId?: string;
   pluginAction?: string;
-  pluginArgs?: Record<string, number>;
+  pluginArgs?: PluginArgs;
 };
 
 export type Control =
@@ -92,6 +98,7 @@ export interface Deck {
 }
 
 export type ControlPatch = {
+  presentation?: Presentation;
   rowSpan?: number;
   columnSpan?: number;
   label?: string;
@@ -102,7 +109,7 @@ export type ControlPatch = {
   volume?: number;
   pluginId?: string;
   pluginAction?: string;
-  pluginArgs?: Record<string, number>;
+  pluginArgs?: PluginArgs;
 };
 
 export type StorageLike = {

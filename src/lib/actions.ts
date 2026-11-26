@@ -77,7 +77,7 @@ export function createControl(
       if (!pluginIdentifier(options.pluginId) || !pluginIdentifier(options.pluginAction) || !isPluginArgs(options.pluginArgs)) {
         throw new Error("Invalid plugin control configuration.");
       }
-      return { id, label, action: kind, pluginId: options.pluginId, pluginAction: options.pluginAction, pluginArgs: { ...options.pluginArgs } };
+      return { id, label, action: kind, ...(options.presentation ? { presentation: options.presentation } : {}), pluginId: options.pluginId, pluginAction: options.pluginAction, pluginArgs: { ...options.pluginArgs } };
     case "obs-scene": {
       const scene = options.scene?.trim() || "Scene 1";
       const autoLabel = options.autoLabel === true || !options.label?.trim();
@@ -94,7 +94,7 @@ export function createControl(
     case "media-play-pause":
       return { id, label, action: kind };
     case "volume":
-      return { id, label, action: kind, volume: clampVolume(options.volume ?? 50) };
+      return { id, label, action: kind, ...(options.presentation ? { presentation: options.presentation } : {}), volume: clampVolume(options.volume ?? 50) };
   }
 }
 

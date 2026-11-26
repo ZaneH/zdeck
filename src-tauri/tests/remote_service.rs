@@ -1304,10 +1304,66 @@ async fn commands_are_strict_and_reject_bad_input() {
     env.service.stop().await;
 }
 
+#[tokio::test]
+async fn presentation_targets_use_only_declared_plugin_fields_and_observed_booleans() {
+    let env = default_env().await;
+    let entry = env._dir.path.join("presentations.cjs");
+    std::fs::write(&entry, r#"
+let enabled=false,count=0;
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),base={protocolVersion:1,id:r.id,type:'result'};
+ if(r.type==='describe') {
+  process.stdout.write(JSON.stringify({...base,manifest:{id:'power',version:'1.0.0',protocolVersion:1,actions:[
+   {id:'level',title:'Level',config:{amount:{type:'integer',minimum:-20,maximum:200,control:{step:5}},zone:{type:'integer',minimum:1,maximum:4}}},
+   {id:'power',title:'Power',config:{enabled:{type:'boolean',control:{stateKey:'enabled'}}}},
+   {id:'unknown',title:'Unknown',config:{enabled:{type:'boolean',control:{stateKey:'missing'}}}}
+  ]}})+'\n'); return;
+ }
+ if(r.type==='execute'){count++;if(r.action==='power')enabled=r.args.enabled;}
+ process.stdout.write(JSON.stringify({...base,state:{enabled,count,args:r.args??{},private:'not for phone snapshot'}})+'\n');
+});
+"#).unwrap();
+    let node = std::process::Command::new("node").args(["-p","process.execPath"]).output().expect("Node required for presentation test");
+    assert!(node.status.success());
+    env.plugin.connect("power", String::from_utf8(node.stdout).unwrap().trim().into(), entry.to_str().unwrap().into()).await.unwrap();
+    env.plugin.state("power").await.unwrap();
+    let mut deck = default_deck();
+    for (id,action,args,presentation) in [("level","level",json!({"amount":50,"zone":2}),"dial"),
+        ("power","power",json!({"enabled":false}),"toggle-switch"), ("unknown","unknown",json!({"enabled":false}),"toggle-button"), ("mismatch","power",json!({"enabled":false}),"slider")] {
+        deck.pages[0].controls.push(serde_json::from_value(json!({"id":id,"label":id,"action":"plugin","pluginId":"power","pluginAction":action,"pluginArgs":args,"presentation":presentation})).unwrap());
+    }
+    env.deck.save(1,deck).await.unwrap();
+    let (_,token) = approved_device(&env,"Presentations").await;
+    let state = http_request(env.port,"GET","/api/v1/state",PUBLIC_HOST,None,Some(&token),None).await;
+    assert_eq!(state.status,200);
+    assert_eq!(state.json()["plugins"]["power"]["state"],json!({"enabled":false}));
+    assert_eq!(state.json()["plugins"]["power"]["manifest"]["actions"][0]["config"]["amount"]["control"],json!({"step":5}));
+    for (index,(id,target,expected)) in [("level",75.0,json!({"amount":75,"zone":2})),("power",1.0,json!({"enabled":true})),("power",0.0,json!({"enabled":false}))].into_iter().enumerate() {
+        let command = json!({"id":format!("valid_{index}"),"revision":2,"controlId":id,"value":target}).to_string();
+        let response = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        assert_eq!(response.status,200); assert_eq!(response.json()["state"],"confirmed"); assert_eq!(response.json()["observed"]["args"],expected);
+        let repeated = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        assert_eq!(repeated.json(),response.json());
+    }
+    for (index,(id,target)) in [("level",201.0),("level",2.0),("level",0.5),("power",2.0),("power",0.5),("mismatch",1.0),("unknown",1.0)].into_iter().enumerate() {
+        let command = json!({"id":format!("invalid_{index}"),"revision":2,"controlId":id,"value":target}).to_string();
+        let response = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        assert_eq!(response.status,200); assert_eq!(response.json()["state"],"failed"); assert_eq!(response.json()["code"],"plugin_setup_required");
+    }
+    let missing = json!({"id":"missing-target","revision":2,"controlId":"level"}).to_string();
+    assert_eq!(http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&missing)).await.status,400);
+    let command = json!({"id":"injected","revision":2,"controlId":"level","value":75,"args":{"zone":4}}).to_string();
+    assert_eq!(http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await.status,400);
+    let observed = env.plugin.snapshot("power").await.unwrap().state.unwrap();
+    assert_eq!(observed["count"],3,"invalid targets and duplicates never execute");
+    assert_eq!(observed["enabled"],false);
+    env.plugin.disconnect("power").await.unwrap(); env.service.stop().await;
+}
+
 async fn plugin_deck(env: &TestEnv) {
     let mut deck = default_deck();
     deck.pages[0].controls.push(deck_lib::deck::Control {
-        id: "ctl_plugin".into(), label: "Plugin volume".into(), row_span: None, column_span: None, icon: None,
+        id: "ctl_plugin".into(), label: "Plugin volume".into(), row_span: None, column_span: None, icon: None, presentation: None,
         action: deck_lib::deck::ControlAction::Plugin {
             plugin_id: "fake".into(), plugin_action: "set-volume".into(),
             plugin_args: json!({"volume":50}).as_object().unwrap().clone(),
@@ -1352,7 +1408,7 @@ let count=0;require('node:readline').createInterface({input:process.stdin}).on('
 });
 "#;
         std::fs::write(&entry,source).unwrap();env.plugin.connect(id,node.clone(),entry.to_str().unwrap().into()).await.unwrap();
-        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),row_span:None,column_span:None,icon:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
+        deck.pages[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),row_span:None,column_span:None,icon:None,presentation:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
     }
     env.deck.save(1,deck).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
     for (id,volume) in [("alpha",17),("beta",83)] {
@@ -1402,7 +1458,7 @@ rl.on('line',line=>{
         let result = first.json();
         if crash {
             assert_eq!(result["state"],"unknown"); assert_eq!(result["code"],"plugin_outcome_unknown");
-            assert_eq!(env.plugin.snapshot("fake").await.unwrap().status,deck_lib::plugin::ConnectionStatus::Stopped);
+            assert_eq!(env.plugin.snapshot("fake").await.unwrap().status,deck_lib::plugin::ConnectionStatus::Disconnected);
         } else {
             assert_eq!(result["state"],"confirmed"); assert_eq!(result["observed"]["volume"],50);
             assert_eq!(env.plugin.snapshot("fake").await.unwrap().state.unwrap()["count"],1,"desktop sees remote result");

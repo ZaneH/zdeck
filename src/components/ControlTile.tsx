@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { GripVertical } from "lucide-react";
+import { controlContract, effectivePresentation, presentationCompatible } from "../lib/presentations";
+import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
@@ -12,6 +14,7 @@ const VOLUME_COMMIT_KEYS = new Set([
 
 interface ControlTileProps {
   control: Control;
+  plugins?: PluginSnapshots;
   order?: { index: number; total: number; move: (sourceId: string, targetIndex: number) => void };
   variant: "editor" | "phone";
   volume: number;
@@ -24,13 +27,13 @@ interface ControlTileProps {
   semantics?: "preview" | "remote" | "live";
   onPrimary?: () => void;
   onVolumeChange?: (value: number) => void;
-  /** Fired on deliberate slider release or value key-up, never on cancel/blur. */
+  /** Numeric targets stream during live gestures; preview targets fire on release. Never fires on cancel/blur. */
   onVolumeCommit?: (value: number) => void;
 }
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order,
+  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {},
 }: ControlTileProps) {
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
@@ -43,10 +46,34 @@ export function ControlTile({
     setDragging(false);
   }
   useEffect(() => () => { dropTarget.current?.classList.remove("is-drop-target"); }, []);
+  const contract = controlContract(control, plugins);
+  const presentation = effectivePresentation(control, plugins);
+  const numeric = contract?.kind === "numeric" && (presentation === "slider" || presentation === "dial") ? contract : null;
+  const toggle = contract?.kind === "boolean" && (presentation === "toggle-switch" || presentation === "toggle-button") ? contract : null;
+  const [localValue, setLocalValue] = useState<number | null>(null);
+  const [previewToggle, setPreviewToggle] = useState<boolean | null>(null);
+  useEffect(() => { setLocalValue(null); setPreviewToggle(null); }, [control.id, control.action, control.presentation, semantics, control.action === "plugin" ? JSON.stringify(control.pluginArgs) : volume]);
+  const currentValue = localValue ?? (control.action === "volume" ? volume : numeric?.value ?? 0);
+  const toggleValue = semantics === "preview" ? previewToggle ?? toggle?.value : toggle?.value;
+  const valueRef = useRef(currentValue);
+  valueRef.current = currentValue;
+  const sentValue = useRef<number | null>(null);
+  const commitValue = (value: number) => {
+    if (sentValue.current === value) return;
+    sentValue.current = value;
+    onVolumeCommit?.(value);
+  };
+  const changeValue = (value: number) => {
+    valueRef.current = value;
+    setLocalValue(value);
+    onVolumeChange?.(value);
+    if (!disabled && semantics !== "preview" && (volumeGesture.current || dialPointer.current)) commitValue(value);
+  };
+  const dialPointer = useRef<{ id: number; y: number; value: number } | null>(null);
   const remote = semantics === "remote";
   const live = semantics === "live";
   const volumeGesture = useRef<string | null>(null);
-  useEffect(() => { volumeGesture.current = null; }, [disabled, control.id, semantics]);
+  useEffect(() => { volumeGesture.current = null; dialPointer.current = null; }, [disabled, control.id, semantics]);
   const content = (
     <>
       <span className="tile-icon"><ActionIcon kind={control.action} icon={control.icon} size={22} /></span>
@@ -55,7 +82,7 @@ export function ControlTile({
   );
 
   const primaryLabel =
-    live && control.action !== "volume"
+    live && presentation === "button"
       ? `Run ${control.label} on this computer`
       : variant === "editor"
       ? `Select ${control.label}`
@@ -66,8 +93,10 @@ export function ControlTile({
   return (
     <article
       className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
-      style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}` } as CSSProperties}
-      data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
+      style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}`,
+        ...(numeric ? { "--control-fill": `${100 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}%` } : {}),
+      } as CSSProperties}
+      data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
       data-order-index={order?.index}
       onPointerMove={(event) => {
         const gesture = drag.current;
@@ -133,46 +162,107 @@ export function ControlTile({
           {Array.from({ length: order.total }, (_, index) => <option key={index} value={index}>{index + 1} of {order.total}</option>)}
         </select></label>
       </details> : null}
-      {control.action === "volume" && variant === "phone" ? (
+      {(numeric || toggle) && variant === "phone" ? (
         <div className="tile-primary tile-primary-static">{content}</div>
       ) : (
         <button
-          type="button" className="tile-primary" onClick={onPrimary} disabled={disabled}
+          type="button" className="tile-primary" onClick={onPrimary} disabled={disabled || (semantics !== "preview" && (!presentationCompatible(control, plugins) || busy))}
           aria-label={busy ? `${primaryLabel} — running` : primaryLabel}
           aria-pressed={variant === "editor" ? selected : undefined} title={controlSummary(control)}
         >
           {content}
         </button>
       )}
-      {control.action === "volume" ? (
-        <div className="tile-volume">
+      {toggle ? <button type="button" className={`tile-toggle ${presentation}`} disabled={(!busy && disabled) || (semantics !== "preview" && toggleValue == null)}
+        aria-disabled={busy || undefined}
+        role={presentation === "toggle-switch" && toggleValue != null ? "switch" : undefined}
+        aria-checked={presentation === "toggle-switch" && toggleValue != null ? toggleValue : undefined}
+        aria-pressed={presentation === "toggle-button" && toggleValue != null ? toggleValue : undefined}
+        aria-label={`${control.label}${toggleValue == null ? " — state unknown" : ""}`}
+        onClick={() => {
+          if (disabled || busy) return;
+          const next = !toggleValue;
+          if (semantics === "preview") setPreviewToggle(next);
+          else onVolumeCommit?.(next ? 1 : 0);
+        }}><span className="toggle-track" aria-hidden="true"><span /></span><span className="toggle-state">{toggleValue == null ? "State unknown" : toggleValue ? "On" : "Off"}</span></button> : null}
+      {numeric ? (
+        <div className={`tile-volume${presentation === "dial" ? " tile-dial" : ""}`}>
           <label className="sr-only" htmlFor={`vol-${variant}-${control.id}`}>
-            {remote || live ? `Target volume for ${control.label}` : `Preview volume for ${control.label}`}
+            {remote || live ? `Target value for ${control.label}` : `Preview value for ${control.label}`}
           </label>
           <input
-            id={`vol-${variant}-${control.id}`} type="range" min={0} max={100} step={1} value={volume}
-            disabled={disabled}
-            onChange={(event) => onVolumeChange?.(Number(event.target.value))}
+            id={`vol-${variant}-${control.id}`} type="range" min={numeric.minimum} max={numeric.maximum} step={numeric.step} value={currentValue}
+            disabled={disabled} hidden={presentation === "dial"}
+            onChange={(event) => changeValue(Number(event.target.value))}
             onPointerDown={(event) => {
-              volumeGesture.current = !disabled && event.button === 0 ? "pointer" : null;
+              volumeGesture.current = !disabled && event.button === 0 && event.isPrimary ? `pointer:${event.pointerId}` : null;
+              if (volumeGesture.current) {
+                sentValue.current = null;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }
             }}
             onPointerUp={(event) => {
-              const commit = volumeGesture.current === "pointer" && event.button === 0 && !disabled;
+              const commit = volumeGesture.current === `pointer:${event.pointerId}` && event.button === 0 && !disabled;
               volumeGesture.current = null;
-              if (commit) onVolumeCommit?.(Number(event.currentTarget.value));
+              if (commit) commitValue(Number(event.currentTarget.value));
             }}
             onPointerCancel={() => { volumeGesture.current = null; }}
+            onLostPointerCapture={() => { volumeGesture.current = null; }}
             onBlur={() => { volumeGesture.current = null; }}
             onKeyDown={(event) => {
-              if (!disabled && VOLUME_COMMIT_KEYS.has(event.key)) volumeGesture.current = event.key;
+              if (event.key === "Escape") volumeGesture.current = null;
+              else if (!disabled && VOLUME_COMMIT_KEYS.has(event.key)) {
+                if (!volumeGesture.current) sentValue.current = null;
+                volumeGesture.current = event.key;
+              }
             }}
             onKeyUp={(event) => {
               const commit = volumeGesture.current === event.key && !disabled;
               volumeGesture.current = null;
-              if (commit) onVolumeCommit?.(Number(event.currentTarget.value));
+              if (commit) commitValue(Number(event.currentTarget.value));
             }}
           />
-          <span className="volume-readout" aria-hidden="true">{volume}%</span>
+          {presentation === "dial" ? <div className="dial-face" role="slider" tabIndex={disabled ? -1 : 0}
+            aria-label={control.label} aria-valuemin={numeric.minimum} aria-valuemax={numeric.maximum} aria-valuenow={currentValue} aria-orientation="vertical" aria-disabled={disabled}
+            style={{ "--dial-angle": `${-135 + 270 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}deg` } as CSSProperties}
+            onPointerDown={(event) => {
+              if (disabled || event.button !== 0 || !event.isPrimary) return;
+              event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId);
+              sentValue.current = null;
+              dialPointer.current = { id: event.pointerId, y: event.clientY, value: currentValue };
+            }} onPointerMove={(event) => {
+              const gesture = dialPointer.current;
+              if (!gesture || gesture.id !== event.pointerId || disabled) return;
+              const raw = gesture.value + (gesture.y - event.clientY) * (numeric.maximum - numeric.minimum) / 150;
+              changeValue(Math.max(numeric.minimum, Math.min(numeric.maximum, numeric.minimum + Math.round((raw - numeric.minimum) / numeric.step) * numeric.step)));
+            }} onPointerUp={(event) => {
+              if (dialPointer.current?.id !== event.pointerId) return;
+              dialPointer.current = null;
+              if (!disabled) commitValue(valueRef.current);
+            }} onPointerCancel={() => { dialPointer.current = null; }} onLostPointerCapture={() => { dialPointer.current = null; }}
+            onBlur={() => { dialPointer.current = null; volumeGesture.current = null; }}
+            onKeyDown={(event) => {
+              if (disabled) return;
+              if (event.key === "Escape") { volumeGesture.current = null; dialPointer.current = null; return; }
+              if (!VOLUME_COMMIT_KEYS.has(event.key)) return;
+              event.preventDefault();
+              if (!volumeGesture.current) sentValue.current = null;
+              volumeGesture.current = event.key;
+              const delta = ["ArrowDown", "ArrowLeft", "PageDown"].includes(event.key) ? -1 : 1;
+              changeValue(event.key === "Home" ? numeric.minimum : event.key === "End" ? numeric.maximum
+                : Math.max(numeric.minimum, Math.min(numeric.maximum, currentValue + delta * numeric.step * (event.key.startsWith("Page") ? 10 : 1))));
+            }} onKeyUp={(event) => {
+              const commit = volumeGesture.current === event.key && !disabled;
+              volumeGesture.current = null; if (commit) commitValue(valueRef.current);
+            }}>
+              <svg className="dial-scale" viewBox="0 0 48 48" aria-hidden="true">
+                <circle className="dial-scale-track" cx="24" cy="24" r="21" pathLength="100" strokeDasharray="75 100" />
+                <circle className="dial-scale-value" cx="24" cy="24" r="21" pathLength="100"
+                  strokeDasharray={`${75 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)} 100`} />
+              </svg>
+              <span className="dial-indicator" aria-hidden="true" />
+            </div> : null}
+          <span className="volume-readout" aria-hidden="true">{currentValue}{control.action === "volume" ? <span className="value-unit">%</span> : null}</span>
         </div>
       ) : null}
     </article>

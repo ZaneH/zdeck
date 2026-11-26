@@ -18,7 +18,7 @@ describe("saved desktop control bridge", () => {
   it("rejects invalid bounds, IDs, explicit null/undefined and unexpected action payloads before invoke", async () => {
     for (const bad of [{ ...command, commandId: "" }, { ...command, controlId: "bad\n" }, { ...command, revision: -1 },
       { ...command, revision: 1.5 }, { ...command, revision: Number.MAX_SAFE_INTEGER + 1 }, { ...command, value: null },
-      { ...command, value: undefined }, { ...command, value: 101 }, { ...command, value: "50" },
+      { ...command, value: undefined }, { ...command, value: Number.MAX_SAFE_INTEGER + 1 }, { ...command, value: "50" },
       { ...command, action: "plugin" }, { ...command, args: {} }, Object.create(command)]) {
       expect(validDesktopCommand(bad as DesktopCommand)).toBe(false);
       await expect(desktopRunControl(bad as DesktopCommand)).rejects.toMatchObject({ code: "invalid_request", outcome: "not_started" });

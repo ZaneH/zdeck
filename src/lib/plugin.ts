@@ -1,8 +1,10 @@
 import { isIconSource, isPluginIcons } from "./icons";
 import type { PluginIcon } from "./icons";
-import type { PluginControl } from "./types";
+import type { PluginArgs, PluginControl } from "./types";
 
-export interface PluginField { type: "integer"; minimum: number; maximum: number }
+export type PluginField =
+  | { type: "integer"; minimum: number; maximum: number; control?: { step: number } }
+  | { type: "boolean"; control?: { stateKey: string } };
 export interface PluginAction { id: string; title: string; config: Record<string, PluginField> }
 export interface PluginManifest { id: string; version: string; protocolVersion: 1; actions: PluginAction[]; icons?: PluginIcon[]; icon?: string }
 export interface PluginError {
@@ -139,9 +141,23 @@ export function parsePluginCatalog(value: unknown): PluginCatalog | null {
           : "Invalid plugin folder. Check its name, manifest.json, main.js and bundled SDK. SDK symlinks/source npm layouts are not distribution installs: copy the complete packaged folder, including node_modules. Do not repair a distribution install with npm install." })) };
 }
 
-export function isPluginArgs(value: unknown): value is Record<string, number> {
+export function isPluginArgs(value: unknown): value is PluginArgs {
   return record(value) && Object.keys(value).length <= 8
-    && Object.entries(value).every(([key, n]) => pluginIdentifier(key) && safeInteger(n));
+    && Object.entries(value).every(([key, n]) => pluginIdentifier(key) && (safeInteger(n) || typeof n === "boolean"));
+}
+export function validPluginField(field: unknown): field is PluginField {
+  if (!record(field)) return false;
+  const controlled = Object.hasOwn(field, "control");
+  if (field.type === "boolean") return exact(field, ["type", ...(controlled ? ["control"] : [])])
+    && (!controlled || record(field.control) && exact(field.control, ["stateKey"]) && pluginIdentifier(field.control.stateKey));
+  return field.type === "integer" && exact(field, ["type", "minimum", "maximum", ...(controlled ? ["control"] : [])])
+    && safeInteger(field.minimum) && safeInteger(field.maximum) && field.minimum <= field.maximum
+    && (!controlled || record(field.control) && exact(field.control, ["step"]) && safeInteger(field.control.step)
+      && field.control.step > 0 && Number.isSafeInteger(field.maximum - field.minimum) && field.control.step <= field.maximum - field.minimum
+      && (field.maximum - field.minimum) % field.control.step === 0);
+}
+export function pluginControlField(action: PluginAction): [string, PluginField] | null {
+  return Object.entries(action.config).find(([, field]) => field.control) ?? null;
 }
 export function parsePluginManifest(value: unknown): PluginManifest | null {
   if (!record(value) || !exact(value, ["id", "version", "protocolVersion", "actions", ...(Object.hasOwn(value, "icons") ? ["icons"] : []), ...(Object.hasOwn(value, "icon") ? ["icon"] : [])])
@@ -156,9 +172,9 @@ export function parsePluginManifest(value: unknown): PluginManifest | null {
       || !record(action.config) || Object.keys(action.config).length > 8) return null;
     seen.add(action.id);
     for (const [key, field] of Object.entries(action.config)) {
-      if (!pluginIdentifier(key) || !record(field) || !exact(field, ["type", "minimum", "maximum"])
-        || field.type !== "integer" || !safeInteger(field.minimum) || !safeInteger(field.maximum) || field.minimum > field.maximum) return null;
+      if (!pluginIdentifier(key) || !validPluginField(field)) return null;
     }
+    if (Object.values(action.config).filter((field) => (field as PluginField).control).length > 1) return null;
   }
   try { if (new TextEncoder().encode(JSON.stringify(value)).length > 16384) return null; }
   catch { return null; }
@@ -216,17 +232,25 @@ export function parsePluginSnapshot(value: unknown): PluginSnapshot | null {
   return { status: value.status as PluginSnapshot["status"], manifest, state: value.state as PluginSnapshot["state"],
     lastError: value.lastError === null ? null : toPluginError(value.lastError) };
 }
-export function pluginDefaults(action: PluginAction): Record<string, number> {
-  return Object.fromEntries(Object.entries(action.config).map(([key, field]) =>
-    [key, Math.max(field.minimum, Math.min(field.maximum, key === "volume" ? 50 : 0))]));
+export function pluginDefaults(action: PluginAction): PluginArgs {
+  return Object.fromEntries(Object.entries(action.config).map(([key, field]) => {
+    if (field.type === "boolean") return [key, false];
+    const value = Math.max(field.minimum, Math.min(field.maximum, key === "volume" ? 50 : 0));
+    return [key, field.control ? field.minimum + Math.floor((value - field.minimum) / field.control.step) * field.control.step : value];
+  }));
 }
 export function pluginControlAction(snapshot: PluginSnapshot, control: PluginControl): PluginAction | null {
   return snapshot.manifest?.id === control.pluginId
     ? snapshot.manifest.actions.find((action) => action.id === control.pluginAction) ?? null : null;
 }
-export function pluginArgumentsValid(action: PluginAction, args: Record<string, number>): boolean {
+export function pluginArgumentsValid(action: PluginAction, args: PluginArgs): boolean {
   return isPluginArgs(args) && Object.keys(args).length === Object.keys(action.config).length
-    && Object.entries(action.config).every(([key, field]) => Object.hasOwn(args, key) && args[key] >= field.minimum && args[key] <= field.maximum);
+    && Object.entries(action.config).every(([key, field]) => {
+      const value = args[key];
+      return Object.hasOwn(args, key) && (field.type === "boolean" ? typeof value === "boolean"
+        : typeof value === "number" && value >= field.minimum && value <= field.maximum
+          && (!field.control || (value - field.minimum) % field.control.step === 0));
+    });
 }
 export function canRunPlugin(snapshot: PluginSnapshot, control: PluginControl): boolean {
   const action = pluginControlAction(snapshot, control);

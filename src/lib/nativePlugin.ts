@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { PluginArgs } from "./types";
 import { nativeAvailable } from "./native";
 import { isPluginArgs, parsePluginCatalog, parsePluginDiagnostics, parsePluginSnapshot, parsePluginSnapshots, pluginIdentifier, toPluginError } from "./plugin";
 import type { PluginCatalog, PluginDiagnostics, PluginSnapshot, PluginSnapshots } from "./plugin";
@@ -51,7 +52,7 @@ export async function pluginUninstall(pluginId: string): Promise<void> {
 export async function pluginOpenDirectory(): Promise<void> {
   if (await invokeNative("plugin_open_directory") !== null) throw toPluginError({ kind: "protocol", outcome: "not_started" });
 }
-export async function pluginExecute(pluginId: string, actionId: string, args: Record<string, number>): Promise<PluginSnapshot> {
+export async function pluginExecute(pluginId: string, actionId: string, args: PluginArgs): Promise<PluginSnapshot> {
   if (!pluginIdentifier(actionId) || !isPluginArgs(args)) throw toPluginError({ kind: "invalid_arguments", outcome: "not_started" });
   return invokePlugin("plugin_execute", pluginId, { actionId, args });
 }

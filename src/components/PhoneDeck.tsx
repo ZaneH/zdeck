@@ -5,19 +5,21 @@ import { activePage, findPage } from "../lib/deck";
 import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
 import type { LoadStatus } from "../lib/persistence";
 import { applyTheme } from "../lib/theme";
+import type { PluginSnapshots } from "../lib/plugin";
 import type { Control, Deck } from "../lib/types";
 import { BrandMark } from "./BrandMark";
 import { ControlTile } from "./ControlTile";
 import { UpdateBanner } from "./UpdateBanner";
 
 interface PhoneDeckProps {
+  plugins?: PluginSnapshots;
   initialDeck: Deck;
   initialStatus: LoadStatus;
   /** "native" shows the live native deck; "browser" follows localStorage. */
   mode: "browser" | "native";
 }
 
-export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) {
+export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: PhoneDeckProps) {
   const [deck, setDeck] = useState(initialDeck);
   const [status, setStatus] = useState<LoadStatus>(initialStatus);
   const [pageId, setPageId] = useState(initialDeck.activePageId);
@@ -79,9 +81,9 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
   };
 
   const changeVolume = (control: Control, value: number) => {
-    const next = clampVolume(value);
+    const next = control.action === "volume" ? clampVolume(value) : value;
     setPreviewVolumes((current) => ({ ...current, [control.id]: next }));
-    setNotice(`Preview only: volume ${next}%. No desktop action was sent.`);
+    setNotice(`Preview only: ${control.label} target ${next}. No desktop action was sent.`);
   };
 
   return (
@@ -124,6 +126,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode }: PhoneDeckProps) 
             <ControlTile
               key={control.id}
               control={control}
+              plugins={plugins}
               variant="phone"
               volume={previewVolumes[control.id] ?? controlVolume(control)}
               pressed={pressedId === control.id}

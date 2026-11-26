@@ -876,7 +876,9 @@ try {
     window.__trustedPlugins = [];
     window.__runtimeStatus = 'detected';
     const pluginManifest = {id:'spotify', version:'0.1.0', protocolVersion:1, actions:[
-      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}}
+      {id:'set-volume', title:'Spotify <volume>', config:{volume:{type:'integer',minimum:0,maximum:100}}},
+      {id:'level', title:'Generic level', config:{amount:{type:'integer',minimum:-20,maximum:200,control:{step:5}}}},
+      {id:'power', title:'Generic power', config:{enabled:{type:'boolean',control:{stateKey:'powered'}}}}
     ], icons:[
       {id:'badge', title:'Media badge', category:'Media', src:${JSON.stringify(smokeSvgSource)}},
       {id:'logo', title:'Logo', category:'Brand', src:${JSON.stringify(smokePngSource)}},
@@ -906,6 +908,8 @@ try {
         if (Object.keys(args).some(k => !['commandId','revision','controlId','value'].includes(k)) || args.revision !== savedRevision) throw {code:'invalid_request',message:'wrong envelope'};
         if (window.__holdDesktop) await new Promise(resolve => { window.__finishDesktop = resolve; });
         if (window.__desktopError) throw {code:window.__desktopError,message:'raw secret diagnostic'};
+        const control = savedDeck.pages.flatMap(p => p.controls).find(c => c.id === args.controlId);
+        if (control?.pluginAction === 'power') cachedPlugins.spotify = {...cachedPlugins.spotify, state:{powered:args.value === 1}};
         return {id:args.commandId,state:window.__desktopResult || 'confirmed',message:'Safe backend result.'};
       }
       if (command.startsWith('plugin_')) window.__pluginCalls.push({command,args});
@@ -936,7 +940,7 @@ try {
       if (command === 'plugin_execute') {
         window.__pluginArgs = args;
         if (window.__failPlugin && args.pluginId === 'spotify') throw {kind:'plugin_failed',code:'outcome_unknown',outcome:'unknown',message:'raw secret',hint:'raw secret'};
-        return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
+        return cachedPlugins[args.pluginId] = {...cachedPlugins[args.pluginId], state:args.actionId === 'power' ? {powered:args.args.enabled} : args.pluginId === 'spotify' ? {title:'Track',artist:'Artist',playback:'playing',volume:args.args.volume} : null};
       }
       if (command === 'remote_status') return status();
       if (command === 'remote_list_devices') return [];
@@ -1229,6 +1233,90 @@ try {
   await admin.eval(setValue('.inspector-form .native-control input', '75'));
   await admin.eval(clickText('.native-control button', 'Run plugin action'));
   check('Inspector Run maps saved generic plugin arguments', await admin.waitFor("window.__pluginArgs?.args.volume === 75") && await admin.eval("window.__pluginArgs.pluginId === 'spotify' && window.__pluginArgs.actionId === 'set-volume'"));
+  // Declared controls: actual keyboard/pointer gestures, fake IPC only.
+  await admin.eval(click('.add-control'));
+  await admin.waitFor("!!document.querySelector('.action-row')");
+  await admin.eval(clickText('.action-row', 'Generic level'));
+  await admin.waitFor("!!document.querySelector('.control-tile.is-selected input[type=range]')");
+  check('new generic numeric actions default to sliders with declared bounds', await admin.eval("(() => { const input = document.querySelector('.control-tile.is-selected input'); return input.min === '-20' && input.max === '200' && input.step === '5'; })()"));
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected input').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  await admin.waitFor("window.__desktopCalls.length === 1");
+  await pressKey(admin, 'Home', 'Home', 36);
+  check('busy slider stays adjustable and queues the final deliberate target', await admin.eval("!document.querySelector('.control-tile.is-selected input').disabled && window.__desktopCalls.length === 1"));
+  await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
+  check('generic slider delivers latest target after confirmation with a new command ID', await admin.waitFor("window.__desktopCalls.length === 2 && window.__desktopCalls[1].value === -20") && await admin.eval("window.__desktopCalls[0].value === 200 && window.__desktopCalls[0].commandId !== window.__desktopCalls[1].commandId"));
+  await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
+  await admin.eval("document.querySelector('.control-tile.is-selected input').scrollIntoView({block:'center'}); window.__holdDesktop = true");
+  const liveSlider = await admin.eval(rectOf('.control-tile.is-selected input'));
+  await admin.send('Input.dispatchMouseEvent', {type:'mousePressed',x:liveSlider.left+10,y:liveSlider.cy,button:'left',clickCount:1});
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.cx,y:liveSlider.cy,button:'left',buttons:1});
+  check('live slider pointer movement sends before pointerup', await admin.waitFor('window.__desktopCalls.length === 3'));
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseMoved',x:liveSlider.right-10,y:liveSlider.cy,button:'left',buttons:1});
+  const pointerFinal = await admin.eval("Number(document.querySelector('.control-tile.is-selected input').value)");
+  await admin.send('Input.dispatchMouseEvent', {type:'mouseReleased',x:liveSlider.right-10,y:liveSlider.cy,button:'left',clickCount:1});
+  await admin.eval('window.__holdDesktop = false; window.__finishDesktop()');
+  check('busy pointer slider coalesces movement and release into the final target', await admin.waitFor(`window.__desktopCalls.length === 4 && window.__desktopCalls.at(-1).value === ${pointerFinal}`));
+  await admin.waitFor("!document.querySelector('.control-tile.is-selected').hasAttribute('aria-busy')");
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("[...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').value = 'dial'; [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select').dispatchEvent(new Event('change',{bubbles:true}))");
+  await admin.waitFor("!!document.querySelector('.control-tile.is-selected .dial-face')");
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  check('dial keyboard exposes the declared maximum and value', await admin.eval("document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow') === '200'"));
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
+  check('live dial keyboard sends before keyup', await admin.waitFor('window.__desktopCalls.length === 5 && window.__desktopCalls.at(-1).value === -20'));
+  await pressKey(admin, 'Escape', 'Escape', 27);
+  await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Home',code:'Home',windowsVirtualKeyCode:36,nativeVirtualKeyCode:36});
+  check('Escape cancels a live dial gesture without an extra dispatch', await admin.eval("window.__desktopCalls.length === 5"));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').scrollIntoView({block:'center'})");
+  const liveDial = await admin.eval(rectOf('.control-tile.is-selected .dial-face'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:liveDial.cx,y:liveDial.cy}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:liveDial.cx,y:liveDial.cy-40}]});
+  check('live dial touch movement sends before release', await admin.waitFor('window.__desktopCalls.length === 6 && window.__desktopCalls.at(-1).value > -20'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchCancel',touchPoints:[]});
+  check('dial touch cancellation sends no extra target', await admin.eval('window.__desktopCalls.length === 6'));
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').focus()");
+  await pressKey(admin, 'End', 'End', 35);
+  await admin.eval("document.querySelector('.control-tile.is-selected .dial-face').scrollIntoView({block:'center'})");
+  const dial = await admin.eval(rectOf('.control-tile.is-selected .dial-face'));
+  await admin.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:dial.cx,y:dial.cy}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:dial.cx,y:dial.cy+50}]});
+  await admin.send('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
+  check('dial supports touch without native execution in Preview', await admin.eval("Number(document.querySelector('.control-tile.is-selected [role=slider]').getAttribute('aria-valuenow')) < 200 && window.__desktopCalls.length === 6"));
+  await admin.eval(click('.add-control')); await admin.waitFor("!!document.querySelector('.action-row')");
+  await admin.eval(clickText('.action-row', 'Generic power'));
+  await admin.waitFor("document.querySelector('.inspector-form .native-control select')?.value === 'false'");
+  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-switch'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  await admin.waitFor("!document.querySelectorAll('.desktop-mode button')[1].disabled");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  check('live unknown toggle is disabled without claiming Off', await admin.eval("document.querySelector('.control-tile.is-selected .tile-toggle').disabled && !document.querySelector('.control-tile.is-selected .tile-toggle').hasAttribute('aria-checked') && document.querySelector('.control-tile.is-selected .tile-toggle').textContent.includes('State unknown')"));
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval(clickText('.native-control button', 'Run plugin action'));
+  await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-checked') === 'false'");
+  await admin.eval(clickText('.desktop-mode button', 'Live'));
+  await admin.eval("window.__holdDesktop = true; document.querySelector('.control-tile.is-selected [role=switch]').focus()");
+  await pressKey(admin, ' ', 'Space', 32, ' ');
+  check('busy switch preserves focus and blocks a second activation', await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-disabled') === 'true'") && await admin.eval("(() => { const toggle = document.querySelector('.control-tile.is-selected [role=switch]'); toggle.click(); return document.activeElement === toggle && window.__desktopCalls.length === 7; })()"));
+  await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
+  check('switch keyboard sends explicit On and reads observed state', await admin.waitFor("document.querySelector('.control-tile.is-selected [role=switch]')?.getAttribute('aria-checked') === 'true'") && await admin.eval("window.__desktopCalls.at(-1).value === 1"));
+  check('switch keeps a visible keyboard focus indicator', await admin.eval("getComputedStyle(document.querySelector('.control-tile.is-selected [role=switch]')).outlineStyle !== 'none'"));
+  await admin.send('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  check('switch respects reduced motion', await admin.eval("parseFloat(getComputedStyle(document.querySelector('.control-tile.is-selected .toggle-track span')).transitionDuration) <= .001"));
+  await admin.send('Emulation.setEmulatedMedia', {features:[]});
+  await admin.eval(clickText('.desktop-mode button', 'Preview'));
+  await admin.eval("{ const select = [...document.querySelectorAll('.inspector-form label')].find(l => l.querySelector('span')?.textContent === 'Presentation').querySelector('select'); select.value='toggle-button'; select.dispatchEvent(new Event('change',{bubbles:true})); }");
+  check('toggle button exposes observed pressed state', await admin.waitFor("document.querySelector('.control-tile.is-selected .tile-toggle')?.getAttribute('aria-pressed') === 'true'"));
+  check('all presentations stay within their configured key height', await admin.eval("[...document.querySelectorAll('.control-tile')].every(tile => [...tile.children].filter(child => !child.matches('.tile-order')).every(child => child.getBoundingClientRect().bottom <= tile.getBoundingClientRect().bottom + 1))"));
+  await admin.screenshot('/tmp/zdeck-control-presentations.png');
+  await admin.eval("window.__desktopCalls = []");
+  await admin.eval(clickText('.control-tile .tile-primary', 'Spotify <volume>'));
   const executions = await admin.eval("window.__adminCalls.filter(c => c === 'plugin_execute').length");
   await admin.eval(click('[aria-label="Open phone preview"]'));
   await admin.waitFor("!!document.querySelector('.phone-shell .control-tile[data-action=plugin]')");
@@ -1282,7 +1370,7 @@ try {
   await admin.eval("document.querySelector('.control-tile[data-action=volume] input').focus()");
   await admin.send('Page.bringToFront');
   await admin.send('Input.dispatchKeyEvent', {type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
-  check('Live slider movement does not invoke until release', await admin.eval("window.__desktopCalls.length === 1"));
+  check('Live slider keyboard movement invokes before keyup', await admin.waitFor("window.__desktopCalls.length === 2"));
   await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
   await admin.waitFor("window.__desktopCalls.length === 2");
   await admin.send('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
