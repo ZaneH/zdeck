@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Moon, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone, Sun } from "lucide-react";
+import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -65,6 +65,7 @@ import { Inspector } from "./components/Inspector";
 import { ObsSettingsCard } from "./components/ObsSettingsCard";
 import { PageList } from "./components/PageList";
 import { SectionList } from "./components/SectionList";
+import { Dropdown } from "./components/Dropdown";
 import { PhoneDeck } from "./components/PhoneDeck";
 import { RemoteSettingsCard } from "./components/RemoteSettingsCard";
 import { useRestoreRemoteService } from "./lib/useRestoreRemoteService";
@@ -85,7 +86,6 @@ import {
   removeSection,
   renameSection,
   sectionNameError,
-  sectionStyle,
   setSectionAccent,
   setSectionTheme,
 } from "./lib/sections";
@@ -602,51 +602,18 @@ export default function App() {
           <DesktopPreferencesCard />
           <section className="settings-card">
             <h2>Appearance</h2>
-            <div className="field">
-              <span>Theme</span>
-              <div className="segmented">
-                <button
-                  type="button"
-                  className="button secondary"
-                  aria-pressed={deck.theme === "dark"}
-                  onClick={() => handleTheme("dark")}
-                >
-                  <Moon size={16} aria-hidden="true" />
-                  Dark
-                </button>
-                <button
-                  type="button"
-                  className="button secondary"
-                  aria-pressed={deck.theme === "light"}
-                  onClick={() => handleTheme("light")}
-                >
-                  <Sun size={16} aria-hidden="true" />
-                  Light
-                </button>
-              </div>
+            <div className="appearance-fields">
+              <Dropdown
+                label="Theme" value={deck.theme}
+                options={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]}
+                onChange={(value) => handleTheme(value as Theme)}
+              />
+              <Dropdown
+                label="Accent" value={deck.accent}
+                options={ACCENTS.map((accent) => ({ value: accent.value, label: accent.name }))}
+                onChange={(value) => handleAccent(value as Accent)}
+              />
             </div>
-            <fieldset className="field accent-field">
-              <legend>Accent</legend>
-              <div className="accent-grid">
-                {ACCENTS.map((accent) => (
-                  <button
-                    key={accent.value}
-                    type="button"
-                    className="accent-button"
-                    aria-pressed={deck.accent === accent.value}
-                    aria-label={`Use ${accent.name} accent`}
-                    onClick={() => handleAccent(accent.value)}
-                  >
-                    <span
-                      className="accent-swatch"
-                      style={{ backgroundColor: accent.value }}
-                      aria-hidden="true"
-                    />
-                    <span>{accent.name}</span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
           </section>
 
           <section className="settings-card">
@@ -722,7 +689,7 @@ export default function App() {
             ) : null}
 
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
-            {!desktop.live ? <p className="reorder-note">Drag tiles to reorder, or use Alt + arrow keys. Use Left / Right arrows to change pages.</p> : null}
+            {!desktop.live ? <p className="reorder-note">Drag tiles or a section handle to reorder, or use Alt + arrow keys. Use Left / Right arrows to change pages.</p> : null}
             <SectionList
               deck={deck} page={page} selectedSectionId={selectedSectionId}
               disabled={desktop.live || desktop.inflight || !!desktop.pending}
@@ -730,16 +697,8 @@ export default function App() {
               onRename={handleRenameSection} onRemove={handleRemoveSection}
               onMove={handleMoveSection} onTheme={handleSectionTheme}
               onAccent={handleSectionAccent}
-            />
-            <div className="deck-workbench">
-              {page.sections.map((section) => (
-                <section
-                  key={section.id} className="deck-section"
-                  data-theme={section.theme} style={sectionStyle(section)}
-                  aria-labelledby={`section-${section.id}`}
-                >
-                  <h2 id={`section-${section.id}`} className="section-heading">{section.name}</h2>
-                  <div className="control-grid">
+              renderControls={(section) => (
+                <div className="control-grid">
                     {section.controls.map((control, index) => (
                       <ControlTile
                         key={control.id}
@@ -780,10 +739,9 @@ export default function App() {
                         <Plus size={20} aria-hidden="true" /> Add a control
                       </button>
                     ) : null}
-                  </div>
-                </section>
-              ))}
-            </div>
+                </div>
+              )}
+            />
 
           </section>
 

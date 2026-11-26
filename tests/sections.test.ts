@@ -107,6 +107,16 @@ describe("section editing", () => {
     expect(isDeck(moved)).toBe(true);
   });
 
+  it("inserts a dragged section without reversing the sections it passes", () => {
+    const { deck } = withSection();
+    deck.pages[0].sections.push({ id: "page_stream_third", name: "Third", controls: [] });
+    const original = [...deck.pages[0].sections];
+    const moved = moveSection(deck, PAGE, FIRST, 2);
+    expect(moved.pages[0].sections).toEqual([original[1], original[2], original[0]]);
+    expect(moveSection(moved, PAGE, FIRST, -2).pages[0].sections).toEqual(original);
+    expect(deck.pages[0].sections).toEqual(original);
+  });
+
   it("keeps moves inside the page boundaries", () => {
     const { deck } = withSection();
     expect(moveSection(deck, PAGE, FIRST, -1)).toBe(deck);

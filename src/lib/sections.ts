@@ -102,7 +102,8 @@ export function moveSection(
     return deck;
   }
   const sections = [...page.sections];
-  [sections[index], sections[target]] = [sections[target], sections[index]];
+  const [section] = sections.splice(index, 1);
+  sections.splice(target, 0, section);
   return mapSections(deck, pageId, () => sections);
 }
 

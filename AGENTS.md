@@ -21,6 +21,8 @@ Commit completed work incrementally: one coherent, independently reviewable/reve
 
 ## Design invariant
 
+- Reuse established components (including dropdowns and menus) rather than bespoke or native alternatives.
+
 Interactive elements use context-appropriate cursors: `pointer` for actions, `grab`/`grabbing` for dragging, axis-specific cursors for resizing, `text` for text entry, and `not-allowed` when disabled. Clickable labels match their controls.
 
 Checkbox rows align the box and any inline help icon with the vertical center of the label's first line, including wrapped labels. The box and its clickable label use the same pointer cursor; disabled controls and labels consistently use the disabled cursor. Do not rely on browser-default checkbox margins or cursors.

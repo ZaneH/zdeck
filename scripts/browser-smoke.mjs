@@ -631,7 +631,7 @@ try {
   const clickTile = await editor.eval(rectOf('.control-tile.is-selected .tile-primary'));
   await pointerClick(editor, clickTile.cx, clickTile.cy);
   check('clicking a tile without dragging selects without pressing', await editor.waitFor("!!document.querySelector('.control-tile.is-selected') && !document.querySelector('.is-pressed')"));
-  await editor.eval(click('.deck-workbench'));
+  await editor.eval(click('.deck-sections'));
   check('clicking elsewhere clears the selection', await editor.waitFor("!document.querySelector('.control-tile.is-selected') && !document.querySelector('.inspector-form')"));
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
   await editor.eval(click('[aria-label="Collapse Inspector sidebar"]'));
@@ -694,7 +694,7 @@ try {
   await pressKey(editor, 'Enter', 'Enter', 13, '\r');
   check('action choice closes the picker and restores focus to its trigger', await editor.waitFor("!document.querySelector('.action-picker').open && document.activeElement === document.querySelector('.action-picker > summary')"));
 
-  // ------------------------------------------------------------ settings + theme segmented control
+  // ------------------------------------------------------------ settings + theme dropdowns
   await editor.eval(click('[aria-label="Open settings"]'));
   check("settings opens from the topbar", await editor.waitFor("!!document.querySelector('.settings-view')"));
   await editor.eval("document.querySelector('.app-content').scrollTop = document.querySelector('.app-content').scrollHeight");
@@ -716,17 +716,33 @@ try {
   check("Phone connection navigation works with the keyboard and updates active section", await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'Phone connection' && !document.querySelector('[aria-label=\"Phone connection\"][role=region]').hidden"));
   await editor.eval(click('.settings-nav a[href="#/settings/general"]'));
   await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General'");
-  check("settings shows the segmented theme buttons", await editor.eval("document.querySelectorAll('.segmented button').length === 2"));
-  await editor.eval(clickText('.segmented .button', 'Light'));
-  check("theme segmented control switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
+  check("settings theme and accent reuse the shared text dropdowns", await editor.eval("(() => { const triggers = [...document.querySelectorAll('.appearance-fields .dropdown-trigger')]; return triggers.length === 2 && triggers.every((trigger) => trigger.querySelectorAll('svg').length === 1 && !trigger.querySelector('.lucide-moon, .lucide-sun, .accent-swatch')); })()"));
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
+  check("theme dropdown offers both themes", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 2"));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
+  check("theme dropdown switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
+  await pressKey(editor, 'ArrowDown', 'ArrowDown', 40);
+  check("text dropdown opens from the keyboard and focuses its menu", await editor.waitFor("document.activeElement?.getAttribute('role') === 'menuitemradio'"));
+  await pressKey(editor, 'End', 'End', 35);
+  check("text dropdown keyboard navigation reaches the last choice", await editor.eval("document.activeElement?.textContent === 'Light'"));
+  await pressKey(editor, 'Escape', 'Escape', 27);
+  check("text dropdown Escape closes its menu and returns focus", await editor.waitFor("!document.querySelector('.appearance-fields .dropdown-menu') && document.activeElement === document.querySelector('.appearance-fields .dropdown-trigger')"));
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(2) .dropdown-trigger'));
+  check("accent dropdown lists every accent", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]').length === 5"));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]', 'Mint'));
+  check("accent dropdown applies the chosen accent", await editor.waitFor("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#6ee7b7'"));
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
   check("light editor shows the default page", await editor.waitFor("document.querySelector('#page-title').textContent === 'Stream'"));
   await editor.screenshot("/tmp/deck-design-light.png");
   await editor.eval(click('[aria-label="Open settings"]'));
   await editor.waitFor("!!document.querySelector('.settings-view')");
-  await editor.eval(clickText('.segmented .button', 'Dark'));
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Dark'));
   await editor.waitFor("document.documentElement.dataset.theme === 'dark'");
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(2) .dropdown-trigger'));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]', 'Cyan'));
+  await editor.waitFor("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#4cc9f0'");
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
 
@@ -1643,25 +1659,62 @@ try {
   await manage.eval(click('.add-control'));
   await manage.eval(clickText('.action-library .action-row', 'Volume slider'));
   check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
-  await manage.eval(click('[aria-label="Manage sections"]'));
-  await manage.eval(click('.section-dialog [title="Rename section"]'));
-  await typeInput(manage, '.section-dialog .page-rename input', 'Audio');
-  await manage.eval(click('.section-dialog [aria-label^="Save name"]'));
-  await manage.eval(setSelect('.section-appearance .field:nth-of-type(1) select', 'light'));
-  await manage.eval(setSelect('.section-appearance .field:nth-of-type(2) select', '#6ee7b7'));
-  await manage.eval(click('.section-dialog [title="Move section up"]'));
-  await manage.eval(click('[aria-label="Close section manager"]'));
-  check('section appearance and order apply to its controls', await manage.waitFor("(() => { const s = document.querySelector('.deck-section'); return s.querySelector('.section-heading').textContent === 'Audio' && s.dataset.theme === 'light' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7'; })()"));
+  check('editor sections have separate visual containers', await manage.eval("(() => { const sections = [...document.querySelectorAll('.deck-sections > .deck-section')]; return sections.length === 2 && sections.every((section) => getComputedStyle(section).borderTopStyle === 'solid' && getComputedStyle(section).borderTopWidth !== '0px') && !document.querySelector('.deck-workbench'); })()"));
+
+  const baseSectionName = await manage.eval("document.querySelector('.deck-section:first-child .section-name-input').value");
+  const secondName = '.deck-section:nth-child(2) .section-name-input';
+  await manage.eval(`document.querySelector('${secondName}').focus()`);
+  await typeInput(manage, secondName, 'Audio');
+  await manage.eval("document.activeElement.blur()");
+  check('section names save inline on blur', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && JSON.parse(localStorage.getItem('deck.local.v1')).pages.find(p => p.id === JSON.parse(localStorage.getItem('deck.local.v1')).activePageId).sections[1].name === 'Audio'"));
+  check('inline rename keeps the section control', await manage.eval("document.querySelectorAll('.deck-section:nth-child(2) .control-tile').length === 1"));
+
+  await manage.eval(`document.querySelector('${secondName}').focus()`);
+  await typeInput(manage, secondName, '   ');
+  await pressKey(manage, 'Enter', 'Enter', 13, '\r');
+  check('invalid inline section names stay visible and are not saved', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-error')?.textContent.includes('Enter a section name') && JSON.parse(localStorage.getItem('deck.local.v1')).pages.find(p => p.id === JSON.parse(localStorage.getItem('deck.local.v1')).activePageId).sections[1].name === 'Audio'"));
+  await manage.eval(`document.querySelector('${secondName}').focus()`);
+  await pressKey(manage, 'Escape', 'Escape', 27);
+  check('Escape cancels an inline section rename', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && !document.querySelector('.deck-section:nth-child(2) .section-error')"));
+
+  check('section appearance reuses the shared text dropdown without decorative icons', await manage.eval("(() => { const triggers = [...document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown-trigger')]; return triggers.length === 2 && triggers.every((trigger) => trigger.querySelectorAll('svg').length === 1 && !trigger.querySelector('.lucide-moon, .lucide-sun, .accent-swatch')); })()"));
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-trigger'));
+  check('theme dropdown offers inherit, dark and light choices', await manage.waitFor("document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 3"));
+  await manage.eval(clickText('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-trigger'));
+  check('accent dropdown offers inherit plus every accent', await manage.waitFor("document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]').length === 6"));
+  await manage.eval(clickText('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]', 'Mint'));
+  check('section appearance applies to its controls', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); return s.dataset.theme === 'light' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7'; })()"));
+
+  await manage.eval("document.querySelector('.deck-section:nth-child(2) .section-drag').focus()");
+  await altArrow(manage, 'ArrowUp');
+  check('section drag handles reorder with Alt + arrow keys', await manage.waitFor("document.querySelector('.deck-section:first-child .section-name-input').value === 'Audio' && document.querySelector('.deck-section:first-child').dataset.theme === 'light'"));
+  await manage.eval("document.querySelector('.deck-section:first-child').scrollIntoView({block:'center'})");
+  await manage.send('Page.bringToFront');
+  const sectionGrip = await manage.eval(rectOf('.deck-section:first-child .section-drag'));
+  const sectionTarget = await manage.eval(rectOf('.deck-section:nth-child(2) .deck-section-head'));
+  await manage.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: sectionGrip.cx, y: sectionGrip.cy, button: 'left', buttons: 1, clickCount: 1 });
+  await manage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sectionGrip.cx + 8, y: sectionGrip.cy + 8, button: 'left', buttons: 1 });
+  await manage.waitFor("!!document.querySelector('.deck-section.is-dragging')");
+  await manage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sectionTarget.cx, y: sectionTarget.cy, button: 'left', buttons: 1 });
+  check('dragging a section handle marks the drop target', await manage.waitFor("!!document.querySelector('.deck-section.is-drop-target')"));
+  await sleep(150);
+  await manage.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: sectionTarget.cx, y: sectionTarget.cy, button: 'left', buttons: 0, clickCount: 1 });
+  check('dropping a dragged section reorders it', await manage.waitFor(`(() => { const names = [...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value); return names[0] === ${JSON.stringify(baseSectionName)} && names[1] === 'Audio' && !document.querySelector('.is-dragging, .is-drop-target'); })()`), await manage.eval("[...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value).join('|')"));
+
   await manage.reload();
-  check('section configuration survives a browser reload', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections[0].name === 'Audio' && p.sections[0].theme === 'light' && p.sections[0].accent === '#6ee7b7' && p.sections[0].controls.length === 1; })()"));
-  await manage.eval(click('[aria-label="Manage sections"]'));
-  await manage.eval(click('.section-dialog [title="Remove section"]'));
+  check('section rename, order and appearance survive a reload', await manage.waitFor(`(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections[0].name === ${JSON.stringify(baseSectionName)} && p.sections[1].name === 'Audio' && p.sections[1].theme === 'light' && p.sections[1].accent === '#6ee7b7' && p.sections[1].controls.length === 1; })()`));
+  check('reloaded sections render in the saved order', await manage.waitFor(`[...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value).join('|') === ${JSON.stringify(`${baseSectionName}|Audio`)}`));
+
+  await manage.eval(click('.deck-section:nth-child(2) [title="Remove section"]'));
   check('populated section deletion focuses the safe Cancel action', await manage.waitFor(`document.querySelector('[aria-labelledby="remove-section-title"]')?.open && document.activeElement.textContent.trim() === 'Cancel'`));
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Cancel'));
-  check('cancelling section deletion retains its controls', await manage.eval("document.querySelectorAll('#section-target option').length === 2"));
-  await manage.eval(click('.section-dialog [title="Remove section"]'));
+  await manage.waitFor("!document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
+  check('cancelling section deletion retains its controls', await manage.eval("document.querySelectorAll('#section-target option').length === 2 && document.querySelectorAll('.deck-section').length === 2"));
+  await manage.eval(click('.deck-section:nth-child(2) [title="Remove section"]'));
+  await manage.waitFor("document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Remove section'));
-  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('#section-target option').length === 1 && document.querySelector('.section-dialog [title=\"Remove section\"]').disabled"));
+  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('#section-target option').length === 1 && document.querySelectorAll('.deck-section').length === 1 && document.querySelector('.deck-section [title=\"Remove section\"]').disabled"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: manageCtx });
 
   // ------------------------------------------------------------ cross-tab sync
