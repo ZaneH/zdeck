@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Moon, Plus, Settings, Smartphone, Sun } from "lucide-react";
+import { ArrowLeft, Moon, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone, Sun } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -449,7 +449,7 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
       onClick={(event) => {
         if (route === "editor" && event.target instanceof Element &&
-          !event.target.closest(".control-tile, .inspector-region, .status-footer, dialog")) setSelectedControlId(null);
+          !event.target.closest(".control-tile, .inspector-dock, .sidebar-toggle, .status-footer, dialog")) setSelectedControlId(null);
       }}
     >
       <header className={`topbar${route === "settings" ? " settings-topbar" : ""}`}>
@@ -487,6 +487,11 @@ export default function App() {
         >
           <Settings size={17} aria-hidden="true" />
         </a>
+        {route === "editor" ? <button type="button" className="icon-button sidebar-toggle"
+          aria-label={sidebar.collapsed ? "Expand Inspector sidebar" : "Collapse Inspector sidebar"}
+          aria-expanded={!sidebar.collapsed} aria-controls="inspector-sidebar" onClick={toggleSidebar}>
+          {sidebar.collapsed ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />}
+        </button> : null}
       </header>
 
       <div className="app-content">
@@ -679,12 +684,6 @@ export default function App() {
 
           </section>
 
-          <div className="inspector-region">
-          <button type="button" className="inspector-toggle"
-            aria-label={sidebar.collapsed ? "Expand Inspector sidebar" : "Collapse Inspector sidebar"}
-            aria-expanded={!sidebar.collapsed} aria-controls="inspector-sidebar" onClick={toggleSidebar}>
-            {sidebar.collapsed ? <ChevronLeft size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-          </button>
           <section className="inspector-dock" id="inspector-sidebar" aria-label="Control properties" hidden={sidebar.collapsed}>
             <Inspector
               key={selectedControl?.id ?? "empty"}
@@ -702,7 +701,6 @@ export default function App() {
               }
             />
           </section>
-          </div>
           <ActionLibrary
             dialogRef={actionDialog} pageName={page.name}
             manifests={enabledPluginManifests(plugin.snapshots)}

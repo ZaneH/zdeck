@@ -627,7 +627,7 @@ try {
   check('clicking elsewhere clears the selection', await editor.waitFor("!document.querySelector('.control-tile.is-selected') && !document.querySelector('.inspector-form')"));
   await editor.eval(clickText('.control-tile .tile-primary', 'Go live edited'));
   await editor.eval(click('[aria-label="Collapse Inspector sidebar"]'));
-  check('sidebar toggle is a subtle chevron on the divider, not in the toolbar', await editor.eval("(() => { const button = document.querySelector('.inspector-toggle'); const r = button.getBoundingClientRect(); const divider = document.querySelector('.inspector-region').getBoundingClientRect(); return !document.querySelector('.topbar [aria-controls=\"inspector-sidebar\"]') && Math.abs(r.left + r.width/2 - divider.left) < 2 && !!button.querySelector('.lucide-chevron-left'); })()"));
+  check('sidebar toggle is the rightmost navbar control with no collapsed divider or chevron', await editor.eval("(() => { const button = document.querySelector('.topbar .sidebar-toggle'); const workspace = document.querySelector('.workspace'); return document.querySelector('.topbar').lastElementChild === button && !!button.querySelector('.lucide-panel-right-open') && !document.querySelector('.inspector-region, .inspector-toggle') && getComputedStyle(workspace).gridTemplateColumns.split(' ').length === 1 && document.querySelector('.control-tile.is-selected')?.querySelector('.tile-label').textContent === 'Go live edited'; })()"));
   check('sidebar collapses with an always-reachable expand toggle', await editor.waitFor("document.querySelector('.inspector-dock').hidden && document.querySelector('[aria-label=\"Expand Inspector sidebar\"]').getAttribute('aria-expanded') === 'false'"));
   await editor.reload();
   check('explicit collapsed sidebar choice survives reload', await editor.waitFor("document.querySelector('.inspector-dock').hidden"));
@@ -1453,7 +1453,7 @@ try {
   await admin.screenshot('/tmp/zdeck-footer-armed.png');
   await pressKey(admin, 'Escape', 'Escape', 27);
   await admin.eval(click('[aria-label="Collapse Inspector sidebar"]'));
-  check('armed controls keep the expand toggle reachable while the sidebar is hidden', await admin.waitFor("document.querySelector('.inspector-dock').hidden && !!document.querySelector('[aria-label=\"Expand Inspector sidebar\"]') && !!document.querySelector('.footer-trigger.is-armed')"));
+  check('armed controls keep the expand toggle reachable while the sidebar is hidden', await admin.waitFor("document.querySelector('.inspector-dock').hidden && document.querySelector('.topbar').lastElementChild?.getAttribute('aria-label') === 'Expand Inspector sidebar' && !document.querySelector('.inspector-region, .inspector-toggle') && getComputedStyle(document.querySelector('.workspace')).gridTemplateColumns.split(' ').length === 1 && !!document.querySelector('.footer-trigger.is-armed')"));
   await admin.eval(click('[aria-label="Expand Inspector sidebar"]'));
   check('status footer sits at the window edge outside the scrolling workspace', await admin.eval("(() => { const footer = document.querySelector('.status-footer'); return footer.parentElement.classList.contains('app-shell') && Math.abs(footer.getBoundingClientRect().bottom - innerHeight) < 2 && document.documentElement.scrollHeight <= innerHeight; })()"));
   await admin.eval("window.__holdDesktop = true");
