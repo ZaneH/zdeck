@@ -125,6 +125,21 @@ The logo is a Z inside a rounded box, without a lower deck/shadow. `src/componen
 
 Reference: [Tauri system tray](https://v2.tauri.app/learn/system-tray/) and [`TrayIconBuilder::icon_as_template`](https://docs.rs/tauri/latest/tauri/tray/struct.TrayIconBuilder.html#method.icon_as_template). For visual verification, launch on macOS in both light and dark menu bars and check the menu's Open/Quit actions; check the colored tray on Windows and a tray-enabled Linux desktop as well.
 
+### macOS application shortcuts
+
+The macOS application menu is separate from the tray menu. It supplies native Cut/Copy/Paste and window/hide actions; Settings and Quit reuse the existing zDeck handlers. Windows/Linux menus are unchanged. No global shortcuts are registered: these bindings apply while zDeck is active.
+
+Verify in a native macOS build (`npm run tauri:dev` or a packaged app), not a browser:
+
+- In an editable field, select part of the text and check **⌘C**, **⌘X**, and **⌘V**. Copy must leave the selection intact, cut must remove it, and paste must insert the clipboard text. Check a second field as well; no deck-level copy/cut is implied.
+- **⌘,** opens Settings, including when the editor was active.
+- **⌘M** minimizes the window; restore it from the Dock.
+- **⌘H** hides zDeck; restore it from the Dock. **⌥⌘H** hides other applications, not zDeck; use the macOS menu's Show All to restore them.
+- With close-to-tray enabled and a working tray, **⌘W** hides the window and Open zDeck restores it. With close-to-tray disabled, **⌘W** follows graceful shutdown instead.
+- **⌘Q** quits even with close-to-tray enabled. If the local service or plugins are running, verify they disconnect and the process exits rather than merely hiding.
+
+Rust lifecycle tests do not exercise AppKit keyboard dispatch or the focused WebKit text responder; these native checks are still required. Reload, deck undo/redo, and deck-level clipboard operations are not added by this menu change.
+
 ## Architecture and execution boundaries
 
 ```text

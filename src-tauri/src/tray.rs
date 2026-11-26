@@ -234,8 +234,35 @@ pub fn setup(app: &tauri::AppHandle) {
         ])?;
         // Also provides an explicit Quit when no tray host exists.
         let application_menu = Submenu::new(app, "zDeck", true)?;
-        for item in menu.items()? { application_menu.append(&item)?; }
-        app.set_menu(Menu::with_items(app, &[&application_menu])?)?;
+        #[cfg(target_os = "macos")]
+        {
+            settings.set_accelerator(Some("Cmd+,"))?;
+            // Keep Quit on our graceful shutdown path, not AppKit's terminate action.
+            quit_item.set_accelerator(Some("Cmd+Q"))?;
+            application_menu.append_items(&[
+                &settings, &PredefinedMenuItem::separator(app)?,
+                &open_item, &service, &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, Some("Hide zDeck"))?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &PredefinedMenuItem::separator(app)?, &quit_item,
+            ])?;
+            let edit_menu = Submenu::with_items(app, "Edit", true, &[
+                &PredefinedMenuItem::cut(app, None)?,
+                &PredefinedMenuItem::copy(app, None)?,
+                &PredefinedMenuItem::paste(app, None)?,
+            ])?;
+            let window_menu = Submenu::with_items(app, "Window", true, &[
+                &PredefinedMenuItem::minimize(app, None)?,
+                &PredefinedMenuItem::close_window(app, None)?,
+            ])?;
+            app.set_menu(Menu::with_items(app, &[&application_menu, &edit_menu, &window_menu])?)?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            for item in menu.items()? { application_menu.append(&item)?; }
+            app.set_menu(Menu::with_items(app, &[&application_menu])?)?;
+        }
         app.on_menu_event(|app, event| match event.id().as_ref() {
             "tray-open" | "tray-settings" => {
                 if let Err(error) = open(app, event.id().as_ref() == "tray-settings") {
