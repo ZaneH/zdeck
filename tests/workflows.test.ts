@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const desktop = readFileSync(new URL("../.github/workflows/system-controls.yml", import.meta.url), "utf8");
-const web = readFileSync(new URL("../.github/workflows/web.yml", import.meta.url), "utf8");
+const desktop = readFileSync(new URL("../.github/workflows/system-controls.yml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const web = readFileSync(new URL("../.github/workflows/web.yml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 describe("development and production CI contract", () => {
   it.each([desktop, web])("checks PRs and pushes to both long-lived branches with read-only permissions", (workflow) => {
