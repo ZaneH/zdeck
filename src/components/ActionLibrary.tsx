@@ -39,10 +39,12 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifests
   const needle = query.trim().toLowerCase();
   const catalog = [
     ...ACTION_CATALOG.map((action) => ({ ...action, options: undefined as ControlOptions | undefined })),
-    ...manifests.flatMap((manifest) => manifest.actions.map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
+    ...manifests.flatMap((manifest) => [...manifest.actions, ...(manifest.values ?? [])].map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
       description: `${manifest.id} · ${action.id}`, note: "Trusted local plugin", defaultLabel: action.title,
       options: { label: action.title, pluginId: manifest.id, pluginAction: action.id, pluginArgs: pluginDefaults(action),
-        ...(pluginControlField(action)?.[1].type === "integer" ? { presentation: "slider" as const } : {}) },
+        ...(manifest.values?.some((value) => value.id === action.id) ? { presentation: "value" as const }
+          : pluginControlField(action)?.[1].type === "integer" ? { presentation: "slider" as const }
+          : pluginControlField(action)?.[1].type === "boolean" ? { presentation: "toggle-switch" as const } : {}) },
     }))),
   ];
   const filtered = catalog.filter(

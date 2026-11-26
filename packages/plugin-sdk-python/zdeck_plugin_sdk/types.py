@@ -11,8 +11,12 @@ class IntegerControl(TypedDict):
     step: int
 
 
-class BooleanControl(TypedDict):
+class _BooleanControl(TypedDict):
     stateKey: str
+
+
+class BooleanControl(_BooleanControl, total=False):
+    entityKey: str
 
 
 class _IntegerConfig(TypedDict):
@@ -34,17 +38,33 @@ class BooleanConfig(_BooleanConfig, total=False):
     control: BooleanControl
 
 
-class Choice(TypedDict):
+class Observation(TypedDict):
+    value: Union[None, bool, float]
+    unit: str
+    observedAtMs: int
+
+
+class _Choice(TypedDict):
     """Display-only choicesKey array entry; app validates bounds, plugin validates binding."""
     value: int
     label: str
     available: bool
 
 
+class Choice(_Choice, total=False):
+    description: str
+    observation: Observation
+
+
 class Action(TypedDict):
     id: str
     title: str
     config: dict[str, Union[IntegerConfig, BooleanConfig]]
+
+
+class ValueBinding(Action):
+    stateKey: str
+    entityKey: str
 
 
 class SettingsField(TypedDict):
@@ -73,3 +93,4 @@ class Manifest(_Manifest, total=False):
     icons: list[Icon]
     icon: str
     settings: Settings
+    values: list[ValueBinding]

@@ -25,7 +25,7 @@ export const ACTION_KINDS = [
 
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
-export const PRESENTATIONS = ["button", "slider", "dial", "toggle-switch", "toggle-button"] as const;
+export const PRESENTATIONS = ["button", "slider", "dial", "toggle-switch", "toggle-button", "value"] as const;
 export type Presentation = (typeof PRESENTATIONS)[number];
 export type PluginArgs = Record<string, number | boolean>;
 

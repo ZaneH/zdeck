@@ -1,4 +1,4 @@
-import { pluginControlAction, pluginControlField, pluginEntry, pluginArgumentsValid } from "./plugin";
+import { pluginControlAction, pluginControlField, pluginEntry, pluginArgumentsValid, pluginObservation } from "./plugin";
 import type { PluginSnapshots } from "./plugin";
 import type { Control, Presentation } from "./types";
 
@@ -22,13 +22,16 @@ export function controlContract(control: Control, plugins: PluginSnapshots = {})
     value: control.pluginArgs[key] as number,
   };
   if (field.type === "boolean" && field.control) {
-    const observed = snapshot.state?.[field.control.stateKey];
+    const observed = field.control.entityKey
+      ? pluginObservation(snapshot, control, { stateKey: field.control.stateKey, entityKey: field.control.entityKey })?.value
+      : snapshot.state?.[field.control.stateKey];
     return { kind: "boolean", value: snapshot.status === "connected" && !snapshot.lastError && typeof observed === "boolean" ? observed : null };
   }
   return null;
 }
 
 export function compatiblePresentations(control: Control, plugins: PluginSnapshots = {}): Presentation[] {
+  if (control.presentation === "value") return ["value"];
   const contract = controlContract(control, plugins);
   return contract?.kind === "numeric" ? ["button", "slider", "dial"]
     : contract?.kind === "boolean" ? ["button", "toggle-switch", "toggle-button"] : ["button"];

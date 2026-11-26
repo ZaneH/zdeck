@@ -61,7 +61,8 @@ test('manifest declares one instance, settings and choice-bound actions', () => 
   assert.deepEqual(power.config.entity, {
     type: 'integer', minimum: 1, maximum: 281474976710655, choicesKey: 'entities',
   });
-  assert.deepEqual(power.config.enabled, { type: 'boolean' });
+  assert.deepEqual(power.config.enabled, { type: 'boolean', control: { stateKey: 'entities', entityKey: 'entity' } });
+  assert.deepEqual(manifest.values.map((value) => value.id), ['state', 'temperature']);
   assert.equal(brightness.id, 'brightness');
   assert.deepEqual(brightness.config.entity, {
     type: 'integer', minimum: 1, maximum: 281474976710655, choicesKey: 'brightness-entities',
@@ -127,7 +128,7 @@ test('state discovery filters domains, keeps stable hashes and honest labels', a
     valueOf('light.kitchen'), valueOf('switch.fan'), valueOf('light.porch'), valueOf('light.hall'),
   ]);
   assert.deepEqual(state.entities.map((item) => item.label), [
-    'light.kitchen — on, 50% · Kitchen', 'switch.fan — on · Fan', 'light.porch — off · Porch', 'light.hall — unavailable · Hall',
+    'Kitchen', 'Fan', 'Porch', 'Hall',
   ]);
   assert.deepEqual(state.entities.map((item) => item.available), [true, true, true, false]);
   assert.deepEqual(state['brightness-entities'].map((item) => item.value), [
@@ -146,9 +147,9 @@ test('choice arrays and labels stay bounded', async () => {
   ));
   const instance = await ready({ fetch: discovery(states).fetch });
   const state = await instance.state();
-  assert.equal(state.entities.length, 100);
-  assert.equal(state['brightness-entities'].length, 100);
-  assert.ok(state.entities.every((item) => Buffer.byteLength(item.label, 'utf8') <= 160));
+  assert.ok(state.entities.length > 0 && state.entities.length <= 100);
+  assert.ok(state['brightness-entities'].length > 0 && state['brightness-entities'].length <= 100);
+  assert.ok(state.entities.every((item) => Buffer.byteLength(item.label, 'utf8') <= 320));
   assert.ok(Buffer.byteLength(JSON.stringify(state), 'utf8') <= 50000);
 });
 
@@ -163,7 +164,7 @@ test('selection values do not depend on discovery order or indices', async () =>
   const reversed = discovery([...states].reverse());
   const other = await ready({ fetch: reversed.fetch });
   const second = await other.state();
-  const byValue = (state) => Object.fromEntries(state.entities.map((item) => [item.value, item]));
+  const byValue = (state) => Object.fromEntries(state.entities.map(({ observation, ...item }) => [item.value, { ...item, observed: observation.value }]));
   assert.deepEqual(byValue(second), byValue(first));
 });
 
@@ -239,12 +240,13 @@ test('power uses explicit services and confirms the observed state', async () =>
   assert.equal(server.calls.filter((call) => call.init.method === 'POST').length, 1);
   assert.ok(server.calls.some((call) => call.init.method === 'GET'
     && call.url === `${URL_VALUE}/api/states/switch.fan`));
-  assert.equal(result.entities.find((item) => item.value === fan.value).label, 'switch.fan — on · Fan');
+  assert.equal(result.entities.find((item) => item.value === fan.value).label, 'Fan');
+  assert.equal(result.entities.find((item) => item.value === fan.value).observation.value, true);
 
   const off = await instance.execute('power', { entity: fan.value, enabled: false });
   assert.equal(server.calls.filter((call) => call.init.method === 'POST').at(-1).url,
     `${URL_VALUE}/api/services/switch/turn_off`);
-  assert.equal(off.entities.find((item) => item.value === fan.value).label, 'switch.fan — off · Fan');
+  assert.equal(off.entities.find((item) => item.value === fan.value).observation.value, false);
   assert.equal(server.calls.filter((call) => call.init.method === 'POST').length, 2);
 });
 
@@ -394,7 +396,9 @@ test('unknown color modes never advertise brightness and long labels retain iden
   const instance = await ready({ fetch: server.fetch });
   const state = await instance.state();
   assert.deepEqual(state['brightness-entities'], []);
-  assert.ok(state.entities[0].label.startsWith('light.a — on'));
+  assert.equal(state.entities[0].description, 'light.a');
+  assert.equal(state.entities[0].observation.value, true);
+  assert.ok(state.entities[0].label.startsWith('Name '));
   assert.ok(!/\p{Cc}/u.test(state.entities[0].label));
 });
 
@@ -412,7 +416,8 @@ test('successful execute returns the confirmed observation, not stale pre-comman
   } });
   const state = await instance.state();
   const result = await instance.execute('power', { entity: state.entities[0].value, enabled: true });
-  assert.equal(result.entities[0].label, 'switch.a — on');
+  assert.equal(result.entities[0].label, 'switch.a');
+  assert.equal(result.entities[0].observation.value, true);
   assert.equal(discoveryReads, 2);
 });
 

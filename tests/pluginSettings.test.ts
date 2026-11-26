@@ -108,7 +108,7 @@ describe("plugin choices are untrusted display data", () => {
       [{ ...entities[0], extra: true }], [{ value: 0, label: "Low", available: true }],
       [{ value: 2 ** 48, label: "High", available: true }], [{ value: 1.5, label: "Fraction", available: true }],
       [{ value: "1", label: "String", available: true }], [entities[0], { ...entities[0] }],
-      [{ value: 1, label: "", available: true }], [{ value: 1, label: "x".repeat(161), available: true }],
+      [{ value: 1, label: "", available: true }], [{ value: 1, label: "x".repeat(321), available: true }],
       [{ value: 1, label: "line\nbreak", available: true }], [{ value: 1, label: "One", available: "yes" }], tooMany];
     for (const choices of badChoices) expect(pluginChoices(snapshot({ entities: choices }), field)).toBeNull();
     expect(pluginChoices(snapshot({ entities: tooMany.slice(1, 257) }), field)).toHaveLength(256);

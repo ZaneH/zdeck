@@ -58,7 +58,8 @@ function validField(field) {
   const controlled = Object.hasOwn(field, 'control');
   const choices = Object.hasOwn(field, 'choicesKey');
   if (field.type === 'boolean') return exact(field, ['type', ...(controlled ? ['control'] : [])])
-    && (!controlled || exact(field.control, ['stateKey']) && identifier(field.control.stateKey));
+    && (!controlled || exact(field.control, ['stateKey', ...(Object.hasOwn(field.control ?? {}, 'entityKey') ? ['entityKey'] : [])]) && identifier(field.control.stateKey)
+      && (!Object.hasOwn(field.control, 'entityKey') || identifier(field.control.entityKey)));
   return field.type === 'integer' && exact(field, ['type', 'minimum', 'maximum',
     ...(controlled ? ['control'] : []), ...(choices ? ['choicesKey'] : [])])
     && integer(field.minimum) && integer(field.maximum) && field.minimum <= field.maximum
@@ -68,20 +69,26 @@ function validField(field) {
 }
 
 export function validateManifest(value) {
-  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : []), ...(Object.hasOwn(value, 'icon') ? ['icon'] : []), ...(Object.hasOwn(value, 'settings') ? ['settings'] : [])])
+  let valid = record(value) && exact(value, ['id', 'version', 'protocolVersion', 'actions', ...(Object.hasOwn(value, 'icons') ? ['icons'] : []), ...(Object.hasOwn(value, 'icon') ? ['icon'] : []), ...(Object.hasOwn(value, 'settings') ? ['settings'] : []), ...(Object.hasOwn(value, 'values') ? ['values'] : [])])
     && (!Object.hasOwn(value, 'icons') || pluginIcons(value.icons)) && (!Object.hasOwn(value, 'icon') || iconSource(value.icon))
     && (!Object.hasOwn(value, 'settings') || pluginSettings(value.settings)) && identifier(value.id)
     && typeof value.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.version)
     && value.protocolVersion === 1 && Array.isArray(value.actions) && value.actions.length > 0 && value.actions.length <= 32;
+  valid &&= !Object.hasOwn(value, 'values') || Array.isArray(value.values) && value.values.length <= 32;
   const seen = new Set();
-  if (valid) for (const action of value.actions) {
-    if (!exact(action, ['id', 'title', 'config']) || !identifier(action.id) || seen.has(action.id) || !text(action.title)
+  if (valid) for (const action of [...value.actions, ...(value.values ?? [])]) {
+    const reading = value.values?.includes(action);
+    if (!exact(action, ['id', 'title', 'config', ...(reading ? ['stateKey', 'entityKey'] : [])]) || !identifier(action.id) || seen.has(action.id) || !text(action.title)
       || !record(action.config) || Object.keys(action.config).length > 8) { valid = false; break; }
     seen.add(action.id);
     for (const [key, field] of Object.entries(action.config)) {
       if (!identifier(key) || !validField(field)) valid = false;
     }
     if (Object.values(action.config).filter((field) => field.control).length > 1) valid = false;
+    const binding = (b) => identifier(b.stateKey) && identifier(b.entityKey)
+      && action.config[b.entityKey]?.type === 'integer' && action.config[b.entityKey]?.choicesKey === b.stateKey;
+    if (reading && (!binding(action) || Object.keys(action.config).length !== 1 || Object.values(action.config).some((f) => f.control))) valid = false;
+    if (Object.values(action.config).some((f) => f.type === 'boolean' && f.control?.entityKey && !binding(f.control))) valid = false;
   }
   if (!valid || Buffer.byteLength(JSON.stringify(value)) > LIMITS.manifestBytes) throw new TypeError('Invalid plugin manifest.');
   return value;

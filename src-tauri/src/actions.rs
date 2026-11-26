@@ -72,6 +72,9 @@ pub(crate) fn find_control<'a>(deck: &'a Deck, id: &str) -> Option<&'a Control> 
         .find(|control| control.id == id)
 }
 pub(crate) fn validate_action_value(control: &Control, value: Option<f64>) -> Result<(), ActionError> {
+    if control.presentation.as_deref() == Some("value") {
+        return Err(ActionError::invalid("Read-only values cannot execute actions."));
+    }
     if value.is_some() && control.presentation.as_deref() == Some("button") {
         return Err(ActionError::invalid("Button presentations use their saved configuration."));
     }
@@ -103,7 +106,7 @@ impl ActionDispatcher {
     pub fn new(obs: Arc<ObsState>, system: Arc<SystemState>, plugin: Arc<PluginRegistry>) -> Self {
         Self { obs, system, plugin, effect: Mutex::new(()) }
     }
-    /// Only declared observed booleans accompany remote presentation metadata.
+    /// Only declared boolean/choice observations accompany remote presentation metadata.
     pub async fn presentation_plugins(&self) -> std::collections::BTreeMap<String, crate::plugin::PluginSnapshot> {
         let mut snapshots = self.plugin.snapshots().await;
         for snapshot in snapshots.values_mut() {
@@ -113,10 +116,19 @@ impl ActionDispatcher {
                     for action in &manifest.actions {
                         for field in action.config.values() {
                             if let crate::plugin::ConfigField::Boolean { control: Some(control) } = field {
-                                if let Some(value) = state.get(&control.state_key).filter(|v| v.is_boolean()) {
+                                if control.entity_key.is_some() {
+                                    if let Some(value) = state.get(&control.state_key).and_then(display_choices) {
+                                        observed.insert(control.state_key.clone(), value);
+                                    }
+                                } else if let Some(value) = state.get(&control.state_key).filter(|v| v.is_boolean()) {
                                     observed.insert(control.state_key.clone(), value.clone());
                                 }
                             }
+                        }
+                    }
+                    for binding in manifest.values.iter().flatten() {
+                        if let Some(value) = state.get(&binding.state_key).and_then(display_choices) {
+                            observed.insert(binding.state_key.clone(), value);
                         }
                     }
                 }
@@ -124,6 +136,19 @@ impl ActionDispatcher {
             snapshot.state = (snapshot.status == crate::plugin::ConnectionStatus::Connected).then_some(observed);
         }
         snapshots
+    }
+    /// Explicit observation only: no action admission, execution, replay or retries.
+    pub async fn refresh_value(&self, control: &Control) -> Result<(), ActionError> {
+        if control.presentation.as_deref() != Some("value") { return Err(ActionError::invalid("Not a read-only value.")); }
+        let ControlAction::Plugin { plugin_id, plugin_action, .. } = &control.action else { return Err(ActionError::invalid("Not a plugin value.")); };
+        let _effect = self.effect.try_lock().map_err(|_| ActionError::invalid("Another request is pending."))?;
+        let snapshots = self.plugin.snapshots().await;
+        if !snapshots.get(plugin_id).and_then(|s| s.manifest.as_ref()).is_some_and(|m|
+            m.values.iter().flatten().any(|v| &v.id == plugin_action)) {
+            return Err(ActionError::invalid("Connect the matching plugin first."));
+        }
+        self.plugin.state(plugin_id).await.map_err(|_| ActionError::invalid("Reading failed. Check the plugin in desktop Settings."))?;
+        Ok(())
     }
     /// Rust-only dispatcher. Transports must resolve the control from DeckStore
     /// and bound admission before calling; this is not a frontend action API.
@@ -196,6 +221,32 @@ impl ActionDispatcher {
         };
         Ok(result)
     }
+}
+// Project only the declared display contract; never forward arbitrary plugin state to phones.
+fn display_choices(value: &Value) -> Option<Value> {
+    let choices = value.as_array()?;
+    if choices.len() > 256 { return None; }
+    let mut projected = Vec::new();
+    for choice in choices {
+        let number = choice.get("value").filter(|v| zdeck_schema::plugin::integer(v).is_some())?;
+        let label = choice.get("label")?.as_str()?;
+        if label.is_empty() || label.chars().count() > 320 || label.chars().any(char::is_control) { return None; }
+        let available = choice.get("available")?.as_bool()?;
+        let mut row = serde_json::json!({"value":number,"label":label,"available":available});
+        if let Some(description) = choice.get("description").and_then(Value::as_str).filter(|s| !s.is_empty() && s.chars().count() <= 320 && !s.chars().any(char::is_control)) {
+            row["description"] = Value::from(description);
+        }
+        if let Some(o) = choice.get("observation") {
+            let v = o.get("value")?;
+            let unit = o.get("unit")?.as_str()?;
+            let at = o.get("observedAtMs").filter(|v| zdeck_schema::plugin::integer(v).is_some_and(|n| n > 0.0))?;
+            if !(v.is_null() || v.is_boolean() || v.as_f64().is_some_and(|n| n.is_finite() && n.abs() <= 9_007_199_254_740_991.0))
+                || unit.chars().count() > 24 || unit.chars().any(char::is_control) { return None; }
+            row["observation"] = serde_json::json!({"value":v,"unit":unit,"observedAtMs":at});
+        }
+        projected.push(row);
+    }
+    Some(Value::Array(projected))
 }
 fn failed_result(id: &str, message: String) -> CommandResult {
     CommandResult { id: id.to_string(), state: CommandState::Failed, code: None, message, observed: None }

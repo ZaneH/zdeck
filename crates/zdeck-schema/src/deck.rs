@@ -22,7 +22,7 @@ pub enum Theme {
 
 fn presentation_valid(action: &str, p: &str) -> bool {
     p == "button" || (action == "volume" && matches!(p, "slider" | "dial"))
-        || (action == "plugin" && matches!(p, "slider" | "dial" | "toggle-switch" | "toggle-button"))
+        || (action == "plugin" && matches!(p, "slider" | "dial" | "toggle-switch" | "toggle-button" | "value"))
 }
 
 /// A present optional field must deserialize as its value, so `null` is rejected.
@@ -540,13 +540,13 @@ mod tests {
         use serde_json::json;
         let original = serde_json::to_value(default_deck()).unwrap();
         assert_eq!(serde_json::to_value(serde_json::from_value::<Deck>(original.clone()).unwrap()).unwrap(), original);
-        for presentation in ["button", "slider", "dial", "toggle-switch", "toggle-button"] {
+        for presentation in ["button", "slider", "dial", "toggle-switch", "toggle-button", "value"] {
             let mut value = original.clone();
             value["pages"][0]["sections"][0]["controls"][0] = json!({"id":"power","label":"Power","action":"plugin","pluginId":"power","pluginAction":"set","pluginArgs":{"enabled":true},"presentation":presentation});
             let deck: Deck = serde_json::from_value(value.clone()).unwrap(); deck.validate().unwrap();
             assert_eq!(serde_json::to_value(deck).unwrap(), value);
         }
-        for presentation in [json!(null), json!("knob"), json!("slider"), json!("toggle-switch")] {
+        for presentation in [json!(null), json!("knob"), json!("slider"), json!("toggle-switch"), json!("value")] {
             let mut value = original.clone(); value["pages"][0]["sections"][0]["controls"][0]["presentation"] = presentation;
             assert!(serde_json::from_value::<Deck>(value).is_err());
         }

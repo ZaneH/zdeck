@@ -1,18 +1,28 @@
 {
   "id": "home-assistant",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocolVersion": 1,
   "settings": {
     "url": { "type": "text", "label": "Home Assistant URL" },
     "token": { "type": "secret", "label": "Long-lived access token" }
   },
+  "values": [
+    {
+      "id": "state", "title": "Light / switch state", "stateKey": "entities", "entityKey": "entity",
+      "config": { "entity": { "type": "integer", "minimum": 1, "maximum": 281474976710655, "choicesKey": "entities" } }
+    },
+    {
+      "id": "temperature", "title": "Temperature", "stateKey": "temperatures", "entityKey": "entity",
+      "config": { "entity": { "type": "integer", "minimum": 1, "maximum": 281474976710655, "choicesKey": "temperatures" } }
+    }
+  ],
   "actions": [
     {
       "id": "power",
       "title": "Power",
       "config": {
         "entity": { "type": "integer", "minimum": 1, "maximum": 281474976710655, "choicesKey": "entities" },
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean", "control": { "stateKey": "entities", "entityKey": "entity" } }
       }
     },
     {

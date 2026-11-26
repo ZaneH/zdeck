@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 export interface DropdownOption {
   value: string;
   label: string;
+  description?: string;
 }
 
 /**
@@ -18,6 +19,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState({ above: false, maxHeight: 280 });
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -27,6 +29,26 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
     setOpen(false);
     trigger.current?.focus();
   };
+
+  useLayoutEffect(() => {
+    if (!open || !root.current || !menu.current) return;
+    const place = () => {
+      const rect = trigger.current!.getBoundingClientRect();
+      let top = 4, bottom = window.innerHeight - 4;
+      for (let parent = root.current!.parentElement; parent; parent = parent.parentElement) {
+        if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
+        const bounds = parent.getBoundingClientRect();
+        top = Math.max(top, bounds.top + 4); bottom = Math.min(bottom, bounds.bottom - 4);
+      }
+      const below = bottom - rect.bottom - 4, above = rect.top - top - 4;
+      const flip = below < Math.min(280, menu.current!.scrollHeight) && above > below;
+      setPlacement({ above: flip, maxHeight: Math.max(48, Math.min(280, flip ? above : below)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,7 +81,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
       <button
         ref={trigger} type="button" className="dropdown-trigger"
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
-        aria-label={`${label}: ${current?.label ?? ""}`} disabled={disabled}
+        aria-label={`${label}: ${current?.label ?? ""}`} aria-description={current?.description} disabled={disabled}
         onClick={() => setOpen(!open)}
       >
         <span className="dropdown-label">{label}</span>
@@ -68,7 +90,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
       </button>
       {open ? (
         <div
-          ref={menu} id={id} className="dropdown-menu" role="menu" aria-label={label}
+          ref={menu} id={id} className={`dropdown-menu${placement.above ? " is-above" : ""}`} style={{ maxHeight: placement.maxHeight }} role="menu" aria-label={label}
           onKeyDown={(event) => {
             if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
             event.preventDefault();
@@ -82,10 +104,11 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
           {options.map((option) => (
             <button
               key={option.value} type="button" role="menuitemradio" tabIndex={-1}
-              aria-checked={option.value === value}
+              aria-checked={option.value === value} aria-label={option.label} aria-description={option.description}
               onClick={() => { onChange(option.value); close(); }}
             >
-              {option.label}
+              <span className="dropdown-option-copy"><span className="dropdown-option-label">{option.label}</span>{option.description ? <span className="dropdown-option-description">{option.description}</span> : null}</span>
+              <span className="dropdown-check" aria-hidden="true">{option.value === value ? "✓" : ""}</span>
             </button>
           ))}
         </div>

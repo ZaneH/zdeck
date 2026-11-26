@@ -994,6 +994,7 @@ fn router(inner: Arc<Inner>) -> Router {
         .route("/api/v1/pair", post(pair))
         .route("/api/v1/pair/status", get(pair_status))
         .route("/api/v1/state", get(state))
+        .route("/api/v1/readings/{id}", get(refresh_reading))
         .route("/api/v1/events", get(events))
         .route("/api/v1/commands", post(command))
         .route("/api/v1/commands/{id}", get(command_result))
@@ -1148,6 +1149,31 @@ async fn state(State(inner): State<Arc<Inner>>, headers: HeaderMap) -> Result<Re
             "plugins": inner.actions.presentation_plugins().await,
         }),
     ))
+}
+
+async fn refresh_reading(State(inner): State<Arc<Inner>>, headers: HeaderMap, Path(id): Path<String>) -> Result<Response, ApiError> {
+    // Same-origin GET fetches normally omit Origin. Strict cookies + host guard protect this read.
+    if headers.contains_key(header::ORIGIN) { inner.check_origin(&headers)?; }
+    if single_header(&headers, header::HeaderName::from_static("sec-fetch-site")).is_some_and(|site| site != "same-origin" && site != "none") {
+        return Err(ApiError::forbidden("Only same-origin readings are allowed."));
+    }
+    let auth = inner.authenticate(&headers).await?;
+    let now = inner.clock.now();
+    {
+        let mut registry = inner.registry.lock().await;
+        let device = registry.devices.get_mut(&auth.hash).ok_or_else(|| ApiError::unauthorized("Device unavailable."))?;
+        device.command_times.retain(|attempt| now.duration_since(*attempt) <= inner.limits.command_window);
+        if device.command_times.len() >= inner.limits.command_rate { return Err(ApiError::too_many_requests("Too many requests. Wait a moment.")); }
+        device.command_times.push_back(now);
+    }
+    let snapshot = load_saved_deck(inner.as_ref()).await?;
+    let control = find_control(&snapshot.deck, &id).ok_or_else(|| ApiError::bad_request("Saved value not found."))?;
+    let result = inner.actions.refresh_value(control).await;
+    // Return the safe stopped/unknown snapshot on read failure, never an old successful value.
+    let plugins = inner.actions.presentation_plugins().await;
+    Ok(json_response(StatusCode::OK, &json!({ "protocolVersion": PROTOCOL_VERSION,
+        "revision": snapshot.revision, "deck": snapshot.deck, "plugins": plugins,
+        "readingFailed": result.is_err() })))
 }
 
 async fn events(

@@ -9,6 +9,7 @@ export interface RemotePhoneController extends RemotePhoneSnapshot {
   press: (control: Control) => void;
   commitVolume: (control: Control, value: number) => void;
   setPage: (pageId: string) => void;
+  refreshValue: (controlId: string) => Promise<void>;
 }
 
 /**
@@ -68,5 +69,6 @@ export function useRemotePhone(initialInvite: string | null): RemotePhoneControl
     press: (control) => connection.pressControl(control),
     commitVolume: (control, value) => connection.commitVolume(control, value),
     setPage: (pageId) => connection.setPage(pageId),
+    refreshValue: (controlId) => connection.refreshValue(controlId),
   };
 }

@@ -6,11 +6,15 @@ export const LIMITS: Readonly<{
 }>;
 /** At most one field per action may declare control. Integer values align to minimum + n * step. */
 export interface IntegerConfig { type: 'integer'; minimum: number; maximum: number; control?: { step: number }; /** Names a bounded state array for UI selection; never combine with control. */ choicesKey?: string }
-/** true means On, false means Off; stateKey reads an observed top-level boolean, never inferred playback. */
-export interface BooleanConfig { type: 'boolean'; control?: { stateKey: string } }
-/** choicesKey arrays: at most 256 unique bounded values, with nonempty labels up to 160 characters.
+/** true means On, false means Off. With entityKey, stateKey selects an observation array;
+ * otherwise it reads the original top-level boolean. Never infer missing state. */
+export interface BooleanConfig { type: 'boolean'; control?: { stateKey: string; entityKey?: string } }
+/** choicesKey arrays: at most 256 unique bounded values, with nonempty labels up to 320 characters.
  * The app validates these display-only arrays; plugins must independently validate the selected binding. */
-export interface Choice { value: number; label: string; available: boolean }
+export interface Observation { value: number | boolean | null; unit: string; observedAtMs: number }
+export interface Choice { value: number; label: string; available: boolean; description?: string; observation?: Observation }
+/** A read-only binding, never an executable action. Exactly one integer selection field. */
+export interface ValueBinding extends Action { stateKey: string; entityKey: string }
 export type Args = Record<string, number | boolean>;
 export interface Action { id: string; title: string; config: Record<string, IntegerConfig | BooleanConfig> }
 export interface SettingsField { type: 'text' | 'secret'; label: string }
@@ -19,7 +23,7 @@ export type Settings = Record<string, SettingsField>;
 export type SettingsValues = Record<string, string>;
 /** Base64 data URL: PNG, JPEG, WebP, GIF or SVG. At most 8192 characters, within the 16 KiB manifest budget. */
 export interface Icon { id: string; title: string; category: string; src: string }
-export interface Manifest { id: string; version: string; protocolVersion: 1; actions: Action[]; icons?: Icon[]; /** Optional plugin-identity thumbnail: one bounded embedded image data URL. */ icon?: string; /** Optional settings required before state or execution. */ settings?: Settings }
+export interface Manifest { id: string; version: string; protocolVersion: 1; actions: Action[]; values?: ValueBinding[]; icons?: Icon[]; /** Optional plugin-identity thumbnail: one bounded embedded image data URL. */ icon?: string; /** Optional settings required before state or execution. */ settings?: Settings }
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type State = { [key: string]: Json };
 export type Request =

@@ -13,10 +13,10 @@ import threading
 from types import MappingProxyType
 from typing import Any, Awaitable, BinaryIO, Protocol
 
-from .types import Action, Args, BooleanConfig, Choice, Icon, IntegerConfig, Json, Manifest, Settings, SettingsField, SettingsValues, State
+from .types import Action, Args, BooleanConfig, Choice, Observation, ValueBinding, Icon, IntegerConfig, Json, Manifest, Settings, SettingsField, SettingsValues, State
 
 __all__ = ["PROTOCOL_VERSION", "LIMITS", "Action", "Args", "BooleanConfig", "Icon", "IntegerConfig",
-           "Json", "Manifest", "Choice", "Settings", "SettingsField", "SettingsValues", "State", "Plugin", "PluginError",
+           "Json", "Manifest", "Choice", "Observation", "ValueBinding", "Settings", "SettingsField", "SettingsValues", "State", "Plugin", "PluginError",
            "validate_manifest", "validate_arguments", "serve"]
 
 PROTOCOL_VERSION = 1
@@ -95,7 +95,8 @@ def _field(field):
     control = field.get("control")
     if field.get("type") == "boolean":
         return _exact(field, ["type"] + (["control"] if controlled else [])) and (
-            not controlled or _exact(control, ["stateKey"]) and _identifier(control["stateKey"]))
+            not controlled or type(control) is dict and _exact(control, ["stateKey"] + (["entityKey"] if "entityKey" in control else []))
+            and _identifier(control["stateKey"]) and ("entityKey" not in control or _identifier(control["entityKey"])))
     if not (_exact(field, ["type", "minimum", "maximum"]
                    + (["control"] if controlled else []) + (["choicesKey"] if choices else []))
             and field["type"] == "integer" and _integer(field["minimum"])
@@ -135,7 +136,7 @@ def validate_manifest(value: Any) -> Manifest:
         keys = ["id", "version", "protocolVersion", "actions"]
         if type(value) is not dict:
             raise ValueError
-        keys += [key for key in ("icon", "icons", "settings") if key in value]
+        keys += [key for key in ("icon", "icons", "settings", "values") if key in value]
         if not (_exact(value, keys) and _identifier(value["id"])
                 and isinstance(value["version"], str) and re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", value["version"])
                 and _integer(value["protocolVersion"]) and value["protocolVersion"] == 1
@@ -156,9 +157,12 @@ def validate_manifest(value: Any) -> Manifest:
                         and _text(icon["category"]) and icon["category"].strip() and _icon(icon["src"])):
                     raise ValueError
                 seen.add(icon["id"])
+        if "values" in value and (type(value["values"]) is not list or len(value["values"]) > 32):
+            raise ValueError
         seen = set()
-        for action in value["actions"]:
-            if not (_exact(action, ["id", "title", "config"]) and _identifier(action["id"])
+        for action in value["actions"] + value.get("values", []):
+            reading = action in value.get("values", [])
+            if not (_exact(action, ["id", "title", "config"] + (["stateKey", "entityKey"] if reading else [])) and _identifier(action["id"])
                     and action["id"] not in seen and _text(action["title"])
                     and type(action["config"]) is dict and len(action["config"]) <= 8):
                 raise ValueError
@@ -166,6 +170,16 @@ def validate_manifest(value: Any) -> Manifest:
             if not all(_identifier(key) and _field(field) for key, field in action["config"].items()):
                 raise ValueError
             if sum("control" in field for field in action["config"].values()) > 1:
+                raise ValueError
+            def binding(b):
+                return (_identifier(b.get("stateKey")) and _identifier(b.get("entityKey"))
+                        and action["config"].get(b["entityKey"], {}).get("type") == "integer"
+                        and action["config"][b["entityKey"]].get("choicesKey") == b["stateKey"])
+            if reading and (not binding(action) or len(action["config"]) != 1
+                            or any("control" in f for f in action["config"].values())):
+                raise ValueError
+            if any(f["type"] == "boolean" and "entityKey" in f.get("control", {})
+                   and not binding(f["control"]) for f in action["config"].values()):
                 raise ValueError
         # Measure UTF-8 as the JS SDK does, not Python's ASCII-escaped representation.
         if len(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")) > LIMITS["manifest_bytes"]:

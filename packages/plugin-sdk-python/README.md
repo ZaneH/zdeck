@@ -78,8 +78,13 @@ sandbox/permission enforcement. Changed packages require explicit re-trust befor
 receiving settings saved for their plugin ID.
 
 An integer field may use `choicesKey` instead of `control` to select a stable
-binding from a returned state array. Each `Choice` is exactly
-`{"value": safe_integer, "label": nonempty_string_up_to_160, "available": bool}`.
+binding from a returned state array. Each `Choice` has
+`{"value": safe_integer, "label": nonempty_string_up_to_320, "available": bool}`,
+optionally `description` and typed `Observation`. `BooleanControl.entityKey`
+selects an observed boolean from that array; missing/null state is never inferred.
+Separate manifest `values: list[ValueBinding]` declares read-only displays, not
+executable actions. Python exports `Observation` and `ValueBinding` alongside
+`Choice`. See the [read-only value contract](../plugin-sdk/README.md#read-only-values-and-selected-boolean-observations-unreleased) for exact matching config, unit/timestamp bounds and refresh semantics.
 The app validates array length ≤256, unique in-range values and safe labels;
 multiple actions may share a state array. SDK/host field validation does not
 validate arbitrary plugin state. The plugin must resolve/validate the chosen

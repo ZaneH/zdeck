@@ -86,6 +86,8 @@ impl std::error::Error for PluginError {}
 pub struct Manifest {
     pub id: String, pub version: String, pub protocol_version: u8, pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<ValueBinding>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icons: Option<Vec<zdeck_schema::icons::PluginIcon>>,
     /// Optional plugin-identity thumbnail (bounded local image data URL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +109,16 @@ impl SettingsField {
 #[serde(deny_unknown_fields)]
 pub struct Action { pub id: String, pub title: String, pub config: BTreeMap<String, ConfigField> }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ValueBinding {
+    pub id: String, pub title: String, pub config: BTreeMap<String, ConfigField>,
+    pub state_key: String, pub entity_key: String,
+}
+fn selection_binding(config: &BTreeMap<String, ConfigField>, state_key: &str, entity_key: &str) -> bool {
+    identifier(state_key) && identifier(entity_key)
+        && matches!(config.get(entity_key), Some(ConfigField::Integer { choices_key: Some(key), .. }) if key == state_key)
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum ConfigField {
     Integer {
@@ -121,12 +133,16 @@ pub enum ConfigField {
 pub struct NumericControl { pub step: Value }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BooleanControl { pub state_key: String }
+pub struct BooleanControl {
+    pub state_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<String>,
+}
 impl ConfigField {
     fn controlled(&self) -> bool { matches!(self, Self::Integer { control: Some(_), .. } | Self::Boolean { control: Some(_) }) }
     fn valid(&self) -> bool {
         match self {
-            Self::Boolean { control } => control.as_ref().is_none_or(|c| identifier(&c.state_key)),
+            Self::Boolean { control } => control.as_ref().is_none_or(|c| identifier(&c.state_key) && c.entity_key.as_ref().is_none_or(|key| identifier(key))),
             Self::Integer { minimum, maximum, control, choices_key } => match (integer(minimum), integer(maximum)) {
                 (Some(min), Some(max)) if min <= max => choices_key.as_ref().is_none_or(|key| identifier(key))
                     && !(control.is_some() && choices_key.is_some())
@@ -166,10 +182,10 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         return Err(ErrorKind::InvalidManifest);
     }
     if value.get("icons").is_some_and(|icons| !icons.is_array()) { return Err(ErrorKind::InvalidManifest); }
-    if value["actions"].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null) || f.get("choicesKey").is_some_and(Value::is_null))))) {
+    if ["actions", "values"].iter().any(|key| value[*key].as_array().is_some_and(|actions| actions.iter().any(|a| a["config"].as_object().is_some_and(|config| config.values().any(|f| f.get("control").is_some_and(Value::is_null) || f.get("choicesKey").is_some_and(Value::is_null) || f.get("control").and_then(|c| c.get("entityKey")).is_some_and(Value::is_null)))))) {
         return Err(ErrorKind::InvalidManifest);
     }
-    if value.get("settings").is_some_and(Value::is_null) {
+    if value.get("values").is_some_and(|v| !v.is_array()) || value.get("settings").is_some_and(Value::is_null) {
         return Err(ErrorKind::InvalidManifest);
     }
     let m: Manifest = serde_json::from_value(value).map_err(|_| ErrorKind::InvalidManifest)?;
@@ -197,6 +213,19 @@ pub(crate) fn manifest(mut value: Value) -> Result<Manifest, ErrorKind> {
         if a.config.values().filter(|f| f.controlled()).count() > 1 { return Err(ErrorKind::InvalidManifest); }
         for (key, field) in &a.config {
             if !identifier(key) || !field.valid() { return Err(ErrorKind::InvalidManifest); }
+            if let ConfigField::Boolean { control: Some(c) } = field {
+                if c.entity_key.as_ref().is_some_and(|key| !selection_binding(&a.config, &c.state_key, key)) { return Err(ErrorKind::InvalidManifest); }
+            }
+        }
+    }
+    if let Some(values) = &m.values {
+        if values.len() > 32 { return Err(ErrorKind::InvalidManifest); }
+        for v in values {
+            if !identifier(&v.id) || !seen.insert(&v.id) || !text(&v.title) || v.config.len() != 1
+                || !selection_binding(&v.config, &v.state_key, &v.entity_key)
+                || v.config.iter().any(|(key, f)| !identifier(key) || !f.valid() || f.controlled()) {
+                return Err(ErrorKind::InvalidManifest);
+            }
         }
     }
     Ok(m)
@@ -756,7 +785,17 @@ impl Session {
                             .ok_or_else(|| PluginError::new(ErrorKind::UnknownAction, Outcome::NotStarted))?;
                         if toggle {
                             let observed = action.config.values().find_map(|field| match field {
-                                ConfigField::Boolean { control: Some(control) } => self.state.as_ref().and_then(|s| s.get(&control.state_key)),
+                                ConfigField::Boolean { control: Some(control) } => self.state.as_ref().and_then(|s| {
+                                    if let Some(key) = &control.entity_key {
+                                        let target = args.get(key)?;
+                                        let rows = s.get(&control.state_key)?.as_array()?;
+                                        if rows.len() > 256 { return None; }
+                                        let mut matching = rows.iter().filter(|choice| choice.get("value") == Some(target));
+                                        let choice = matching.next()?;
+                                        if matching.next().is_some() || choice.get("available") != Some(&Value::Bool(true)) { return None; }
+                                        choice.get("observation")?.get("value")
+                                    } else { s.get(&control.state_key) }
+                                }),
                                 _ => None,
                             });
                             if self.last_error.is_some() || !observed.is_some_and(Value::is_boolean) {
@@ -907,6 +946,19 @@ mod tests {
         assert!(serde_json::to_vec(&v).unwrap().len() > REQUEST_BYTES);
         assert!(manifest(v).is_err());
     }
+    #[test]
+    fn selected_observations_and_read_only_values_match_sdk_contract() {
+        let value: Value = serde_json::from_str(include_str!("../../../plugins/home-assistant/manifest.json")).unwrap();
+        let parsed = manifest(value.clone()).unwrap();
+        assert_eq!(parsed.values.as_ref().unwrap().len(), 2);
+        for (path, replacement) in [("/values/0/id", json!("power")), ("/values/0/stateKey", json!("missing")),
+            ("/values/0/entityKey", json!("missing")), ("/actions/0/config/enabled/control/entityKey", Value::Null),
+            ("/values", Value::Null)] {
+            let mut bad = value.clone(); *bad.pointer_mut(path).unwrap() = replacement;
+            assert!(manifest(bad).is_err(), "{path}");
+        }
+    }
+
     #[test]
     fn strict_responses_and_redacted_errors() {
         let good = json!({"protocolVersion":1,"id":"r1","type":"result","state":{}});

@@ -1360,6 +1360,64 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     env.plugin.disconnect("power").await.unwrap(); env.service.stop().await;
 }
 
+#[tokio::test]
+async fn read_only_values_refresh_over_authenticated_get_never_command_admission() {
+    let env = default_env().await;
+    let entry = env._dir.path.join("readings.cjs");
+    let mut manifest: Value = serde_json::from_str(include_str!("../../plugins/home-assistant/manifest.json")).unwrap();
+    // No connection settings or HTTP requests in this fixture.
+    manifest.as_object_mut().unwrap().remove("settings");
+    let source = format!("const manifest = {};\n", manifest) + r#"
+let reads=0,commands=0,enabled=false,lastArgs=null;
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),base={protocolVersion:1,id:r.id,type:'result'};
+ if(r.type==='describe'){process.stdout.write(JSON.stringify({...base,manifest})+'\n');return;}
+ if(r.type==='state')reads++;
+ if(r.type==='execute'){commands++;lastArgs=r.args;if(r.action==='power')enabled=r.args.enabled;}
+ const choice={value:7,label:'Hall thermostat',description:'climate.hall',available:true,observation:{value:20+reads,unit:'°C',observedAtMs:1700000000000+reads},arbitrary:'not for phones'};
+ process.stdout.write(JSON.stringify({...base,state:{temperatures:[choice],entities:[{...choice,observation:{value:enabled,unit:'',observedAtMs:1700000000000}}],reads,commands,lastArgs,private:'not for phones'}})+'\n');
+});
+"#;
+    std::fs::write(&entry, source).unwrap();
+    let node = std::process::Command::new("node").args(["-p","process.execPath"]).output().unwrap();
+    env.plugin.connect("home-assistant",String::from_utf8(node.stdout).unwrap().trim().into(),entry.to_str().unwrap().into()).await.unwrap();
+    env.plugin.state("home-assistant").await.unwrap();
+    let mut deck = default_deck();
+    deck.pages[0].sections[0].controls.push(serde_json::from_value(json!({"id":"reading","label":"Hall temperature","action":"plugin","pluginId":"home-assistant","pluginAction":"temperature","pluginArgs":{"entity":7},"presentation":"value"})).unwrap());
+    for (id, entity) in [("selected-power",7), ("missing-power",99)] {
+        deck.pages[0].sections[0].controls.push(serde_json::from_value(json!({"id":id,"label":id,"action":"plugin","pluginId":"home-assistant","pluginAction":"power","pluginArgs":{"entity":entity,"enabled":false},"presentation":"toggle-switch"})).unwrap());
+    }
+    env.deck.save(1,deck.clone()).await.unwrap();
+    let restored = DeckStore::new(env._dir.path.join(DECK_FILE_NAME)).load().await.unwrap();
+    assert_eq!(restored.deck, deck, "read-only bindings and fixed/toggle modes round-trip without observations or secrets");
+    let (_, token) = approved_device(&env,"Readings").await;
+    let path = "/api/v1/readings/reading";
+    assert_eq!(http_request(env.port,"GET",path,PUBLIC_HOST,Some(ORIGIN),None,None).await.status,401);
+    assert_eq!(http_request(env.port,"GET",path,PUBLIC_HOST,Some("https://other.test"),Some(&token),None).await.status,403);
+    let initial = http_request(env.port,"GET","/api/v1/state",PUBLIC_HOST,None,Some(&token),None).await.json();
+    assert_eq!(initial["plugins"]["home-assistant"]["state"]["temperatures"][0]["observation"]["value"],21);
+    assert!(initial["plugins"]["home-assistant"]["state"].get("private").is_none());
+    assert!(initial["plugins"]["home-assistant"]["state"]["temperatures"][0].get("arbitrary").is_none());
+    let refreshed = http_request(env.port,"GET",path,PUBLIC_HOST,None,Some(&token),None).await;
+    assert_eq!(refreshed.status,200);
+    assert_eq!(refreshed.json()["plugins"]["home-assistant"]["state"]["temperatures"][0]["observation"]["value"],22);
+    let command = json!({"id":"no_read_action","revision":2,"controlId":"reading"}).to_string();
+    assert_eq!(http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await.status,400);
+    let state = env.plugin.snapshot("home-assistant").await.unwrap().state.unwrap();
+    assert_eq!(state["commands"],0);
+    assert_eq!(state["reads"],2);
+    for (index, (control_id, expected)) in [("selected-power","confirmed"),("missing-power","failed")].into_iter().enumerate() {
+        let command = json!({"id":format!("selected_toggle_{index}"),"revision":2,"controlId":control_id,"value":1}).to_string();
+        let response = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
+        assert_eq!(response.json()["state"],expected);
+    }
+    let state = env.plugin.snapshot("home-assistant").await.unwrap().state.unwrap();
+    assert_eq!(state["commands"],1,"missing selected observations never reach the handler");
+    assert_eq!(state["lastArgs"],json!({"entity":7,"enabled":true}));
+    assert_eq!(http_request(env.port,"GET","/api/v1/readings/missing",PUBLIC_HOST,Some(ORIGIN),Some(&token),None).await.status,400);
+    env.plugin.disconnect("home-assistant").await.unwrap(); env.service.stop().await;
+}
+
 async fn plugin_deck(env: &TestEnv) {
     let mut deck = default_deck();
     deck.pages[0].sections[0].controls.push(deck_lib::deck::Control {

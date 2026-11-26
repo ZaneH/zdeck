@@ -73,7 +73,9 @@ it("runs the packaged SDK through owned local HTTP discovery, explicit power, re
     expect(calls).toHaveLength(0);
     const binding = (await request({ type: "state" })).state.entities[0].value;
     const success = await request({ type: "execute", action: "power", args: { entity: binding, enabled: true } });
-    expect(success.state.entities[0].label).toContain("switch.fixture — on");
+    expect(success.state.entities[0].label).toBe("Owned test fixture");
+    expect(success.state.entities[0].description).toBe("switch.fixture");
+    expect(success.state.entities[0].observation.value).toBe(true);
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
     expect(JSON.parse(calls.find((call) => call.method === "POST")!.body)).toEqual({ entity_id: "switch.fixture" });
     expect(calls.every((call) => call.auth === "Bearer fixture-token")).toBe(true);

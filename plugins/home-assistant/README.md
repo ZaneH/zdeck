@@ -30,10 +30,19 @@ Plain HTTP is only accepted for loopback, private and link-local IPv4 addresses 
 
 Actions use Home Assistant's REST API, verified against the official [REST API](https://developers.home-assistant.io/docs/api/rest/) and [authentication](https://developers.home-assistant.io/docs/auth_api/) documentation: `Authorization: Bearer <token>`, `GET /api/states`, and `POST /api/services/<domain>/<service>`.
 
-- **Power** — `entity` plus `enabled` (on/off). Sends `light.turn_on`, `light.turn_off`, `switch.turn_on` or `switch.turn_off`. There is no toggle call.
+- **Power** — new controls default to the established toggle switch, using the selected entity's observed boolean state. Unknown/unavailable state blocks the toggle; saved arguments are never used to invent state. Sends explicit `light.turn_on`, `light.turn_off`, `switch.turn_on` or `switch.turn_off`, never HA's toggle service. Choose **Presentation → Button (fixed on/off)** to expose **On press → Turn on / Turn off**. Existing saved buttons retain their fixed `enabled` argument until explicitly changed.
 - **Brightness** — `entity` plus `brightness` 0–100. Sends `light.turn_on` with `brightness_pct`; `0` sends `light.turn_off`. Only lights whose `supported_color_modes` contains a recognized dimming mode (`brightness`, `color_temp`, `hs`, `xy`, `rgb`, `rgbw`, `rgbww` or `white`; never `onoff` or `unknown`) are offered, following the [light entity semantics](https://developers.home-assistant.io/docs/core/entity/light/).
 
-Discovery reads `GET /api/states` and exposes only `light.*` and `switch.*` entities. Choice labels show the honest last-observed `on`, `off` or `unavailable` state and, when known, the current brightness. Unavailable entities are listed as unavailable and cannot be executed. The returned arrays are bounded to 100 entries each, labels are bounded to 160 UTF-8 bytes, and the whole state stays under the SDK response limit. The URL and token are never included in state.
+- **Light / switch state** — read-only On/Off display, not an action. Select a light or switch.
+- **Temperature** — read-only temperature sensors (`sensor.*` with °C, °F or K units) and thermostat `climate.*` current temperature, not the target setpoint. Climate units use the entity's `temperature_unit`/`unit_of_measurement`, or HA's `GET /api/config → unit_system.temperature`; no unit is guessed. Missing/invalid values or units display **Unknown / unavailable**.
+
+Discovery reads `GET /api/states`. Friendly names lead; IDs are secondary in menus and fully available through **Entity details**, including long names and unbroken IDs. Unavailable entities remain selectable for repair but cannot execute. Arrays contain at most 100 entries each; labels are bounded to 320 UTF-8 bytes, entity IDs to 320 ASCII characters. A shared 50,000-byte state budget may reduce those counts for long names. The URL and token are never included in state.
+
+### Freshness and refresh
+
+Readings are **timestamped snapshots, not live subscriptions**. Nothing polls in the background, on launch, on page visibility, or just because a phone connects. Use **Refresh entities** in the Inspector, **Read state** in Settings, or the small **Refresh [label]** button on a dashboard value. Refresh works without arming desktop controls and updates all readings for this instance. The authenticated phone uses a separate GET-only reading route resolved from its saved control ID; it cannot supply services, entity IDs, settings or executable arguments. Reads do not enter command admission/activity/replay. Action results include the pre-command discovery snapshot, with the selected entity replaced by its later confirmed observation; timestamps describe each observation, not continuous freshness. A failed read never claims freshness; host errors stop the session and values become unknown until explicitly re-enabled and read again.
+
+For a last-observed toggle, a press chooses the opposite of the displayed observation and sends that explicit target once. Another HA client may have changed the device since the snapshot; refresh before pressing when that distinction matters. No automatic command retry is made.
 
 ### Stable entity selection
 
@@ -61,7 +70,7 @@ Tests use only injected `fetch` fakes and Node built-ins: no installed Home Assi
 printf '{"protocolVersion":1,"id":"d1","type":"describe"}\n' | node dist/plugins/home-assistant/main.js
 ```
 
-For distribution, use the same offline, self-contained folder layout as the Spotify plugin: copy `manifest.json`, `main.js`, `home-assistant.js`, `package.json`, `README.md` and `LICENSE`, plus real SDK files under `node_modules/@zdeck/plugin-sdk` (`index.js`, `index.d.ts`, `package.json`, `LICENSE`). Do not install dependencies or distribute a development `node_modules`. The plugin requires the SDK release that adds `settings`, `choicesKey` and `configure`; an older SDK rejects this manifest.
+For distribution, use the same offline, self-contained folder layout as the Spotify plugin: copy `manifest.json`, `main.js`, `home-assistant.js`, `package.json`, `README.md` and `LICENSE`, plus real SDK files under `node_modules/@zdeck/plugin-sdk` (`index.js`, `index.d.ts`, `package.json`, `LICENSE`). Do not install dependencies or distribute a development `node_modules`. The plugin requires the unreleased app/SDK extensions for `settings`, `choicesKey`, `configure`, selected boolean observations and separate `values`; an older SDK rejects this manifest.
 
 The source dependency points to the local SDK because the published npm 0.1.0 package does **not** support these extensions. The offline packager copies the current repository SDK as regular files and rewrites distribution metadata; recipients run no npm install. Keep `manifest.json` and the runtime `describe` metadata identical. Settings are capped at 2048 UTF-8 bytes per value and 2400 UTF-16 bytes for the entire native storage envelope.
 

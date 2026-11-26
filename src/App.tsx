@@ -704,6 +704,7 @@ export default function App() {
                         key={control.id}
                         control={control}
                         plugins={plugin.snapshots}
+                        onRefresh={control.action === "plugin" && control.presentation === "value" && plugin.native ? () => plugin.readState(control.pluginId) : undefined}
                         variant="editor"
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
                         semantics={desktop.live ? "live" : "preview"}

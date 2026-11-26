@@ -54,11 +54,9 @@ SDK from this checkout, **not** the published npm SDK 0.1.0.
    connection or device command. Use trusted HTTPS where possible: HTTP sends
    bearer tokens unencrypted and is restricted to local addresses/hostnames.
    TLS verification is never disabled; configure a trusted certificate separately.
-3. Choose **Enable**, then **Read state** to discover lights and switches. Enabling
+3. Choose **Enable**, then **Read state** to discover lights, switches and temperature readings. Enabling
    only describes/configures the plugin, including on restart; it sends no HA requests.
-4. Add a plugin control. In the Inspector, discover/refresh selections, select an
-   entity, choose explicit Off/On or brightness 0–100, then deliberately run it.
-   There is no toggle or arbitrary service builder. Brightness 0 sends turn_off.
+4. Add **Power** (observed-state toggle by default), **Brightness**, **Light / switch state**, or **Temperature** from Plugins. Select an entity in the Inspector. For explicit power setters choose **Presentation → Button (fixed on/off)**, then **On press → Turn on / Turn off**. Existing saved buttons retain fixed semantics. Read-only values are separate bindings, never executable actions. Brightness 0 sends turn_off; no arbitrary service builder is exposed.
 5. Disable before editing settings. Use the secret's **Forget** button to remove
    the saved token; the token is never read back into the form. Forget does not
    revoke the token at Home Assistant—revoke it there too when appropriate.
@@ -119,8 +117,8 @@ Forget recovery action clears the damaged plugin record with a visible warning. 
 trusted unsandboxed processes: this mechanism is not a security boundary against
 malicious plugin code.
 
-`choicesKey` refers to a state array of at most 256 exact
-`{value: safeInteger, label: nonemptyStringUpTo160, available: boolean}` objects.
+`choicesKey` refers to a state array of at most 256 unique bounded
+`{value: safeInteger, label: nonemptyStringUpTo320, available: boolean}` objects, optionally with `description` (1–320 characters) and `observation: {value: boolean | finiteSafeNumber | null, unit: stringUpTo24, observedAtMs: positiveSafeInteger}`. Unknown fields are rejected by the UI; remote snapshots project only these display fields.
 Values must be unique and inside the field's integer bounds. The app renders
 these as shared dropdowns and fails closed for malformed/missing/unavailable
 selections. The plugin must independently validate the saved binding immediately
@@ -132,6 +130,14 @@ TS, Python and Rust. Older apps/SDKs deliberately reject the new optional fields
 rather than silently dropping them. Ship the updated app and complete bundled
 SDK together; protocol number 1 alone does not advertise extension support.
 The published 0.1.0 artifact has not been changed or republished.
+
+## Selected observations and read-only values (unreleased)
+
+Boolean `control: {stateKey, entityKey?}` still supports the original top-level boolean when `entityKey` is absent. When present, `entityKey` must name an integer field whose `choicesKey` equals `stateKey`. The observed boolean comes from the selected choice's `observation.value`, not a saved argument or truthiness. Unknown/unavailable readings block toggles. New boolean controls default to toggle-switch; old controls with omitted/button presentation keep fixed arguments.
+
+Optional manifest `values` contains at most 32 `{id,title,config,stateKey,entityKey}` read-only bindings. Each has exactly one integer choices field, matching `stateKey` and `entityKey`, and no writable control metadata. IDs share the action namespace so ambiguity is rejected in TS, Python and Rust. Value IDs are **not** actions: `execute` rejects them before a handler is called. The existing state request reads them without sending a command. Deck v3 uses `presentation: "value"`, the plugin ID, the binding ID in the historical `pluginAction` slot, and the selected numeric `pluginArgs`. Native action validation rejects value presentations even when disconnected; the UI cannot turn them into a button presentation. No secrets, launch paths or observations persist in the deck.
+
+HA values use timestamped snapshots with deliberate refresh, no automatic polling. Dashboard Refresh observes the instance without arming controls; phone refresh is authenticated `GET /api/v1/readings/{savedControlId}`, separately rate-limited through the existing per-device request budget, with one bounded dispatcher read at a time. It resolves a read-only saved binding, not a caller-supplied service or plugin. Cached socket/deck snapshots never trigger network observations. Failure retains no false freshness and the existing wire-error/session-stop rule remains. See the plugin README for temperature units, limits and concurrent-client toggle semantics. Older apps/SDKs reject these optional extensions; ship the matching app, phone assets and bundled SDK together. No published SDK artifact was changed.
 
 ## Customize control icons
 

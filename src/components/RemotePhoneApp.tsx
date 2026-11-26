@@ -303,6 +303,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
                   key={control.id}
                   control={control}
                   plugins={remote.plugins}
+                  onRefresh={control.presentation === "value" ? () => remote.refreshValue(control.id) : undefined}
                   variant="phone"
                   semantics="remote"
                   disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}

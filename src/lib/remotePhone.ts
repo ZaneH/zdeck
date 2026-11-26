@@ -706,6 +706,27 @@ export class RemotePhoneConnection {
     this.openSocket(epoch);
   }
 
+  private reading = false;
+  async refreshValue(controlId: string): Promise<void> {
+    if (this.reading || !this.foreground || this.snap.phase !== "active") return;
+    const control = this.snap.deck?.pages.flatMap(pageControls).find((c) => c.id === controlId);
+    if (control?.action !== "plugin" || control.presentation !== "value") return;
+    const epoch = this.epoch;
+    this.reading = true;
+    try {
+      const response = await this.request(`/api/v1/readings/${encodeURIComponent(controlId)}`, { method: "GET" });
+      const body = await safeJson(response);
+      if (this.isStale(epoch)) return;
+      if (response.status === 401 || response.status === 403) { this.terminal("revoked"); throw new Error("Reading unavailable"); }
+      const snapshot = response.ok ? parseSnapshot(body) : null;
+      if (!snapshot || snapshot.revision < this.lastRevision) throw new Error("Reading unavailable");
+      this.lastRevision = snapshot.revision;
+      this.update({ deck: snapshot.deck, revision: snapshot.revision, plugins: snapshot.plugins ?? {},
+        pageId: this.choosePage(snapshot.deck) });
+      if (body?.readingFailed) throw new Error("Reading unavailable");
+    } finally { this.reading = false; }
+  }
+
   private choosePage(deck: Deck): string {
     if (this.snap.pageId && findPage(deck, this.snap.pageId)) return this.snap.pageId;
     return activePage(deck).id;

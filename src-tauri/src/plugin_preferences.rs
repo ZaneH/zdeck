@@ -239,7 +239,7 @@ mod tests {
         Manifest {
             id: "fake".into(), version: "0.1.0".into(), protocol_version: 1,
             actions: vec![Action { id: "play".into(), title: "Play".into(), config: BTreeMap::new() }],
-            icons: None, icon: None, settings: Some(settings),
+            icons: None, icon: None, settings: Some(settings), values: None,
         }
     }
     fn settings() -> Manifest {

@@ -340,7 +340,7 @@ export function isAccent(value: unknown): value is Accent {
 
 function validPresentation(action: unknown, presentation: unknown): presentation is Presentation {
   return presentation === "button" || (action === "volume" && (presentation === "slider" || presentation === "dial"))
-    || (action === "plugin" && ["slider", "dial", "toggle-switch", "toggle-button"].includes(presentation as string));
+    || (action === "plugin" && ["slider", "dial", "toggle-switch", "toggle-button", "value"].includes(presentation as string));
 }
 
 function isControl(value: unknown): value is Control {

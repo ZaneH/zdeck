@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import type { CSSProperties } from "react";
 import { controlContract, effectivePresentation, presentationCompatible } from "../lib/presentations";
+import { pluginValue, pluginEntry, EMPTY_PLUGIN } from "../lib/plugin";
 import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
@@ -26,6 +28,7 @@ interface ControlTileProps {
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
   semantics?: "preview" | "remote" | "live";
   onPrimary?: () => void;
+  onRefresh?: () => Promise<void>;
   onVolumeChange?: (value: number) => void;
   /** Numeric targets stream during live gestures; preview targets fire on release. Never fires on cancel/blur. */
   onVolumeCommit?: (value: number) => void;
@@ -33,8 +36,13 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {},
+  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh,
 }: ControlTileProps) {
+  const [reading, setReading] = useState(false);
+  const [readError, setReadError] = useState(false);
+  const readOnly = control.presentation === "value";
+  const observation = control.action === "plugin" && readOnly ? pluginValue(pluginEntry(plugins, control.pluginId) ?? EMPTY_PLUGIN, control) : null;
+  const readingFailed = readError || control.action === "plugin" && !!pluginEntry(plugins, control.pluginId)?.lastError;
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
   const dropTarget = useRef<HTMLElement | null>(null);
@@ -99,7 +107,7 @@ export function ControlTile({
       data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
       data-order-index={order?.index}
       onPointerDownCapture={(event) => {
-        if (!order || disabled || event.button !== 0) return;
+        if (!order || disabled || event.button !== 0 || (event.target as HTMLElement).closest(".tile-reading button")) return;
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.querySelector<HTMLButtonElement>(".tile-primary")?.focus();
@@ -108,7 +116,7 @@ export function ControlTile({
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onClickCapture={(event) => {
-        if (!order) return;
+        if (!order || (event.target as HTMLElement).closest(".tile-reading button")) return;
         event.stopPropagation();
         if (!disabled && !suppressClick.current) onPrimary?.();
         suppressClick.current = false;
@@ -155,7 +163,7 @@ export function ControlTile({
         order.move(control.id, Math.max(0, Math.min(order.total - 1, target)));
       }}
     >
-      {(numeric || toggle) && variant === "phone" ? (
+      {((numeric || toggle || readOnly) && variant === "phone") || (readOnly && live) ? (
         <div className="tile-primary tile-primary-static">{content}</div>
       ) : (
         <button
@@ -168,7 +176,14 @@ export function ControlTile({
           {content}
         </button>
       )}
-      {toggle ? <button type="button" className={`tile-toggle ${presentation}`} disabled={(!busy && disabled) || (semantics !== "preview" && toggleValue == null)}
+      {readOnly ? <div className="tile-reading">
+        <output className={readingFailed || observation?.value == null ? "reading-unknown" : undefined} aria-label={`${control.label} reading`}>{readingFailed ? "Reading failed" : observation?.value == null ? "Unknown / unavailable" : typeof observation.value === "boolean" ? observation.value ? "On" : "Off" : <>{observation.value}<span className="value-unit">{observation.unit}</span></>}</output>
+        <span className="reading-time">{observation ? `Checked ${new Date(observation.observedAtMs).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}` : "Not checked"}</span>
+        {onRefresh ? <button type="button" className="icon-button reading-refresh" disabled={disabled || reading} aria-label={`Refresh ${control.label}`}  aria-busy={reading || undefined}
+          onClick={async () => { setReading(true); setReadError(false); try { await onRefresh(); } catch { setReadError(true); } finally { setReading(false); } }}><RefreshCw size={14} aria-hidden="true" /></button> : null}
+        {readingFailed ? <span className="sr-only" role="alert">Reading failed. Refresh or check the plugin in Settings.</span> : null}
+      </div> : null}
+      {toggle ? <button type="button" className={`tile-toggle ${presentation}`} disabled={(!busy && disabled) || toggleValue == null}
         aria-disabled={busy || undefined}
         role={presentation === "toggle-switch" && toggleValue != null ? "switch" : undefined}
         aria-checked={presentation === "toggle-switch" && toggleValue != null ? toggleValue : undefined}

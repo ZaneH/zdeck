@@ -77,6 +77,12 @@ Native-only admin operations: start/stop/status, create invitation, list pending
 
 Avoid access/request-body logging of invitations or cookies. Invitation matching and registry updates are atomic. Pairing request IDs and display names are metadata, not authorization secrets.
 
+## Explicit dashboard observation
+
+`GET /api/v1/readings/{savedControlId}` refreshes a saved read-only plugin value. It requires an approved strict device cookie and the normal exact Host guard; an Origin header, when present, must match, and cross-site Fetch Metadata is refused. Same-origin GET fetches normally omit Origin. The route resolves `presentation: "value"` and its declared binding from the saved deck, never accepts plugin arguments, services, credentials or launch paths, and cannot call `execute`. The existing per-device rate budget and dispatcher try-lock bound reads. It returns the standard `{protocolVersion,revision,deck,plugins}` snapshot plus `readingFailed: boolean`, without command admission, IDs, Activity, result replay or automatic retry. Read failures project stopped/unknown plugin state; transport failures leave the last timestamp visible with a reading error. Other values remain timestamped observations, not live subscriptions. Cached state/socket snapshots do not initiate plugin reads. The client only offers this deliberate refresh while foreground and connected, including when desktop actions are disarmed.
+
+Plugin presentation snapshots now include only declared top-level booleans and projected choice observations referenced by boolean controls or separate `values` bindings; arbitrary plugin state and unknown nested choice fields are excluded. Saved value controls cannot be submitted to `/commands`, with or without scalar targets. Ship updated desktop and phone assets together; older clients may reject the new manifest/presentation fields.
+
 ## Deck snapshots and synchronization
 
 - `GET /api/v1/state`: authenticated `{ protocolVersion: 1, revision, deck }` from the desktop's durable deck store. Never send a sample deck to conceal a storage error.

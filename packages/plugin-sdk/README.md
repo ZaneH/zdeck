@@ -97,7 +97,7 @@ or a sandbox against trusted plugin code.
 An integer action field can declare `choicesKey: 'entities'` instead of `control`.
 Its state array uses `Choice`: `{value: number, label: string, available: boolean}`.
 The **app** validates at most 256 unique safe integer values inside field bounds,
-nonempty labels up to 160 characters without control characters, and availability;
+nonempty labels up to 320 characters without control characters, and availability;
 it renders a shared dropdown and disables unavailable/missing bindings. Multiple
 actions may refer to the same array. The SDK/host validate the key name and normal
 integer arguments, not the arbitrary state object. The plugin must independently
@@ -110,6 +110,14 @@ confirms post-action observation without replaying commands. Generic SDK errors
 remain conservative: once an execute handler is entered, an error reports outcome
 unknown even if the handler failed preflight. A handler-raised `timeout`, like an
 SDK deadline, stops serving further requests in both JS and Python.
+
+## Read-only values and selected boolean observations (unreleased)
+
+`Choice` also accepts `description` (1–320 characters) and `observation: {value: boolean | number | null, unit: string, observedAtMs: number}`. Numbers must be finite with magnitude ≤ MAX_SAFE_INTEGER, units ≤24 characters without control characters, and timestamps positive safe integers. `null` means unknown/unavailable, never Off/zero. Return timestamped observations, not optimistic command targets.
+
+A boolean control can use `{stateKey:'entities', entityKey:'entity'}` to read the selected choice's observation. Its `entity` config field must be an integer with matching `choicesKey:'entities'`. Omitting `entityKey` keeps the original top-level observed boolean behavior. Existing fixed buttons keep their saved arguments; new boolean controls default to observed toggles.
+
+Declare read-only bindings separately from actions, e.g. `values: [{id:'temperature', title:'Temperature', config:{entity:{type:'integer',minimum:1,maximum:100,choicesKey:'temperatures'}}, stateKey:'temperatures',entityKey:'entity'}]`. At most 32, exactly one integer selection field per value, no writable metadata, IDs unique across actions and values. Do not add fake read actions: value IDs are not executable, and the existing `state` handler observes them. The app stores the selected ID/binding with read-only `value` presentation and offers explicit refresh without sending `execute`. No new stdio request type or background events/polling were added. See [the host contract](../../docs/plugins.md#selected-observations-and-read-only-values-unreleased) for compatibility and phone refresh.
 
 ## Maintainer releases
 

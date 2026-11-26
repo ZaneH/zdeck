@@ -2,14 +2,15 @@ import { createHash } from 'node:crypto';
 import manifest from './manifest.json' with { type: 'json' };
 
 const MAX_ENTITY = 281474976710655; // 48-bit control value; also the manifest maximum.
-const MAX_LABEL_BYTES = 160;
+const MAX_LABEL_BYTES = 320;
 const MAX_CHOICES = 100;
 const MAX_STATE_BYTES = 50000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_DISCOVERY_ITEMS = 5000;
 const MAX_URL_LENGTH = 2048;
 const MAX_TOKEN_LENGTH = 2048;
-const ENTITY_ID = /^(?:light|switch)\.[a-z0-9_]+$/;
+const ENTITY_ID = /^(?:light|switch|sensor|climate)\.[a-z0-9_]+$/;
+const TEMPERATURE_UNITS = new Set(['°C', '°F', 'K']);
 const POWERS = new Set(['on', 'off']);
 const PRIVATE_SUFFIXES = ['.local', '.lan', '.home.arpa'];
 
@@ -75,20 +76,24 @@ function brightnessPercent(attributes) {
   return null;
 }
 
-function observedLabel(candidate) {
-  const state = POWERS.has(candidate.state) ? candidate.state : 'unavailable';
-  const suffix = state === 'on' && candidate.brightness !== null ? `, ${candidate.brightness}%` : '';
-  return `${candidate.id} — ${state}${suffix}${candidate.name === candidate.id ? '' : ` · ${candidate.name}`}`;
+function observedValue(candidate) {
+  if (candidate.domain === 'light' || candidate.domain === 'switch') {
+    return POWERS.has(candidate.state) ? candidate.state === 'on' : null;
+  }
+  return !['unknown', 'unavailable'].includes(candidate.state) && TEMPERATURE_UNITS.has(candidate.unit)
+    && typeof candidate.temperature === 'number' && Number.isFinite(candidate.temperature)
+    && Math.abs(candidate.temperature) <= Number.MAX_SAFE_INTEGER ? candidate.temperature : null;
 }
 
 function readChoices(raw) {
   const candidates = [];
   for (const item of raw.slice(0, MAX_DISCOVERY_ITEMS)) {
-    if (!record(item) || typeof item.entity_id !== 'string' || !ENTITY_ID.test(item.entity_id) || item.entity_id.length > 128) continue;
+    if (!record(item) || typeof item.entity_id !== 'string' || !ENTITY_ID.test(item.entity_id) || item.entity_id.length > 320) continue;
     const attributes = record(item.attributes) ? item.attributes : {};
     const domain = item.entity_id.slice(0, item.entity_id.indexOf('.'));
     const name = typeof attributes.friendly_name === 'string' && attributes.friendly_name.trim()
       ? attributes.friendly_name.trim() : item.entity_id;
+    if (domain === 'sensor' && !TEMPERATURE_UNITS.has(attributes.unit_of_measurement)) continue;
     candidates.push({
       id: item.entity_id,
       domain,
@@ -96,6 +101,9 @@ function readChoices(raw) {
       name,
       brightness: brightnessPercent(attributes),
       brightCapable: domain === 'light' && supportedBrightness(attributes),
+      unit: domain === 'climate' ? attributes.temperature_unit ?? attributes.unit_of_measurement : attributes.unit_of_measurement,
+      temperature: domain === 'climate' ? attributes.current_temperature
+        : typeof item.state === 'string' && item.state.trim() && Number.isFinite(Number(item.state)) ? Number(item.state) : null,
     });
   }
   return candidates;
@@ -170,33 +178,29 @@ export function createHomeAssistant({
       if (counts.get(value) !== 1) continue;
       if (known.has(value) && known.get(value) !== candidate.id) continue;
       known.set(value, candidate.id);
-      candidate.available = POWERS.has(candidate.state);
-      candidate.label = clipLabel(observedLabel(candidate));
+      candidate.available = observedValue(candidate) !== null;
+      candidate.label = clipLabel(candidate.name);
       usable.push(candidate);
     }
     return usable;
   }
 
   function choices(candidates) {
-    let power = candidates.map((candidate) => ({
-      candidate, entry: { value: candidate.value, label: candidate.label, available: candidate.available },
-    })).slice(0, MAX_CHOICES);
-    let brightness = candidates.filter((candidate) => candidate.brightCapable).map((candidate) => ({
-      candidate, entry: { value: candidate.value, label: candidate.label, available: candidate.available },
-    })).slice(0, MAX_CHOICES);
-    const state = () => ({
-      entities: power.map((item) => item.entry),
-      'brightness-entities': brightness.map((item) => item.entry),
-    });
-    while (Buffer.byteLength(JSON.stringify(state())) > MAX_STATE_BYTES && (power.length || brightness.length)) {
-      if (power.length >= brightness.length) power.pop();
-      else brightness.pop();
+    const at = Date.now();
+    const entry = (candidate) => ({ candidate, entry: { value: candidate.value, label: candidate.label,
+      description: candidate.id, available: candidate.available,
+      observation: { value: observedValue(candidate), unit: ['sensor', 'climate'].includes(candidate.domain) ? (TEMPERATURE_UNITS.has(candidate.unit) ? candidate.unit : '') : '', observedAtMs: at } } });
+    const power = candidates.filter((c) => ['light', 'switch'].includes(c.domain)).slice(0, MAX_CHOICES).map(entry);
+    const brightness = candidates.filter((c) => c.brightCapable).slice(0, MAX_CHOICES).map(entry);
+    const temperatures = candidates.filter((c) => ['sensor', 'climate'].includes(c.domain)).slice(0, MAX_CHOICES).map(entry);
+    const lists = [power, brightness, temperatures];
+    const state = () => ({ entities: power.map((i) => i.entry),
+      'brightness-entities': brightness.map((i) => i.entry), temperatures: temperatures.map((i) => i.entry) });
+    while (Buffer.byteLength(JSON.stringify(state())) > MAX_STATE_BYTES) {
+      lists.reduce((largest, list) => list.length > largest.length ? list : largest).pop();
     }
-    return {
-      state: state(),
-      power: new Map(power.map((item) => [item.entry.value, item.candidate])),
-      brightness: new Map(brightness.map((item) => [item.entry.value, item.candidate])),
-    };
+    return { state: state(), power: new Map(power.map((i) => [i.entry.value, i.candidate])),
+      brightness: new Map(brightness.map((i) => [i.entry.value, i.candidate])) };
   }
 
   async function discover(signal) {
@@ -209,7 +213,16 @@ export function createHomeAssistant({
       throw new PluginError('invalid_state');
     }
     if (!Array.isArray(raw)) throw new PluginError('invalid_state');
-    return choices(bind(readChoices(raw)));
+    const candidates = readChoices(raw);
+    if (candidates.some((c) => c.domain === 'climate' && !TEMPERATURE_UNITS.has(c.unit))) {
+      const configResponse = await response(`${config.origin}/api/config`, { method: 'GET', headers: authHeaders() }, signal);
+      if (!configResponse.ok) throw new PluginError(configResponse.status === 401 || configResponse.status === 403 ? 'authentication_failed' : 'connection_failed');
+      let data;
+      try { data = JSON.parse(await bodyText(configResponse)); } catch { throw new PluginError('invalid_state'); }
+      const unit = data?.unit_system?.temperature;
+      for (const c of candidates) if (c.domain === 'climate' && !TEMPERATURE_UNITS.has(c.unit)) c.unit = TEMPERATURE_UNITS.has(unit) ? unit : '';
+    }
+    return choices(bind(candidates));
   }
 
   async function readEntity(entityId, signal) {
@@ -358,10 +371,11 @@ export function createHomeAssistant({
           throw new PluginError('outcome_unknown');
         }
         // Return the confirmed observation, never the stale pre-command label on a later read failure.
-        const label = clipLabel(observedLabel({ ...candidate, state: observed.state,
-          brightness: brightnessPercent(record(observed.attributes) ? observed.attributes : {}) }));
         for (const list of Object.values(discovery.state)) {
-          for (const choice of list) if (choice.value === args.entity) choice.label = label;
+          for (const choice of list) if (choice.value === args.entity) {
+            choice.available = POWERS.has(observed.state);
+            choice.observation = { value: observed.state === 'on', unit: '', observedAtMs: Date.now() };
+          }
         }
         return discovery.state;
       });

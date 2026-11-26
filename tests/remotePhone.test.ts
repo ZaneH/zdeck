@@ -178,6 +178,30 @@ it("round-trips an existing Spotify button as a slider and sends a remote scalar
   connection.stop();
 });
 
+it("refreshes saved read-only values by GET without creating or replaying commands", async () => {
+  const deck = createDefaultDeck();
+  const value: PluginControl = { id: "reading", label: "Temperature", action: "plugin", pluginId: "fixture", pluginAction: "temperature", pluginArgs: { entity: 7 }, presentation: "value" };
+  deck.pages[0].sections[0].controls.push(value);
+  const payload = snapshotBody(3, deck);
+  const harness = createHarness((path, init) => {
+    if (path === "/api/v1/pair/status") return jsonResponse(200, { requestId: "r1", status: "approved" });
+    if (path === "/api/v1/state") return jsonResponse(200, payload);
+    if (path === "/api/v1/readings/reading") { expect(init.method).toBe("GET"); return jsonResponse(200, payload); }
+    throw new Error("No command request is allowed");
+  });
+  const connection = new RemotePhoneConnection(harness.deps); connection.start();
+  for (let i = 0; i < 3; i++) await flush();
+  harness.sockets[0].emit(payload); await flush();
+  connection.pressControl(value); connection.commitVolume(value, 1);
+  await connection.refreshValue(value.id);
+  expect(harness.calls.filter((c) => c.path === "/api/v1/readings/reading")).toHaveLength(1);
+  expect(harness.calls.filter((c) => c.path === "/api/v1/commands")).toHaveLength(0);
+  connection.onHidden();
+  await connection.refreshValue(value.id);
+  expect(harness.calls.filter((c) => c.path === "/api/v1/readings/reading")).toHaveLength(1);
+  connection.stop();
+});
+
 function makeStandardHarness(command?: Handler) {
   let statusCalls = 0;
   const harness = createHarness((path, init) => {

@@ -1,4 +1,4 @@
-import { compatiblePresentations, effectivePresentation } from "../lib/presentations";
+import { compatiblePresentations, effectivePresentation, controlContract } from "../lib/presentations";
 import type { Presentation } from "../lib/types";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -8,9 +8,10 @@ import { Dropdown } from "./Dropdown";
 import { isSpan, MAX_COLUMN_SPAN, MAX_ROW_SPAN } from "../lib/deck";
 import { ACTION_CATALOG, clampVolume } from "../lib/actions";
 import { IconPicker } from "./IconPicker";
-import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginDefaults, pluginEntry, pluginChoices } from "../lib/plugin";
+import { canRunPlugin, enabledPluginManifests, EMPTY_PLUGIN, pluginControlAction, pluginEntry, pluginChoices, pluginValue } from "../lib/plugin";
 import type { PluginControl } from "../lib/types";
 import type { PluginConsole } from "../lib/usePluginConsole";
+import { HelpTooltip } from "./HelpTooltip";
 import { PluginErrorNotice } from "./PluginSettingsCard";
 import type { ActionKind, Control, ControlPatch } from "../lib/types";
 import type { ObsConsole, SceneSwitchFeedback } from "../lib/useObsConsole";
@@ -19,7 +20,7 @@ import { useMediaPermission } from "../lib/useMediaPermission";
 import type { ApplyFeedback, SystemConsole } from "../lib/useSystemConsole";
 
 const PRESENTATION_LABELS: Record<Presentation, string> = {
-  button: "Button", slider: "Slider", dial: "Dial", "toggle-switch": "Toggle switch", "toggle-button": "Toggle button",
+  button: "Button", slider: "Slider", dial: "Dial", "toggle-switch": "Toggle switch", "toggle-button": "Toggle button", value: "Value",
 };
 
 interface InspectorProps {
@@ -40,7 +41,7 @@ function isSystemAction(kind: ActionKind): boolean {
 }
 
 function observedLine(observedAtMs: number | null | undefined): string {
-  return observedAtMs ? `checked ${new Date(observedAtMs).toLocaleTimeString()}` : "not checked";
+  return observedAtMs ? `checked ${new Date(observedAtMs).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "not checked";
 }
 
 function NativeStatus({ feedback, error }: { feedback: ApplyFeedback | null; error: string | null }) {
@@ -96,25 +97,31 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
   const snapshot = pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN;
   const busy = pluginEntry(plugin.busy, control.pluginId) === true;
   const action = pluginControlAction(snapshot, control);
+  const contract = controlContract(control, plugin.snapshots);
+  const toggle = control.presentation?.startsWith("toggle-") === true;
+  const observed = contract?.kind === "boolean" ? contract.value : null;
   const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(control.pluginArgs).map(([key, n]) => [key, String(n)])));
   const validDraft = action && Object.entries(action.config).every(([key, field]) => field.type === "boolean"
     ? ["true", "false"].includes(drafts[key]) : drafts[key]?.trim()
       && Number.isSafeInteger(Number(drafts[key])) && Number(drafts[key]) >= field.minimum && Number(drafts[key]) <= field.maximum
       && (!field.control || (Number(drafts[key]) - field.minimum) % field.control.step === 0));
   return <div className="native-control">
-    <p>{control.pluginId} · {control.pluginAction}</p>
     {action && Object.values(action.config).some((field) => field.type === "integer" && field.choicesKey) ? <div className="plugin-read-control">
-      <button type="button" className="button secondary" disabled={busy || snapshot.status !== "connected" || !!snapshot.lastError} onClick={() => void plugin.readState(control.pluginId)}>Discover / refresh selections</button>
-      <p className="field-note">Last observed values, not live. Saved selections never follow discovery order. Missing or renamed entities must be selected again.</p>
+      <button type="button" className="button secondary" disabled={busy || snapshot.status !== "connected" || !!snapshot.lastError} onClick={() => void plugin.readState(control.pluginId)}>Refresh entities</button>
+      <HelpTooltip label="About entity readings">Readings are snapshots, not live. Refresh to observe this integration again. Saved bindings use the entity ID and instance, never list order.</HelpTooltip>
     </div> : null}
-    {action ? Object.entries(action.config).map(([key, field]) => field.type === "boolean" ? <Dropdown key={key} label={key}
-      value={drafts[key] ?? "false"} options={[{ value: "false", label: "Off" }, { value: "true", label: "On" }]} disabled={busy} onChange={(text) => {
-        setDrafts((current) => ({ ...current, [key]: text }));
-        onPatch({ pluginArgs: { ...control.pluginArgs, [key]: text === "true" } });
-      }} /> : field.choicesKey ? <Dropdown key={key} label={key} value={drafts[key] ?? ""}
+    {action ? Object.entries(action.config).map(([key, field]) => field.type === "boolean" ? field.control && control.presentation?.startsWith("toggle-") ? null : <Dropdown key={key} label={field.control ? "On press" : key}
+      value={drafts[key] ?? "false"}
+      options={[...(field.control ? [{ value: "toggle", label: "Toggle" }] : []), { value: "true", label: "Turn on" }, { value: "false", label: "Turn off" }]} disabled={busy} onChange={(text) => {
+        if (text === "toggle") onPatch({ presentation: "toggle-switch" });
+        else {
+          setDrafts((current) => ({ ...current, [key]: text }));
+          onPatch({ ...(field.control ? { presentation: "button" as const } : {}), pluginArgs: { ...control.pluginArgs, [key]: text === "true" } });
+        }
+      }} /> : field.choicesKey ? <Dropdown key={key} label={key === "entity" ? "Entity" : key} value={drafts[key] ?? ""}
         options={(() => {
           const choices = pluginChoices(snapshot, field) ?? [];
-          const options = choices.map((choice) => ({ value: String(choice.value), label: choice.label + (choice.available ? "" : " — unavailable") }));
+          const options = choices.map((choice) => ({ value: String(choice.value), label: choice.label + (choice.available ? "" : " — unavailable"), description: choice.description }));
           return options.some((choice) => choice.value === drafts[key]) ? options
             : [{ value: drafts[key] ?? "", label: "Select an entity (saved selection missing)" }, ...options];
         })()} disabled={busy || snapshot.status !== "connected"} onChange={(text) => {
@@ -130,18 +137,26 @@ function PluginControlEditor({ control, plugin, onPatch }: { control: PluginCont
           setDrafts((current) => ({ ...current, [key]: text }));
           if (text.trim() && Number.isSafeInteger(Number(text))) onPatch({ pluginArgs: { ...control.pluginArgs, [key]: Number(text) } });
         }} />
-    </label>) : <p className="field-note">Connect the matching plugin in Settings to configure and run this saved action.</p>}
-    {action ? <button type="button" className="button secondary" disabled={busy} onClick={() => {
-      const args = pluginDefaults(action);
-      setDrafts(Object.fromEntries(Object.entries(args).map(([key, n]) => [key, String(n)])));
-      onPatch({ pluginArgs: args });
-    }}>Use declared defaults</button> : null}
-    <div className="native-actions"><button type="button" className="button primary"
-      disabled={!plugin.native || busy || !validDraft || !canRunPlugin(snapshot, control)}
-      onClick={() => void plugin.execute(control)}>{busy ? "Request pending…" : "Run plugin action"}</button></div>
-    <p className="field-note">Runs on this computer. Editor tiles never run the plugin. No automatic retry.</p>
-    {plugin.completedIds[control.pluginId] === control.id ? <p className="native-feedback is-confirmed" role="status">Command completed and state read back. This is not live state.</p> : null}
-    {action && (!validDraft || !canRunPlugin(snapshot, control)) ? <p className="field-note">Run requires a connected matching manifest and every required value within its declared contract.</p> : null}
+    </label>) : <p className="field-note">Connect the matching plugin in Settings to configure this control.</p>}
+    {action ? Object.entries(action.config).flatMap(([key, field]) => {
+      const selected = pluginChoices(snapshot, field)?.find((choice) => choice.value === control.pluginArgs[key]);
+      return selected ? [<details className="binding-details" key={key}><summary>Entity details</summary><p>{selected.label}</p>{selected.description ? <p>{selected.description}</p> : null}</details>] : [];
+    }) : null}
+    {control.presentation === "value" ? <p className="native-state">{(() => {
+      const reading = pluginValue(snapshot, control);
+      return `${reading?.value == null ? "Unknown / unavailable" : typeof reading.value === "boolean" ? reading.value ? "On" : "Off" : `${reading.value} ${reading.unit}`} · ${observedLine(reading?.observedAtMs)}`;
+    })()}</p> : <div className="native-actions"><button type="button" className={toggle ? `tile-toggle ${control.presentation}` : "button primary"}
+      disabled={!plugin.native || busy || !validDraft || !canRunPlugin(snapshot, control) || toggle && observed === null}
+      aria-label={toggle ? `${control.label}${observed === null ? " — state unknown" : ""}` : undefined}
+      role={toggle && control.presentation === "toggle-switch" && observed !== null ? "switch" : undefined}
+      aria-checked={toggle && control.presentation === "toggle-switch" && observed !== null ? observed : undefined}
+      aria-pressed={toggle && control.presentation === "toggle-button" && observed !== null ? observed : undefined}
+      onClick={() => {
+        const field = Object.entries(action?.config ?? {}).find(([, f]) => f.type === "boolean" && f.control);
+        if (toggle && field && observed !== null)
+          void plugin.execute({ ...control, pluginArgs: { ...control.pluginArgs, [field[0]]: !observed } });
+        else if (!toggle) void plugin.execute(control);
+      }}>{toggle ? <><span className="toggle-track" aria-hidden="true"><span /></span><span className="toggle-state">{observed === null ? "State unknown" : observed ? "On" : "Off"}</span></> : "Run plugin action"}</button></div>}
     <PluginErrorNotice error={pluginEntry(plugin.errors, control.pluginId) ?? snapshot.lastError} />
   </div>;
 }
@@ -243,7 +258,7 @@ export function Inspector({
                     const details = event.currentTarget.closest("details")!;
                     details.open = false;
                     details.querySelector("summary")?.focus();
-                  }}>{PRESENTATION_LABELS[value]}</button>)}
+                  }}>{value === "button" && controlContract(control, plugin.snapshots)?.kind === "boolean" ? "Button (fixed on/off)" : PRESENTATION_LABELS[value]}</button>)}
               </div>
             </details>
             <IconPicker key={control.id} control={control} manifests={enabledPluginManifests(plugin.snapshots)} onPatch={onPatch} />
@@ -266,7 +281,7 @@ export function Inspector({
               </div>
             </details>
             <details className="inspector-section" open>
-              <summary className="disclosure">Action settings</summary>
+              <summary className="disclosure">{control.presentation === "value" ? "Value settings" : "Action settings"}</summary>
               <div className="inspector-section-body">
             {control.action === "plugin" ? <PluginControlEditor
               key={`${control.id}-${control.pluginId}-${control.pluginAction}-${JSON.stringify(pluginControlAction(pluginEntry(plugin.snapshots, control.pluginId) ?? EMPTY_PLUGIN, control)?.config)}`}
@@ -522,7 +537,7 @@ export function Inspector({
             ) : null}
 
             <div className="inspector-actions">
-              {control.action !== "volume" ? (
+              {control.action !== "volume" && control.presentation !== "value" && control.action !== "plugin" ? (
                 control.action === "obs-scene" && obsActive ? (
                   <button
                     type="button"
