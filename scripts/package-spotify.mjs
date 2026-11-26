@@ -27,7 +27,7 @@ async function sourceFile(path) {
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe source: expected a regular file.');
   return readFile(path);
 }
-async function validateOutput(output, files) {
+async function validateOutput(output, files, owner) {
   const allowedFiles = new Set(files.keys());
   const allowedDirectories = new Set();
   for (const name of allowedFiles) {
@@ -48,7 +48,7 @@ async function validateOutput(output, files) {
   if ((await readdir(output)).length) {
     const marker = join(output, MARKER);
     const markerInfo = await stat(marker);
-    if (!markerInfo?.isFile() || markerInfo.isSymbolicLink() || markerInfo.size !== Buffer.byteLength(OWNER) || await readFile(marker, 'utf8') !== OWNER) {
+    if (!markerInfo?.isFile() || markerInfo.isSymbolicLink() || markerInfo.size !== Buffer.byteLength(owner) || await readFile(marker, 'utf8') !== owner) {
       throw new Error('Refusing to overwrite a directory not owned by this packager.');
     }
   }
@@ -56,13 +56,17 @@ async function validateOutput(output, files) {
 }
 
 /** Output injection is for isolated tests; the CLI always uses dist/plugins/spotify. */
-export async function packageSpotify(output = OUTPUT) {
+export function packageSpotify(output = OUTPUT) { return packagePlugin('spotify', 'spotify.js', OWNER, output); }
+export function packageHomeAssistant(output = join(ROOT, 'dist/plugins/home-assistant')) {
+  return packagePlugin('home-assistant', 'home-assistant.js', 'zdeck Home Assistant folder artifact v1\n', output);
+}
+async function packagePlugin(id, core, owner, output) {
   if (typeof output !== 'string' || resolve(output) !== output || output === dirname(output)) throw new Error('An absolute non-root output directory is required.');
   const files = new Map();
-  for (const name of ['manifest.json', 'main.js', 'spotify.js', 'LICENSE', 'README.md']) {
-    files.set(name, await sourceFile(source(`plugins/spotify/${name}`)));
+  for (const name of ['manifest.json', 'main.js', core, 'LICENSE', 'README.md']) {
+    files.set(name, await sourceFile(source(`plugins/${id}/${name}`)));
   }
-  const metadata = JSON.parse(await sourceFile(source('plugins/spotify/package.json')));
+  const metadata = JSON.parse(await sourceFile(source(`plugins/${id}/package.json`)));
   const { name, version, type, license, engines } = metadata;
   const sdk = JSON.parse(await sourceFile(source('packages/plugin-sdk/package.json')));
   // Distribution copies SDK files directly, never development node_modules.
@@ -71,9 +75,9 @@ export async function packageSpotify(output = OUTPUT) {
   for (const name of ['index.js', 'index.d.ts', 'package.json', 'LICENSE']) {
     files.set(join('node_modules/@zdeck/plugin-sdk', name), await sourceFile(source(`packages/plugin-sdk/${name}`)));
   }
-  files.set(MARKER, Buffer.from(OWNER));
+  files.set(MARKER, Buffer.from(owner));
   // Validate everything before replacing any generated file. Never recursively remove output.
-  await validateOutput(output, files);
+  await validateOutput(output, files, owner);
   await directory(output);
   for (const [name, bytes] of files) {
     const target = join(output, name);

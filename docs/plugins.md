@@ -1,8 +1,8 @@
-# Process plugins: SDK and Spotify developer preview
+# Process plugins: SDK, Spotify and Home Assistant
 
 ## Implemented vs planned
 
-Implemented: MIT-licensed JavaScript/TypeScript and Python SDKs, protocol v1, typed author examples, Rust process host shared by desktop and phone, local plugin-folder discovery, Node and Python detection, explicit trust/enable controls, generic deck actions, and a macOS Spotify reference plugin. There is no runtime bundling, automatic download/update, or marketplace. Trust is remembered for each exact installed package; enabled intent is also remembered for that exact trusted fingerprint. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
+Implemented: MIT-licensed JavaScript/TypeScript and Python SDKs, protocol v1, typed author examples, Rust process host shared by desktop and phone, local plugin-folder discovery, Node and Python detection, explicit trust/enable controls, generic deck actions, opt-in host-mediated settings backed by the OS credential store, a macOS Spotify reference plugin, and a cross-platform Home Assistant REST plugin. There is no runtime bundling, automatic download/update, or marketplace. Trust is remembered for each exact installed package; enabled intent is also remembered for that exact trusted fingerprint. The existing default-MPRIS media action is separate from Spotify. `docs/protocol.md` describes the phone protocol, not this stdio protocol.
 
 The JavaScript/TypeScript SDK is plain ESM JavaScript plus `.d.ts`, with explicit package exports and no dependencies or build scripts. An **installed Node.js >=22.18.0** is required, including for Spotify; npm distribution is not end-user runtime distribution. Node >=22.18 runs the included `.ts` example using native type stripping, not typechecking. No `tsc` is required to pack, run or test. Consumers using a TypeScript compiler supply their usual Node types. This preview was exercised on Node 26.12.1; the declared minimum was selected for stable built-in type stripping but was not separately exercised here.
 
@@ -37,7 +37,101 @@ Use the row’s keyboard-accessible **⋯** menu for **Diagnostics** or **Uninst
 
 Desktop startup requests `plugin_catalog` and cached `plugin_snapshots` only. Native lifecycle operations `plugin_enable`, `plugin_disconnect`, `plugin_snapshot`, `plugin_state`, `plugin_diagnostics` and `plugin_uninstall` take `{pluginId}`; execute additionally takes `{actionId,args}`. Snapshot-map keys must match manifest IDs. No operation can redirect a saved action to a different enabled plugin.
 
-Deck schema v2 stores only plugin IDs, action IDs and bounded integer arguments—not launch paths or secrets. Valid v1 decks migrate in memory; migration alone does not rewrite stored data. A later explicit edit/save writes v2. The native filename remains `deck.v1.json`; older app versions cannot read the new schema.
+Deck schema v2 stores only plugin IDs, action IDs and bounded integer/boolean arguments—not launch paths, connection settings or secrets. Valid v1 decks migrate in memory; migration alone does not rewrite stored data. A later explicit edit/save writes v2. The native filename remains `deck.v1.json`; older app versions cannot read the new schema.
+
+## Home Assistant: first usable slice
+
+Package offline with `npm run plugin:package:home-assistant` **after** `npm run build`.
+Copy the complete `dist/plugins/home-assistant/` folder into the plugin directory;
+no dependency installation is needed. This requires the updated app and bundled
+SDK from this checkout, **not** the published npm SDK 0.1.0.
+
+1. Refresh the catalog, choose Enable, review the package and choose **Trust package**.
+   Settings-declaring plugins are trusted separately from enabling.
+2. Expand **Connection settings → Load settings**. Enter one origin-only Home
+   Assistant URL and a long-lived access token created in Home Assistant's user
+   profile security settings. **Apply settings** saves immediately without a
+   connection or device command. Use trusted HTTPS where possible: HTTP sends
+   bearer tokens unencrypted and is restricted to local addresses/hostnames.
+   TLS verification is never disabled; configure a trusted certificate separately.
+3. Choose **Enable**, then **Read state** to discover lights and switches. Enabling
+   only describes/configures the plugin, including on restart; it sends no HA requests.
+4. Add a plugin control. In the Inspector, discover/refresh selections, select an
+   entity, choose explicit Off/On or brightness 0–100, then deliberately run it.
+   There is no toggle or arbitrary service builder. Brightness 0 sends turn_off.
+5. Disable before editing settings. Use the secret's **Forget** button to remove
+   the saved token; the token is never read back into the form. Forget does not
+   revoke the token at Home Assistant—revoke it there too when appropriate.
+   Uninstall preserves secure settings, so use Forget before uninstalling if you
+   want to remove the token from this computer.
+
+State and availability are last observed, not live; unavailable, missing, renamed
+or unsupported entities cannot run. Every enable/restart requires an explicit
+successful Read state before an action can be sent, including via the phone.
+Numeric bindings are deterministic origin/entity-ID hashes, not discovery indices;
+changing the configured origin invalidates old bindings. They survive deck
+export/import and discovery reorder.
+See the [plugin README](../plugins/home-assistant/README.md) for binding limitations,
+discovery caps, readback semantics and setup details. Service delivery is never
+retried. A failed/mismatched post-action observation is an uncertain outcome;
+the process stops, requiring explicit re-enable and a read before deciding whether
+to issue another action. No state polling occurs outside an intentional read/action.
+
+The implementation uses documented [REST endpoints](https://developers.home-assistant.io/docs/api/rest/),
+[Bearer long-lived tokens](https://developers.home-assistant.io/docs/auth_api/),
+and [light color-mode/brightness semantics](https://developers.home-assistant.io/docs/core/entity/light/).
+All API checks use fakes or local owned fixtures. Live HA, physical devices,
+real credential stores and signed native behavior on Windows/macOS/Linux remain
+unverified; browser checks are not native three-OS verification.
+
+## Opt-in settings and selections (unreleased protocol-v1 extension)
+
+A manifest may declare `settings`, a map of at most four identifier keys to
+`{type: "text" | "secret", label: "1–80 character label"}`. The SDK and Rust host
+accept at most 2048 UTF-8 bytes per setting. Native persistence additionally caps
+the entire typed text/secret storage envelope at 2400 UTF-16 bytes to fit the smallest supported OS
+credential-store envelope. Unknown keys and wrong types are rejected. Settings
+are separate from action arguments; no imported metadata can fetch arbitrary
+credentials, choose a process, execute commands or invoke actions.
+
+Only plugins declaring settings get a settings form. Native IPC exposes
+`plugin_settings_load({pluginId}) → {values,secretConfigured}` (text values and
+secret-presence booleans only), `plugin_settings_save({pluginId,values,secrets})`
+(omitted secrets unchanged), and `plugin_settings_forget({pluginId,key})` for a
+declared secret. All operations revalidate current package trust and schema.
+Values are saved in the OS credential store, not package/deck files, browser
+storage, exports or logs; no plaintext fallback. Storage failures stay visible
+without blocking app launch. Saved values belong to a plugin ID and may be
+provided to a changed package only after explicit trust for its new fingerprint.
+Explicit enabled intent retains the existing exact-package restart checks.
+
+The host first checks `describe` against the installed manifest, then sends one
+`configure` frame containing exactly the declared string settings over private
+stdin. The plugin's configure handler performs validation only; it must not issue
+actions. The SDK discards its return value and acknowledges with exactly
+`{protocolVersion:1,id,type:"result",state:{}}`; settings never enter the session
+snapshot. State/execute are refused until configured. Failure stops the host;
+settings are never automatically resent to retry an action. A failed
+reconfiguration invalidates earlier configuration in both SDKs. Settings data is
+typed in secure storage, so a later secret→text schema change cannot expose a
+stored token through the form. Corrupt stored settings fail closed; the secret's
+Forget recovery action clears the damaged plugin record with a visible warning. Plugins remain
+trusted unsandboxed processes: this mechanism is not a security boundary against
+malicious plugin code.
+
+`choicesKey` refers to a state array of at most 256 exact
+`{value: safeInteger, label: nonemptyStringUpTo160, available: boolean}` objects.
+Values must be unique and inside the field's integer bounds. The app renders
+these as shared dropdowns and fails closed for malformed/missing/unavailable
+selections. The plugin must independently validate the saved binding immediately
+before sending a command. Selection labels are display data, never executable
+metadata. No deck-schema extension or arbitrary string arguments were added.
+
+Compatibility: old manifests and three original request types are unchanged in
+TS, Python and Rust. Older apps/SDKs deliberately reject the new optional fields
+rather than silently dropping them. Ship the updated app and complete bundled
+SDK together; protocol number 1 alone does not advertise extension support.
+The published 0.1.0 artifact has not been changed or republished.
 
 ## Customize control icons
 
@@ -131,6 +225,7 @@ Exactly these request shapes are allowed; unknown fields are rejected:
 ```json
 {"protocolVersion":1,"id":"d1","type":"describe"}
 {"protocolVersion":1,"id":"s1","type":"state"}
+{"protocolVersion":1,"id":"c1","type":"configure","settings":{"url":"https://ha.example.test","token":"EXAMPLE-NOT-A-REAL-TOKEN"}}
 {"protocolVersion":1,"id":"a1","type":"execute","action":"set-volume","args":{"volume":50}}
 ```
 
@@ -171,7 +266,7 @@ Malformed framing/JSON/IDs use `id: null` if a valid ID cannot be recovered; a v
 }
 ```
 
-Manifest/action/config IDs: `[a-z][a-z0-9-]{0,63}`; action IDs unique within the manifest. Versions: three dot-separated 1–4 digit numeric parts (no prerelease/build syntax yet). Titles: 1–80 UTF-16 code units, no ASCII control characters. Unknown manifest, action and config-schema fields are rejected. Integer bounds must be ordered safe JavaScript integers (±9,007,199,254,740,991). Every declared config field is required at execute time; extra fields, strings, fractional values, null and arrays are rejected. Empty configuration is exactly `{}`. No defaults, arbitrary text, secret fields, remote URLs or executable launch metadata are supported. Treat every manifest and request as untrusted at the host boundary too; an SDK validator cannot protect a host from a different implementation lying about its output. Do not store secrets in config or manifests.
+Manifest/action/config IDs: `[a-z][a-z0-9-]{0,63}`; action IDs unique within the manifest. Versions: three dot-separated 1–4 digit numeric parts (no prerelease/build syntax yet). Titles: 1–80 UTF-16 code units, no ASCII control characters. Unknown manifest, action and config-schema fields are rejected. Integer bounds must be ordered safe JavaScript integers (±9,007,199,254,740,991). Every declared config field is required at execute time; extra fields, strings, fractional values, null and arrays are rejected. Empty configuration is exactly `{}`. Action configuration supports bounded integers and booleans only, not arbitrary strings, secrets, URLs or executable launch metadata. An integer may declare `control: {step: positiveInteger}` for slider/dial target values, or `choicesKey: identifier` for a selection list from state, never both. A boolean may declare `control: {stateKey: identifier}` for toggles; the state must contain a known boolean before toggling. At most one controlled field is allowed per action. These presentation fields do not authorize execution or replace plugin-side argument validation. Treat every manifest and request as untrusted at the host boundary too; an SDK validator cannot protect a host from a different implementation lying about its output. Do not store secrets in config or manifests.
 
 ## Spotify reference implementation
 
@@ -208,8 +303,8 @@ The first intentional state/action request may trigger macOS's Automation consen
 
 ## Trust and remaining compatibility work
 
-**Stdio is not a sandbox.** A Node or Python plugin runs arbitrary code with the current user's filesystem, network and OS permissions. Fixed scripts protect this reference's input boundary, not an untrusted package in general. Review source, origin, MIT license, runtime requirements and expected Spotify Automation access before intentionally running it. No credential reads, capabilities enforcement, signature verification or OS isolation are provided. Never auto-execute a package on import/preview or accept a launch path from a phone/deck/remote manifest.
+**Stdio is not a sandbox.** A Node or Python plugin runs arbitrary code with the current user's filesystem, network and OS permissions. Fixed scripts protect this reference's input boundary, not an untrusted package in general. Review source, origin, MIT license, runtime requirements and expected Spotify Automation access before intentionally running it. Only explicitly declared plugin settings are delivered after exact-package trust verification. This is not capabilities enforcement, signature verification or OS isolation; trusted plugins can still access user-level files, ambient environment and network. Never auto-execute a package on import/preview or accept a launch path from a phone/deck/remote manifest.
 
 The Rust host in `crates/zdeck-plugin-host/src/plugin.rs` implements this language-neutral protocol without Node SDK internals and maintains independently bounded per-plugin sessions shared by native commands and the phone service. `plugin_install.rs` validates local folders, probes Node/Python and revalidates the complete manifest contract before describing a selected plugin. Plugin launches remove `NODE_OPTIONS` and `NODE_PATH`. The host serializes requests, bounds response framing, discards stderr, and kills/reaps failed processes. Any wire error stops only that plugin’s host instance, not healthy neighbors; recover through explicit enabling, never automatic action replay. Known Spotify setup errors use host-owned messages and hints; arbitrary plugin diagnostics are not reflected. Unknown-outcome warnings appear alongside setup hints. Terminating the direct plugin child does not guarantee termination of grandchildren: an already-started external command may still apply after a host timeout.
 
-Automated verification covers Rust host/discovery, schema migration, TypeScript bridge/control validation, packed SDK consumption, self-contained Spotify packaging, and browser flows with fake IPC. Live Spotify/JXA, Automation attribution, the real folder opener, signed macOS distribution and real-phone plugin execution remain unverified. Python authoring is available in `packages/plugin-sdk-python` (not yet published to PyPI). Its standard-library tests and real-host integration run in the macOS/Windows/Linux CI matrix, including the Python 3.10 minimum. Local verification does not establish native parity across that matrix. Events, richer schemas, secret injection, protocol cancellation, bundled runtimes and cross-platform Spotify support remain deferred. The npm SDK **0.1.0 is published**; installed plugin folders still require a complete SDK runtime, not a symlink.
+Automated verification covers Rust host/discovery, schema migration, TypeScript bridge/control validation, packed SDK consumption, self-contained Spotify packaging, and browser flows with fake IPC. Live Spotify/JXA, Automation attribution, the real folder opener, signed macOS distribution and real-phone plugin execution remain unverified. Python authoring is available in `packages/plugin-sdk-python` (not yet published to PyPI). Its standard-library tests and real-host integration run in the macOS/Windows/Linux CI matrix, including the Python 3.10 minimum. Local verification does not establish native parity across that matrix. Events, arbitrary service builders, protocol cancellation, bundled runtimes and cross-platform Spotify support remain deferred. The npm SDK **0.1.0 is published**; installed plugin folders still require a complete SDK runtime, not a symlink.

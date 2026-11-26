@@ -1,0 +1,27 @@
+{
+  "id": "home-assistant",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "settings": {
+    "url": { "type": "text", "label": "Home Assistant URL" },
+    "token": { "type": "secret", "label": "Long-lived access token" }
+  },
+  "actions": [
+    {
+      "id": "power",
+      "title": "Power",
+      "config": {
+        "entity": { "type": "integer", "minimum": 1, "maximum": 281474976710655, "choicesKey": "entities" },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    {
+      "id": "brightness",
+      "title": "Brightness",
+      "config": {
+        "entity": { "type": "integer", "minimum": 1, "maximum": 281474976710655, "choicesKey": "brightness-entities" },
+        "brightness": { "type": "integer", "minimum": 0, "maximum": 100, "control": { "step": 1 } }
+      }
+    }
+  ]
+}
