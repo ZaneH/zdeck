@@ -39,6 +39,42 @@ Keep zDeck available in the background                 // desktop.tray
         (Linux requires a confirmed StatusNotifier host; unrecognized/legacy hosts keep the window visible)
 ```
 
+## Pages and sections
+
+Status: planned; implementation pending. Existing pages currently contain controls directly.
+
+```text
+Organize controls into pages and sections              // deck.sections
+├── Hierarchy: deck -> ordered pages -> ordered sections -> controls
+├── Edit sections within a page                        // deck.sections.edit
+│   ├── Add, name and rename sections
+│   ├── Insert a section between existing sections
+│   ├── Reorder sections without changing their controls or appearance
+│   ├── Delete sections; confirm before deleting a populated section
+│   └── Keep at least one section per page; no arbitrary section-count limit
+├── Navigate on the companion phone                    // deck.sections.phone
+│   ├── Swipe left / right between pages
+│   ├── Swipe up / down between sections, snapping to the next / previous section
+│   ├── Each section fills the available control viewport when its controls fit
+│   ├── Taller sections scroll internally; advance only at their scroll boundary
+│   ├── Sliders and other interactive controls retain their own gestures
+│   └── Provide accessible navigation alternatives; gestures are not the only way to navigate
+├── Navigate on desktop                                // deck.sections.desktop
+│   ├── Scroll vertically through the active page's stacked sections
+│   ├── Left / right arrow keys switch pages without wrapping at the ends
+│   └── Do not intercept keys while typing, editing, or using controls that own those keys
+├── Configure appearance                               // deck.sections.appearance
+│   ├── Sections inherit the deck theme and accent by default
+│   ├── Allow independent optional theme and accent overrides per section
+│   └── Reset an override to resume inheritance; inherited values follow deck changes
+└── Preserve configuration                             // deck.sections.persistence
+    ├── Migrate each existing page to one section containing its original controls
+    ├── Preserve page and control identities, ordering, actions and appearance
+    ├── Persist section order, names and appearance when applied, not only on quit
+    ├── Keep sections intact through restart, export / import and companion synchronization
+    └── Validate section data at import and synchronization boundaries; report failures visibly
+```
+
 ## Settings navigation
 
 ```text
