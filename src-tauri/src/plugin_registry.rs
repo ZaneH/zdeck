@@ -123,11 +123,15 @@ impl InstallRequests {
             None => { return if std::mem::replace(&mut self.invalid_seen, true) { None } else { Some(Received::Notice(INVALID_REQUEST)) }; }
         };
         if self.seen.contains(&request) { return None; }
-        // Do not evict canceled/handled links: an evicted link could re-prompt repeatedly.
+        // Do not evict active/pending links: an evicted link could re-prompt repeatedly.
         if self.seen.len() == 128 { return if std::mem::replace(&mut self.limit_seen, true) { None } else { Some(Received::Notice(REQUEST_LIMIT)) }; }
         self.seen.insert(request.clone());
         Some(Received::Release(request))
     }
+    // A terminal review or notice may forget its identity so the same link can prompt again.
+    pub(crate) fn release(&mut self, request: &InstallRequest) { self.seen.remove(request); }
+    // An already-seen exact identity is still worth raising the window, without a second prompt.
+    pub(crate) fn awaiting(&self, link: &str) -> bool { parse_request(link).is_some_and(|request| self.seen.contains(&request)) }
 }
 
 pub fn setup_links(app: &tauri::AppHandle) {

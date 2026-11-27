@@ -17,8 +17,10 @@ Only `zdeck://plugins/install?id=<id>&version=<exact-version>` is accepted. Inpu
 bytes, ID `[a-z][a-z0-9-]{0,63}`, version three 1–4-digit numeric parts. Query order and encoded
 values are allowed; unknown/duplicate/encoded field names, paths, credentials, ports, fragments,
 URLs, executable fields, ranges/prereleases and malformed encoding fail. At most 16 URLs from one
-native callback are examined. Up to 128 identities are retained for the entire session without
-eviction (including canceled/rejected links); invalid and overflow notices are bounded.
+native callback are examined. An identity is deduplicated while its prompt or queued request is
+active; canceling or completing it forgets that identity so the same link can prompt again.
+At most 128 active/pending identities are retained without eviction; invalid and overflow notices
+are bounded. A repeat of an active identity raises the existing window without a second prompt.
 
 The signed resolver now ships an independently compiled public endpoint/key default for
 `https://zreg.zaaane.com/`; no genuine signed release is published by this change. Lookup still
@@ -40,8 +42,9 @@ For a deliberately configured build and a genuinely signed release:
 
 One active review; at most one waiting registry identity, first wins. Local picker/review/error
 state is never replaced by a link. Lookup/download can be canceled and stale completions ignored;
-installation itself cannot be canceled mid-publication. Extra waiting identities are ignored and
-remain deduplicated, not persisted/retried. Native commands/drop require the local main editor
+installation itself cannot be canceled mid-publication. A link that cannot take the single waiting
+slot gets one focused notice instead of being silently dropped; reopen it after finishing the
+current review. Extra links are not persisted/retried. Native commands/drop require the local main editor
 origin. A remote page never supplies an archive URL, filesystem path or install authorization.
 
 ## Matching static registry

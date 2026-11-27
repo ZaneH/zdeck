@@ -124,13 +124,15 @@ Open zdeck://plugins/install?id=<id>&version=<x.y.z>   // plugins.registry.link
 │   ├── Malformed id/version, unknown route, extra or duplicate or encoded field names,
 │   │   path/credentials/port/fragment, oversized input -> rejected; native code emits one
 │   │   invalid-request notice per session (native UI notice delivery not verified)
-│   └── Identity already seen this session (including canceled/rejected) -> ignored        (verified macOS)
+│   ├── Identity already active or queued -> window raised, no second prompt
+│   └── Cancel or completed install forgets the identity -> the same link prompts again
 ├── Identity prompt                                       // plugins.registry.identity
 │   ├── Shows only plugin ID and version; states no archive has been downloaded; it stays
 │   │   unchanged over 12s of passive macOS observation; an earlier automation-associated
 │   │   advance without an intentional click remains unexplained
-│   ├── Look up release -> network lookup; Cancel -> prompt closes, nothing remembered but the identity
-│   └── A second link while a prompt/review is open -> first identity wins; the extra is ignored
+│   ├── Look up release -> network lookup; Cancel -> prompt closes and the identity can prompt again
+│   └── A second link while a prompt/review is open -> first identity wins; the extra gets one
+│       focused notice and can be reopened after the current review finishes
 ├── Look up release                                       // plugins.registry.lookup
 │   ├── 200 authenticated metadata -> show key ID, source/commit/licence, compatibility,
 │   │   archive URL, size and digest; Download for review is the next action    (verified macOS)

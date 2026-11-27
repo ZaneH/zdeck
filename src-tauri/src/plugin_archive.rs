@@ -20,6 +20,7 @@ fn request_review(request: InstallRequest) -> RegistryReview {
 
 const CHANGED: &str = "plugin-archive-changed";
 const BUSY: &str = "Finish or cancel the current archive review before selecting another package.";
+const LINK_WAITING: &str = "Another plugin install link is waiting. Finish or cancel the current review first, then open that link again.";
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveView {
@@ -34,7 +35,8 @@ pub struct ArchiveView {
 struct Inbox {
     view: ArchiveView, prepared: Option<PreparedArchive>,
     requests: crate::plugin_registry::InstallRequests, pending_notice: Option<&'static str>,
-    pending_request: Option<InstallRequest>, verified: Option<VerifiedRelease>, remote_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    pending_request: Option<InstallRequest>, unavailable_request: Option<InstallRequest>,
+    verified: Option<VerifiedRelease>, remote_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 #[derive(Default)]
 pub struct ArchiveInbox(Mutex<Inbox>);
@@ -56,20 +58,29 @@ impl Inbox {
         self.flush_notice();
     }
     fn request_link(&mut self, link: &str, resolver_available: bool) -> bool {
-        let Some(received) = self.requests.receive(link) else { return false; };
+        let Some(received) = self.requests.receive(link) else { return self.requests.awaiting(link); };
         match received {
             Received::Notice(notice) => self.notice(notice),
             Received::Release(request) => {
-                if !resolver_available { self.notice(crate::plugin_registry::RESOLUTION_UNAVAILABLE); }
-                else { self.queue_request(request); }
+                if !resolver_available {
+                    // Forget a replaced unavailable link so it can prompt again later.
+                    if let Some(previous) = self.unavailable_request.replace(request) { self.requests.release(&previous); }
+                    self.notice(crate::plugin_registry::RESOLUTION_UNAVAILABLE);
+                } else if !self.queue_request(request.clone()) {
+                    // The one waiting slot is taken; say so instead of swallowing the click.
+                    self.requests.release(&request);
+                    self.notice(LINK_WAITING);
+                }
             }
         }
         true
     }
-    fn queue_request(&mut self, request: InstallRequest) {
+    fn queue_request(&mut self, request: InstallRequest) -> bool {
         // Keep the first waiting request. Never replace local work or an active remote review.
-        if self.pending_request.is_none() { self.pending_request = Some(request); }
+        if self.pending_request.is_some() { return false; }
+        self.pending_request = Some(request);
         self.flush_notice();
+        true
     }
     fn begin(&mut self) -> Result<(), String> {
         if self.view.busy || self.prepared.is_some() || self.view.registry.is_some() { return Err(BUSY.into()); }
@@ -88,11 +99,23 @@ impl Inbox {
         if self.view.busy && (self.view.registry.is_none() || self.prepared.is_none() && self.view.review.is_some()) { return Err(BUSY.into()); }
         let current = self.view.review.as_ref().map(|r| &r.review_id).or_else(|| self.view.registry.as_ref().map(|r| &r.review_id));
         if current != review_id { return Err("This review is no longer current.".into()); }
+        let registry = self.view.registry.as_ref().map(|r| InstallRequest { id: r.id.clone(), version: r.version.clone() });
         if let Some(task) = self.remote_task.take() { task.abort(); }
+        if let Some(request) = registry { self.requests.release(&request); }
+        if let Some(request) = self.unavailable_request.take() { self.requests.release(&request); }
         self.view.busy = false; self.verified = None; self.view.registry = None;
         self.prepared = None; self.view.review = None; self.view.error = None;
         self.flush_notice();
         Ok(())
+    }
+    fn finish_install(&mut self, result: Result<(), String>) {
+        if let Some(r) = self.view.registry.take() { self.requests.release(&InstallRequest { id: r.id, version: r.version }); }
+        self.view.busy = false; self.view.review = None; self.verified = None;
+        match result {
+            Ok(()) => { self.view.error = None; self.view.installed_epoch += 1; }
+            Err(error) => { self.view.error = Some(error); }
+        }
+        self.flush_notice();
     }
     fn begin_remote(&mut self, token: &str) -> Result<(InstallRequest, Option<VerifiedRelease>), String> {
         let r = self.view.registry.as_ref().ok_or("No registry request is current.")?;
@@ -250,12 +273,7 @@ pub async fn plugin_archive_install(app: tauri::AppHandle, window: tauri::Webvie
     {
         let state = app.state::<ArchiveInbox>();
         let mut inbox = state.0.lock().unwrap_or_else(|p| p.into_inner());
-        inbox.view.busy = false; inbox.view.review = None; inbox.view.registry = None; inbox.verified = None;
-        match result {
-            Ok(()) => { inbox.view.error = None; inbox.view.installed_epoch += 1; }
-            Err(error) => { inbox.view.error = Some(error); }
-        }
-        inbox.flush_notice();
+        inbox.finish_install(result);
     }
     changed(&app); Ok(())
 }
@@ -284,18 +302,21 @@ mod tests {
         inbox.begin().unwrap(); inbox.finish(Ok(None));
     }
     #[test]
-    fn links_never_authorize_install_and_cancellation_suppresses_duplicate_notifications() {
+    fn links_never_authorize_install_and_cancellation_allows_the_same_link_to_prompt_again() {
         let mut inbox = Inbox::default();
         let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
         assert!(inbox.request_link(link, false));
         assert_eq!(inbox.view.error.as_deref(), Some(crate::plugin_registry::RESOLUTION_UNAVAILABLE));
         assert!(inbox.view.review.is_none() && inbox.prepared.is_none() && !inbox.view.busy);
         assert!(inbox.take("forged-review").is_err());
+        // A duplicate while the notice is active raises the window but adds no second notice.
+        assert!(inbox.request_link("zdeck://plugins/install?version=1.2.3&id=%66ixture", false));
+        assert_eq!(inbox.view.error.as_deref(), Some(crate::plugin_registry::RESOLUTION_UNAVAILABLE));
         inbox.cancel(None).unwrap();
-        assert!(!inbox.request_link(link, false));
         assert!(inbox.view.error.is_none());
         // Startup and running callbacks canonicalize percent encodings into the same identity.
-        assert!(!inbox.request_link("zdeck://plugins/install?version=1.2.3&id=%66ixture", false));
+        assert!(inbox.request_link("zdeck://plugins/install?version=1.2.3&id=%66ixture", false));
+        assert_eq!(inbox.view.error.as_deref(), Some(crate::plugin_registry::RESOLUTION_UNAVAILABLE));
         assert_eq!(inbox.view.installed_epoch, 0);
     }
     #[test]
@@ -309,8 +330,23 @@ mod tests {
         assert!(inbox.view.error.is_none() && inbox.view.review.is_none() && inbox.prepared.is_none());
         assert!(inbox.take(&review.review_id).is_err());
         inbox.cancel(Some(&review.review_id)).unwrap();
-        assert!(!inbox.request_link(link, true));
+        assert!(inbox.request_link(link, true));
+        assert_eq!(inbox.view.registry.as_ref().unwrap().id, "fixture");
+    }
+    #[test]
+    fn completed_install_forgets_identity_so_the_same_link_starts_a_fresh_review() {
+        let mut inbox = Inbox::default();
+        let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
+        assert!(inbox.request_link(link, true));
+        let review = inbox.view.registry.as_ref().unwrap().review_id.clone();
+        // A repeat raises the window but cannot replace the active review.
+        assert!(inbox.request_link(link, true));
+        assert_eq!(inbox.view.registry.as_ref().unwrap().review_id, review);
+        inbox.finish_install(Ok(()));
         assert!(inbox.view.registry.is_none());
+        assert_eq!(inbox.view.installed_epoch, 1);
+        assert!(inbox.request_link(link, true));
+        assert_eq!(inbox.view.registry.as_ref().unwrap().id, "fixture");
     }
     #[test]
     fn link_notice_waits_for_local_picker_review_and_errors_without_replacing_authorization() {
@@ -327,7 +363,7 @@ mod tests {
         inbox.flush_notice();
         assert!(inbox.view.error.is_none());
         assert!(inbox.view.review.as_ref().unwrap().collision);
-        assert!(!inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3", false));
+        assert!(inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3", false));
         assert_eq!(inbox.view.review.as_ref().unwrap().review_id, review.review_id);
         assert!(inbox.cancel(Some(&"forged".into())).is_err());
         inbox.cancel(Some(&review.review_id)).unwrap();
@@ -345,9 +381,13 @@ mod tests {
     fn remote_intents_wait_for_local_work_and_stale_cancel_or_completion_cannot_replace_current_review() {
         let mut inbox = Inbox::default();
         let request = |id: &str| InstallRequest { id: id.into(), version: "1.2.3".into() };
-        inbox.begin().unwrap(); inbox.queue_request(request("first")); inbox.queue_request(request("ignored-overflow"));
+        inbox.begin().unwrap(); assert!(inbox.queue_request(request("first")));
+        assert!(inbox.request_link("zdeck://plugins/install?id=second&version=1.2.3", true));
+        assert_eq!(inbox.pending_notice, Some(LINK_WAITING));
         assert!(inbox.view.registry.is_none());
         inbox.finish(Err("local error stays visible".into())); assert!(inbox.view.registry.is_none());
+        inbox.cancel(None).unwrap();
+        assert_eq!(inbox.view.error.as_deref(), Some(LINK_WAITING));
         inbox.cancel(None).unwrap();
         let first = inbox.view.registry.as_ref().unwrap().clone(); assert_eq!(first.id, "first");
         assert!(inbox.take(&first.review_id).is_err()); assert!(inbox.begin_remote("forged").is_err());
@@ -361,6 +401,9 @@ mod tests {
         inbox.finish_remote(&first.review_id, Err("stale network failure".into()));
         assert!(inbox.view.error.is_none()); assert_eq!(inbox.view.registry.as_ref().unwrap().review_id,second.review_id);
         inbox.cancel(Some(&second.review_id)).unwrap(); assert!(inbox.view.registry.is_none());
+        // The link blocked while the queue was full can start a review once work is finished.
+        assert!(inbox.request_link("zdeck://plugins/install?id=second&version=1.2.3", true));
+        assert_eq!(inbox.view.registry.as_ref().unwrap().id, "second");
     }
     #[tokio::test]
     async fn cancel_aborts_in_flight_remote_transport_instead_of_leaving_a_background_download() {
