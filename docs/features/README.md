@@ -103,3 +103,59 @@ Press a control on the phone                           // controls.press-feedbac
 ├── Keep accessible busy information and existing duplicate-tap safeguards
 └── Preserve actionable errors and uncertain-delivery / retry safeguards
 ```
+
+## Plugin registry link install
+
+Status: implemented; macOS OS-handler branches marked below were exercised on a locally built
+`.app` on 2026-11-27. Windows/Linux handler branches, native picker/drop overlap and website
+`ready` activation are still unverified. See [registry handoff](../registry-handoff.md).
+
+```text
+Open zdeck://plugins/install?id=<id>&version=<x.y.z>   // plugins.registry.link
+├── OS routing
+│   ├── Closed app -> LaunchServices starts the app; the link arrives after load           (verified macOS)
+│   ├── Running app -> same process handles it; no second instance or second window        (verified macOS)
+│   ├── Hidden / tray-hidden app -> window is restored and focused with the prompt         (verified macOS)
+│   ├── No registered handler -> browser reports no application; the website cannot repair it
+│   └── Same build already running outside LaunchServices (dev binary) ->
+│       single-instance forwards arguments only, so the URL is dropped (development only)
+├── Link validation (before any UI)
+│   ├── Valid id + exact three-part version -> identity-only prompt, no network yet
+│   ├── Malformed id/version, unknown route, extra or duplicate or encoded field names,
+│   │   path/credentials/port/fragment, oversized input -> rejected; native code emits one
+│   │   invalid-request notice per session (native UI notice delivery not verified)
+│   └── Identity already seen this session (including canceled/rejected) -> ignored        (verified macOS)
+├── Identity prompt                                       // plugins.registry.identity
+│   ├── Shows only plugin ID and version; states no archive has been downloaded; it stays
+│   │   unchanged over 12s of passive macOS observation; an earlier automation-associated
+│   │   advance without an intentional click remains unexplained
+│   ├── Look up release -> network lookup; Cancel -> prompt closes, nothing remembered but the identity
+│   └── A second link while a prompt/review is open -> first identity wins; the extra is ignored
+├── Look up release                                       // plugins.registry.lookup
+│   ├── 200 authenticated metadata -> show key ID, source/commit/licence, compatibility,
+│   │   archive URL, size and digest; Download for review is the next action    (verified macOS)
+│   ├── OS not in the signed compatibility list -> refuse before any archive request
+│   ├── 404 / 5xx / redirect / TLS / DNS / shape failure -> visible error, retry allowed,
+│   │   no archive authorized                                                            (404 verified macOS)
+│   └── Cancel while looking up -> aborts, clears verified metadata
+├── Download for review                                   // plugins.registry.download
+│   ├── Size + SHA-256 match the signed record -> ZIP validation, static runtime cross-check,
+│   │   then the archive review panel with an opaque review token                        (verified macOS)
+│   ├── Digest/size mismatch, archive manifest id/version/protocol/runtime mismatch,
+│   │   unsupported archive -> error, no review token
+│   └── Cancel while downloading -> staging dropped, no review
+├── Archive review                                        // plugins.registry.review
+│   ├── Facts: protocol, detected runtime, signed-vs-local source, file count/size,
+│   │   "not a sandbox" warning, install-means-disabled-and-untrusted statement
+│   ├── Plugin ID already installed -> install stays disabled with a "already installed,
+│   │   uninstall the existing package first, nothing will be replaced" message             (verified macOS)
+│   ├── Plugin ID free (for example after uninstalling an older local copy through the
+│   │   reversible in-app uninstall) -> Install disabled performs one atomic no-replace
+│   │   publication; the package stays untrusted and unenabled, and no plugin code runs,
+│   │   including after a normal restart                                            (verified macOS)
+│   └── Cancel -> staged bytes dropped, installed set unchanged
+└── After install / not covered here
+    ├── Trust and Enable stay separate fingerprint-bound actions; nothing is auto-enabled
+    ├── No updates, replacements, retries of a failed install, or remote revocation in v1
+    └── Local .zdx picker, drag-drop and review keep priority over a link
+```
