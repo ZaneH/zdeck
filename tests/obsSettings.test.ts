@@ -13,6 +13,7 @@ vi.mock("react", () => ({
   useEffect(effect: () => () => void) { hooks.effects.push(effect); },
 }));
 vi.mock("../src/lib/native", () => ({ obsLoadPreferences: ipc.load, obsSavePreferences: ipc.save, obsForgetPreferences: ipc.forget }));
+import { resetObsPreferencesCache } from "../src/lib/obsPreferences";
 import { ObsSettingsCard } from "../src/components/ObsSettingsCard";
 
 type Node = ReactElement<Record<string, any>>;
@@ -31,6 +32,7 @@ let obs: ObsConsole;
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.effects = [];
   vi.resetAllMocks();
+  resetObsPreferencesCache();
   ipc.load.mockResolvedValue(null); ipc.save.mockResolvedValue(undefined); ipc.forget.mockResolvedValue(undefined);
   obs = { native: true, status: "disconnected", snapshot: null, currentScene: null,
     error: null, connect: vi.fn().mockResolvedValue(true), disconnect: vi.fn(), refresh: vi.fn() } as unknown as ObsConsole;
@@ -49,7 +51,19 @@ it("restores saved inputs on remount, without automatically connecting", async (
     expect(button(obs, "Connect").disabled).toBe(false);
     cleanup();
   }
+  expect(ipc.load).toHaveBeenCalledTimes(1);
   expect(obs.connect).not.toHaveBeenCalled();
+});
+
+it("reads saved preferences once for StrictMode mounts in the same session", async () => {
+  ipc.load.mockResolvedValue({ port: 4466, password: "test password" });
+  render(obs); const first = hooks.effects[0];
+  hooks.values = []; hooks.effects = [];
+  render(obs); const second = hooks.effects[0];
+  first(); second();
+  await flush();
+  expect(ipc.load).toHaveBeenCalledTimes(1);
+  expect(hooks.values.slice(0, 2)).toEqual([4466, "test password"]);
 });
 
 it("saves only successful connections and keeps save failures visible", async () => {

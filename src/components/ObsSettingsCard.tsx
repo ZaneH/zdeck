@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { obsLoadPreferences, obsSavePreferences, obsForgetPreferences } from "../lib/native";
+import { loadObsPreferences, saveObsPreferences, forgetObsPreferences } from "../lib/obsPreferences";
 import type { ObsConsole } from "../lib/useObsConsole";
 
 interface ObsSettingsCardProps {
@@ -26,7 +26,7 @@ export function ObsSettingsCard({ obs }: ObsSettingsCardProps) {
   useEffect(() => {
     if (!obs.native) return;
     let active = true;
-    void obsLoadPreferences().then((saved) => {
+    void loadObsPreferences().then((saved) => {
       if (active && saved) {
         setPort(saved.port);
         setPassword(saved.password);
@@ -62,7 +62,7 @@ export function ObsSettingsCard({ obs }: ObsSettingsCardProps) {
       const connected = await obs.connect(port, password);
       if (connected) {
         try {
-          await obsSavePreferences(port, password);
+          await saveObsPreferences(port, password);
         } catch {
           setPreferencesError("Connected, but could not save the OBS connection in secure storage.");
         }
@@ -76,7 +76,7 @@ export function ObsSettingsCard({ obs }: ObsSettingsCardProps) {
     setPreferencesBusy(true);
     setPreferencesError(null);
     try {
-      await obsForgetPreferences();
+      await forgetObsPreferences();
       setPassword("");
       setPort(4455);
     } catch {
