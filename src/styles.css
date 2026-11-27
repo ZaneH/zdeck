@@ -282,6 +282,15 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .dialog-body { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .dialog-body p { margin: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.trash-dialog .dialog-body { margin-bottom: 8px; }
+.trash-groups { display: flex; flex-direction: column; gap: 16px; }
+.trash-group h3 { margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 550; }
+.trash-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.trash-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px; border-radius: 4px; background: var(--surface-2); }
+.trash-copy { display: flex; flex-direction: column; min-width: 0; }
+.trash-name { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.trash-location { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.trash-restore { flex: none; }
 .dropdown { position: relative; min-width: 0; }
 .dropdown-trigger { width: 100%; min-width: 0; max-width: 100%; min-height: 32px; background: transparent; color: var(--text); font-size: 12px; }
 .section-actions .dropdown-trigger { padding: 6px 8px; }

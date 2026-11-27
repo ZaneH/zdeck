@@ -87,6 +87,9 @@ import { SetupGuide } from "./components/SetupGuide";
 import { DesktopTrayNotice } from "./components/DesktopTrayNotice";
 import { DesktopPreferencesCard } from "./components/DesktopPreferencesCard";
 import { HelpTooltip } from "./components/HelpTooltip";
+import { DeckTrash } from "./components/DeckTrash";
+import { deriveTrash, restoreTrashEntry } from "./lib/trash";
+import type { TrashEntry } from "./lib/trash";
 
 import { SettingsSections } from "./components/SettingsSections";
 import { StatusFooter } from "./components/StatusFooter";
@@ -177,6 +180,7 @@ export default function App() {
     setSidebar({ collapsed, error: saved ? null : "Sidebar preference was not saved. Storage is unavailable or full; this choice may not survive a restart." });
   };
   const [deck, setDeck] = useState<Deck>(initial.deck);
+  const [trash, setTrash] = useState<TrashEntry[]>(initial.trash);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>(initial.status);
   const [saveError, setSaveError] = useState(initial.status === "unavailable");
   const [selectedControlId, setSelectedControlId] = useState<string | null>(
@@ -201,6 +205,8 @@ export default function App() {
   const pressTimer = useRef<number | null>(null);
   const deckRef = useRef(deck);
   deckRef.current = deck;
+  const trashRef = useRef(trash);
+  trashRef.current = trash;
   const historyRef = useRef<DeckHistory>(createDeckHistory());
   const [, setHistoryVersion] = useState(0);
   const selectedControlRef = useRef(selectedControlId);
@@ -230,15 +236,17 @@ export default function App() {
   }, [updateHistory]);
 
   const applyDeck = useCallback(
-    (next: Deck) => {
+    (next: Deck, nextTrash: TrashEntry[]) => {
       deckRef.current = next;
+      trashRef.current = nextTrash;
       desktop.invalidate();
       setDeck(next);
+      setTrash(nextTrash);
       if (nativeMode) {
-        syncRef.current?.update(next);
+        syncRef.current?.update(next, nextTrash);
         return;
       }
-      const saved = saveDeck(getStorage(), next);
+      const saved = saveDeck(getStorage(), next, nextTrash);
       setSaveError(!saved);
       if (saved) setLoadStatus("loaded");
     },
@@ -250,7 +258,7 @@ export default function App() {
       const current = deckRef.current;
       if (sameDeck(current, next)) return;
       if (record) updateHistory(recordDeckChange(historyRef.current, current, next));
-      applyDeck(next);
+      applyDeck(next, deriveTrash(current, next, trashRef.current));
     },
     [applyDeck, updateHistory],
   );
@@ -272,7 +280,7 @@ export default function App() {
     setPreviewNotice(null);
     reconcileSelection(previous, result.deck);
     updateHistory(result.history);
-    applyDeck(result.deck);
+    applyDeck(result.deck, deriveTrash(previous, result.deck, trashRef.current));
   }, [applyDeck, desktop.inflight, desktop.pending, reconcileSelection, updateHistory]);
 
   const redo = useCallback(() => {
@@ -283,7 +291,7 @@ export default function App() {
     setPreviewNotice(null);
     reconcileSelection(previous, result.deck);
     updateHistory(result.history);
-    applyDeck(result.deck);
+    applyDeck(result.deck, deriveTrash(previous, result.deck, trashRef.current));
   }, [applyDeck, desktop.inflight, desktop.pending, reconcileSelection, updateHistory]);
 
   // Native: load the authoritative deck before enabling edits. A missing file
@@ -313,15 +321,20 @@ export default function App() {
           setNativeSave({ phase: "saved", revision: snapshot.revision });
           setSetupOpen(false);
           deckRef.current = snapshot.deck;
+          trashRef.current = snapshot.trash;
           setDeck(snapshot.deck);
+          setTrash(snapshot.trash);
         } else {
           const browser = loadDeck(getStorage());
           const initialDeck =
             browser.status === "loaded" ? browser.deck : snapshot.deck;
+          const initialTrash = browser.status === "loaded" ? browser.trash : [];
           deckRef.current = initialDeck;
+          trashRef.current = initialTrash;
           setDeck(initialDeck);
+          setTrash(initialTrash);
           setSetupOpen(browser.status !== "loaded" && !setupDismissed(getStorage()));
-          sync.update(initialDeck);
+          sync.update(initialDeck, initialTrash);
         }
         setNativeLoading(false);
       } catch (value) {
@@ -352,7 +365,9 @@ export default function App() {
       if (event.key !== STORAGE_KEY && event.key !== null) return;
       const result = loadDeck(getStorage());
       deckRef.current = result.deck;
+      trashRef.current = result.trash;
       setDeck(result.deck);
+      setTrash(result.trash);
       setLoadStatus(result.status);
       setSaveError(result.status === "unavailable");
       resetHistory();
@@ -451,7 +466,18 @@ export default function App() {
     if (!selectedControl) return;
     commitDeck(removeControl(deck, page.id, selectedControl.id));
     setSelectedControlId(null);
-    setPreviewNotice("Control removed. Local preview only.");
+    setPreviewNotice("Control moved to Trash. Local preview only.");
+  };
+
+  const handleRestoreTrash = (entry: TrashEntry): string | null => {
+    if (desktop.live || desktop.inflight || desktop.pending) {
+      return "Finish the current action before restoring.";
+    }
+    const result = restoreTrashEntry(deckRef.current, entry);
+    if ("error" in result) return result.error;
+    commitDeck(result.deck);
+    setPreviewNotice(`Restored ${entry.kind === "control" ? entry.control.label : entry.section.name}.`);
+    return null;
   };
 
   const handleMoveControl = (controlId: string, targetIndex: number) => {
@@ -674,6 +700,11 @@ export default function App() {
             )}>
               Redo change
             </HelpTooltip>
+            <DeckTrash
+              entries={trash}
+              disabled={desktop.live || desktop.inflight || !!desktop.pending}
+              onRestore={handleRestoreTrash}
+            />
           </div>
         ) : null}
 

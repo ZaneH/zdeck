@@ -26,7 +26,7 @@ describe("control layout and ordering", () => {
     deck = updateControl(deck, "page_stream", "ctl_mic", { action: "volume", icon: { type: "builtin", name: "star" } });
     const storage = memoryStorage();
     expect(saveDeck(storage, deck)).toBe(true);
-    expect(loadDeck(storage)).toEqual({ status: "loaded", deck });
+    expect(loadDeck(storage)).toEqual({ status: "loaded", deck, trash: [] });
     const control = deck.pages[0].sections[0].controls[2];
     for (const variant of ["editor", "phone"] as const) {
       expect(renderToStaticMarkup(createElement(ControlTile, { control, variant, semantics: "remote", volume: 50 })))

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { nativeAvailable } from "./native";
 import { isDeck, isRecord } from "./deck";
+import { isTrash } from "./trash";
+import type { TrashEntry } from "./trash";
 import type { Deck } from "./types";
 
 /** Typed, sanitized errors returned by the native deck commands. */
@@ -26,6 +28,8 @@ export interface DeckError {
 export interface DeckSnapshot {
   revision: number;
   deck: Deck;
+  /** Local undo aid; never part of the phone snapshot payload. */
+  trash: TrashEntry[];
   exists: boolean;
 }
 
@@ -81,10 +85,10 @@ function requireNative(): void {
 
 export function parseDeckSnapshot(value: unknown): DeckSnapshot {
   if (!isRecord(value) || typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 0
-    || typeof value.exists !== "boolean" || !isDeck(value.deck)) {
+    || typeof value.exists !== "boolean" || !isDeck(value.deck) || !isTrash(value.trash)) {
     throw { kind: "invalid_file", message: FALLBACK_MESSAGES.invalid_file } satisfies DeckError;
   }
-  return { revision: value.revision, exists: value.exists, deck: value.deck };
+  return { revision: value.revision, exists: value.exists, deck: value.deck, trash: value.trash };
 }
 
 export async function nativeDeckLoad(): Promise<DeckSnapshot> {
@@ -96,7 +100,8 @@ export async function nativeDeckLoad(): Promise<DeckSnapshot> {
 export async function nativeDeckSave(
   expectedRevision: number,
   deck: Deck,
+  trash: TrashEntry[],
 ): Promise<DeckSnapshot> {
   requireNative();
-  return parseDeckSnapshot(await invoke<unknown>("native_deck_save", { expectedRevision, deck }));
+  return parseDeckSnapshot(await invoke<unknown>("native_deck_save", { expectedRevision, deck, trash }));
 }

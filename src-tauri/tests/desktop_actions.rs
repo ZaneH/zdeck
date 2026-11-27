@@ -33,7 +33,7 @@ struct Env { dir:TempDir, store:Arc<DeckStore>, dispatcher:Arc<ActionDispatcher>
 impl Env {
     async fn new(outputs:&[&str],delay:Duration,deadline:Duration) -> Self {
         let dir=TempDir::new(); let store=Arc::new(DeckStore::new(dir.0.join(DECK_FILE_NAME)));
-        store.save(0,default_deck()).await.unwrap();
+        store.save(0, default_deck(), vec![]).await.unwrap();
         let runner=Arc::new(FakeRunner::new(outputs,delay));
         let system=Arc::new(SystemState::with_runner_and_timeouts(runner.clone(),Timeouts {command:deadline}));
         let plugin=Arc::new(PluginRegistry::default());
@@ -80,7 +80,7 @@ async fn disconnected_obs_and_plugin_have_identical_shared_error_outcomes() {
     assert_eq!(native.state,CommandState::Failed);
     assert_eq!(serde_json::to_value(native).unwrap(),serde_json::to_value(direct).unwrap());
     let plugin=Control {id:"disconnected-plugin".into(),label:"Plugin".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:Default::default()}};
-    deck.pages[0].sections[0].controls.push(plugin.clone());env.store.save(1,deck).await.unwrap();
+    deck.pages[0].sections[0].controls.push(plugin.clone());env.store.save(1, deck, vec![]).await.unwrap();
     let native=env.desktop.run(&env.store,command("plugin",2,&plugin.id,None)).await.unwrap();
     let direct=env.dispatcher.execute("plugin",&plugin,None).await.unwrap();
     assert_eq!(native.state,CommandState::Failed);assert_eq!(native.code,Some("plugin_unavailable"));
@@ -108,7 +108,7 @@ async fn stale_unsaved_missing_and_invalid_requests_never_reach_adapters() {
     assert!(!serde_json::to_string(&error).unwrap().contains("secret"));
     let mut deck = default_deck();
     deck.pages.iter_mut().flat_map(|p| &mut p.sections).flat_map(|s| &mut s.controls).find(|c| c.id == "ctl_volume").unwrap().presentation = Some("button".into());
-    env.store.save(1, deck).await.unwrap();
+    env.store.save(1, deck, vec![]).await.unwrap();
     assert_eq!(env.desktop.run(&env.store, command("button-target", 2, "ctl_volume", Some(50.0))).await.unwrap_err().code, ActionErrorCode::InvalidRequest);
     assert!(env.runner.calls().is_empty());
 }
@@ -134,7 +134,7 @@ async fn identical_concurrent_commands_execute_once_and_conflicts_fail() {
     assert_eq!(env.run("click","ctl_mic",Some(40.0)).await.unwrap_err().code,ActionErrorCode::CommandConflict);
     let mut deck=default_deck();
     deck.pages.iter_mut().flat_map(|p|&mut p.sections).flat_map(|s|&mut s.controls).find(|c|c.id=="ctl_volume").unwrap().action=ControlAction::MediaPlayPause;
-    env.store.save(1,deck).await.unwrap();
+    env.store.save(1, deck, vec![]).await.unwrap();
     let duplicate=env.desktop.run(&env.store,command("click",2,"ctl_volume",Some(40.0))).await.unwrap();
     assert_eq!(serde_json::to_value(duplicate).unwrap(),serde_json::to_value(cached).unwrap());
     assert_eq!(env.runner.calls().len(),2,"save/retry must not replay under changed bindings");
@@ -237,7 +237,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
         env.plugin.connect("fake",String::from_utf8(node.stdout).unwrap().trim().into(),entry.to_str().unwrap().into()).await.unwrap();
         assert!(!log.exists(),"connect describes only");
         let mut deck=default_deck();deck.pages[0].sections[0].controls.push(Control {id:"plugin".into(),label:"Plugin".into(),row_span:None,column_span:None,icon:None,presentation:None,action:ControlAction::Plugin {plugin_id:"fake".into(),plugin_action:"go".into(),plugin_args:json!({"n":7}).as_object().unwrap().clone()}});
-        env.store.save(1,deck).await.unwrap();
+        env.store.save(1, deck, vec![]).await.unwrap();
         assert_eq!(env.desktop.run(&env.store,command("invalid-value",2,"plugin",Some(8.0))).await.unwrap_err().code,ActionErrorCode::InvalidRequest);
         assert!(!log.exists());
         let result=env.desktop.run(&env.store,command("execute",2,"plugin",None)).await.unwrap();

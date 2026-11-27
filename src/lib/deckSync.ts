@@ -1,5 +1,6 @@
 import type { DeckError, DeckSnapshot } from "./nativeDeck";
 import { toDeckError } from "./nativeDeck";
+import type { TrashEntry } from "./trash";
 import type { Deck } from "./types";
 
 export type DeckSyncStatus =
@@ -11,7 +12,12 @@ export type DeckSyncStatus =
 
 export interface DeckBackend {
   load(): Promise<DeckSnapshot>;
-  save(expectedRevision: number, deck: Deck): Promise<DeckSnapshot>;
+  save(expectedRevision: number, deck: Deck, trash: TrashEntry[]): Promise<DeckSnapshot>;
+}
+
+interface PendingDocument {
+  deck: Deck;
+  trash: TrashEntry[];
 }
 
 /**
@@ -25,7 +31,7 @@ export interface DeckBackend {
  */
 export class DeckSync {
   private revision: number;
-  private pending: Deck | null = null;
+  private pending: PendingDocument | null = null;
   private saving = false;
   private blocked = false;
 
@@ -45,22 +51,22 @@ export class DeckSync {
     return this.blocked;
   }
 
-  /** Queue the newest in-memory deck. Called on every edit. */
-  update(deck: Deck): void {
+  /** Queue the newest in-memory deck and its trash. Called on every edit. */
+  update(deck: Deck, trash: TrashEntry[] = []): void {
     if (this.blocked) return;
-    this.pending = deck;
+    this.pending = { deck, trash };
     void this.drain();
   }
 
   private async drain(): Promise<void> {
     if (this.saving || this.pending === null) return;
     this.saving = true;
-    const deck = this.pending;
+    const { deck, trash } = this.pending;
     this.pending = null;
     this.onStatus({ phase: "saving" });
 
     try {
-      const snapshot = await this.backend.save(this.revision, deck);
+      const snapshot = await this.backend.save(this.revision, deck, trash);
       this.revision = snapshot.revision;
       this.saving = false;
       if (this.pending !== null) {

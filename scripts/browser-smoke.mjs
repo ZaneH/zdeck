@@ -876,7 +876,7 @@ try {
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to page'));
   check("Add closes setup and shows the new editor", await firstRun.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')"));
   check("Add returns focus to the page title", await firstRun.waitFor("document.activeElement.id === 'page-title'"));
-  const addedDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
+  const addedDeck = await firstRun.eval("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); return d && d.deck ? d.deck : d; })()");
   const addedPage = addedDeck.pages.find((deckPage) => deckPage.id === addedDeck.activePageId);
   const addedControls = addedPage.sections.flatMap((section) => section.controls).filter((control) => control.label === 'Practice scene');
   check("Add saves the configured control exactly once", addedControls.length === 1 && addedControls[0].action === 'obs-scene' && addedControls[0].scene === 'Practice' && addedPage.sections.flatMap((section) => section.controls).length === 5, JSON.stringify(addedControls));
@@ -903,7 +903,7 @@ try {
   check("sliding the rehearsal volume enables Add", await firstRun.waitFor("document.querySelector('.setup-result').textContent === 'Rehearsal: Volume changed to 35%.' && [...document.querySelectorAll('.setup-actions .button.primary')].every((button) => !button.disabled)"));
   await firstRun.eval(clickText('.setup-actions .button.primary', 'Add to page'));
   await firstRun.waitFor("!!document.querySelector('.app-shell')");
-  const replayDeck = await firstRun.eval("JSON.parse(localStorage.getItem('deck.local.v1'))");
+  const replayDeck = await firstRun.eval("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); return d && d.deck ? d.deck : d; })()");
   const replayPage = replayDeck.pages.find((deckPage) => deckPage.id === replayDeck.activePageId);
   const replayControls = replayPage.sections.flatMap((section) => section.controls);
   const replayVolume = replayControls.filter((control) => control.label === 'Replay volume');
@@ -965,7 +965,7 @@ try {
     let running = savedService ? savedService.enabled : !localStorage.getItem('deck.remote.origin.v1'), invitationNumber = 0;
     window.__remoteStartOrigins = [];
     window.__desktopCalls = [];
-    let savedDeck = ${JSON.stringify(adminDeck)}, savedRevision = 1;
+    let savedDeck = ${JSON.stringify(adminDeck)}, savedRevision = 1, savedTrash = [];
     const emptyPlugin = {status:'disconnected', manifest:null, state:null, lastError:null};
     const cachedPlugins = {};
     window.__removedPlugins = [];
@@ -998,14 +998,14 @@ try {
         if (window.__failPreferenceSave) throw 'Desktop preference save failed';
         return window.__closeToTray = args.enabled;
       }
-      if (command === 'native_deck_load') return { exists: true, revision: savedRevision, deck: savedDeck };
+      if (command === 'native_deck_load') return { exists: true, revision: savedRevision, deck: savedDeck, trash: savedTrash };
       if (command === 'native_deck_save') {
         if (window.__holdSave) await new Promise(resolve => { window.__finishSave = resolve; });
         if (window.__failSave) throw {kind:'io',message:'The test deck could not be saved.'};
         if (window.__conflictSave) throw {kind:'conflict',message:'The deck was changed elsewhere.',currentRevision:savedRevision+1};
-        savedDeck = args.deck; savedRevision = args.expectedRevision + 1;
+        savedDeck = args.deck; savedTrash = args.trash ?? []; savedRevision = args.expectedRevision + 1;
         window.__lastSavedDeck = savedDeck;
-        return { exists: true, revision: savedRevision, deck: savedDeck };
+        return { exists: true, revision: savedRevision, deck: savedDeck, trash: savedTrash };
       }
       if (command === 'desktop_run_control') {
         window.__desktopCalls.push(args);
@@ -1675,7 +1675,7 @@ try {
   check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('.deck-section.is-selected .section-name-input')?.value === 'Section 2' && !document.querySelector('.section-panel .dropdown')"));
   await manage.eval(click('.add-control'));
   await manage.eval(clickText('.action-library .action-row', 'Volume slider'));
-  check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
+  check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const deck = d && d.deck ? d.deck : d; const p = deck.pages.find(p => p.id === deck.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
   check('editor sections have separate visual containers', await manage.eval("(() => { const sections = [...document.querySelectorAll('.deck-sections > .deck-section')]; return sections.length === 2 && sections.every((section) => getComputedStyle(section).borderTopStyle === 'solid' && getComputedStyle(section).borderTopWidth !== '0px') && !document.querySelector('.deck-workbench'); })()"));
 
   const baseSectionName = await manage.eval("document.querySelector('.deck-section:first-child .section-name-input').value");
@@ -1683,13 +1683,13 @@ try {
   await manage.eval(`document.querySelector('${secondName}').focus()`);
   await typeInput(manage, secondName, 'Audio');
   await manage.eval("document.activeElement.blur()");
-  check('section names save inline on blur', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && JSON.parse(localStorage.getItem('deck.local.v1')).pages.find(p => p.id === JSON.parse(localStorage.getItem('deck.local.v1')).activePageId).sections[1].name === 'Audio'"));
+  check('section names save inline on blur', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && (() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const deck = d && d.deck ? d.deck : d; return deck.pages.find(p => p.id === deck.activePageId).sections[1].name === 'Audio'; })()"));
   check('inline rename keeps the section control', await manage.eval("document.querySelectorAll('.deck-section:nth-child(2) .control-tile').length === 1"));
 
   await manage.eval(`document.querySelector('${secondName}').focus()`);
   await typeInput(manage, secondName, '   ');
   await pressKey(manage, 'Enter', 'Enter', 13, '\r');
-  check('invalid inline section names stay visible and are not saved', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-error')?.textContent.includes('Enter a section name') && JSON.parse(localStorage.getItem('deck.local.v1')).pages.find(p => p.id === JSON.parse(localStorage.getItem('deck.local.v1')).activePageId).sections[1].name === 'Audio'"));
+  check('invalid inline section names stay visible and are not saved', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-error')?.textContent.includes('Enter a section name') && (() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const deck = d && d.deck ? d.deck : d; return deck.pages.find(p => p.id === deck.activePageId).sections[1].name === 'Audio'; })()"));
   await manage.eval(`document.querySelector('${secondName}').focus()`);
   await pressKey(manage, 'Escape', 'Escape', 27);
   check('Escape cancels an inline section rename', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && !document.querySelector('.deck-section:nth-child(2) .section-error')"));
@@ -1719,7 +1719,7 @@ try {
   check('dropping a dragged section reorders it', await manage.waitFor(`(() => { const names = [...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value); return names[0] === ${JSON.stringify(baseSectionName)} && names[1] === 'Audio' && !document.querySelector('.is-dragging, .is-drop-target'); })()`), await manage.eval("[...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value).join('|')"));
 
   await manage.reload();
-  check('section rename, order and appearance survive a reload', await manage.waitFor(`(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections[0].name === ${JSON.stringify(baseSectionName)} && p.sections[1].name === 'Audio' && p.sections[1].theme === 'light' && p.sections[1].accent === '#6ee7b7' && p.sections[1].controls.length === 1; })()`));
+  check('section rename, order and appearance survive a reload', await manage.waitFor(`(() => { const d = (() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); return d && d.deck ? d.deck : d; })(); const p = d.pages.find(p => p.id === d.activePageId); return p.sections[0].name === ${JSON.stringify(baseSectionName)} && p.sections[1].name === 'Audio' && p.sections[1].theme === 'light' && p.sections[1].accent === '#6ee7b7' && p.sections[1].controls.length === 1; })()`));
   check('reloaded sections render in the saved order', await manage.waitFor(`[...document.querySelectorAll('.deck-section .section-name-input')].map((input) => input.value).join('|') === ${JSON.stringify(`${baseSectionName}|Audio`)}`));
 
   await manage.eval(click('.deck-section:nth-child(2) [title="Remove section"]'));
@@ -1963,7 +1963,8 @@ try {
   const { browserContextId } = await cdp.send('Target.createBrowserContext');
   const narrow = await openPage('narrow-stress', `${BASE}/`, { width: 320, height: 844, mobile: true }, browserContextId);
   livePages.push(narrow);
-  const stressDeck = JSON.parse(await editor.eval("localStorage.getItem('deck.local.v1')"));
+  const storedStress = JSON.parse(await editor.eval("localStorage.getItem('deck.local.v1')"));
+  const stressDeck = storedStress && storedStress.deck ? storedStress.deck : storedStress;
   const longName = 'A very long control label with forty chars'.slice(0, 40);
   stressDeck.pages.forEach(page => { page.name = longName; });
   const templates = stressDeck.pages.flatMap(page => page.sections.flatMap(section => section.controls));

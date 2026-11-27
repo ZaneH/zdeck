@@ -240,7 +240,7 @@ export function SectionList({
           <p>
             Remove “{confirming?.name}” and its {confirming?.controls.length ?? 0} {confirming?.controls.length === 1 ? "control" : "controls"}?
           </p>
-          <p className="field-note">This cannot be undone.</p>
+          <p className="field-note">It moves to Trash, where you can restore it.</p>
         </div>
         <div className="dialog-actions">
           <button type="button" className="button secondary" ref={cancelRemoveRef} onClick={() => confirmRef.current?.close()}>

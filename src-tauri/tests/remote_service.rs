@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use deck_lib::deck::{default_deck, DeckStore, DECK_FILE_NAME};
+use deck_lib::deck::{default_deck, DeckStore, TrashEntry, TrashLocation, DECK_FILE_NAME};
 use deck_lib::obs::{ObsState, Timeouts as ObsTimeouts};
 use deck_lib::remote::{
     start, AssetProvider, Clock, DeviceStatus, Limits, PublicAsset, RemoteAdmin, RemoteError,
@@ -240,7 +240,7 @@ struct TestEnv {
 }
 
 async fn save_default_deck(store: &DeckStore) {
-    store.save(0, default_deck()).await.expect("save deck");
+    store.save(0, default_deck(), vec![]).await.expect("save deck");
 }
 
 async fn env_with(
@@ -1168,18 +1168,34 @@ async fn deck_store_changes_are_published_over_the_socket() {
     let initial = read_json(&mut websocket).await;
     assert_eq!(initial["revision"], 1);
     assert_eq!(initial["deck"]["version"], 3);
+    assert!(initial.get("trash").is_none(), "phone snapshots must never include local trash");
 
     let mut deck = default_deck();
+    let deleted = deck.pages[0].sections[0].controls[0].clone();
     deck.pages[0].name = "Changed".to_string();
     deck.pages[0].sections[0].controls[0].icon = Some(deck_lib::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
-    let saved = store.save(1, deck).await.expect("save");
+    let trash = vec![TrashEntry::Control {
+        id: deleted.id.clone(),
+        deleted_at: 1,
+        control: deleted,
+        location: TrashLocation {
+            page_id: "page_stream".into(),
+            page_name: "Stream".into(),
+            section_id: Some("page_stream_section".into()),
+            section_name: Some("Stream".into()),
+            index: 0,
+        },
+    }];
+    let saved = store.save(1, deck, trash).await.expect("save");
     assert_eq!(saved.revision, 2);
+    assert_eq!(saved.trash.len(), 1);
 
     let update = read_json(&mut websocket).await;
     assert_eq!(update["type"], "snapshot");
     assert_eq!(update["revision"], 2);
     assert_eq!(update["deck"]["pages"][0]["name"], "Changed");
     assert_eq!(update["deck"]["pages"][0]["sections"][0]["controls"][0]["icon"], json!({"type":"image","src":"data:image/svg+xml;base64,PHN2Zy8+"}));
+    assert!(update.get("trash").is_none(), "phone snapshots must never include local trash");
 
     close_websocket(&mut websocket).await;
     service.stop().await;
@@ -1332,7 +1348,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
         ("power","power",json!({"enabled":false}),"toggle-switch"), ("unknown","unknown",json!({"enabled":false}),"toggle-button"), ("mismatch","power",json!({"enabled":false}),"slider")] {
         deck.pages[0].sections[0].controls.push(serde_json::from_value(json!({"id":id,"label":id,"action":"plugin","pluginId":"power","pluginAction":action,"pluginArgs":args,"presentation":presentation})).unwrap());
     }
-    env.deck.save(1,deck).await.unwrap();
+    env.deck.save(1, deck, vec![]).await.unwrap();
     let (_,token) = approved_device(&env,"Presentations").await;
     let state = http_request(env.port,"GET","/api/v1/state",PUBLIC_HOST,None,Some(&token),None).await;
     assert_eq!(state.status,200);
@@ -1387,7 +1403,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     for (id, entity) in [("selected-power",7), ("missing-power",99)] {
         deck.pages[0].sections[0].controls.push(serde_json::from_value(json!({"id":id,"label":id,"action":"plugin","pluginId":"home-assistant","pluginAction":"power","pluginArgs":{"entity":entity,"enabled":false},"presentation":"toggle-switch"})).unwrap());
     }
-    env.deck.save(1,deck.clone()).await.unwrap();
+    env.deck.save(1, deck.clone(), vec![]).await.unwrap();
     let restored = DeckStore::new(env._dir.path.join(DECK_FILE_NAME)).load().await.unwrap();
     assert_eq!(restored.deck, deck, "read-only bindings and fixed/toggle modes round-trip without observations or secrets");
     let (_, token) = approved_device(&env,"Readings").await;
@@ -1427,7 +1443,7 @@ async fn plugin_deck(env: &TestEnv) {
             plugin_args: json!({"volume":50}).as_object().unwrap().clone(),
         },
     });
-    assert_eq!(env.deck.save(1,deck).await.unwrap().deck.version,3);
+    assert_eq!(env.deck.save(1, deck, vec![]).await.unwrap().deck.version,3);
 }
 
 #[tokio::test]
@@ -1468,7 +1484,7 @@ let count=0;require('node:readline').createInterface({input:process.stdin}).on('
         std::fs::write(&entry,source).unwrap();env.plugin.connect(id,node.clone(),entry.to_str().unwrap().into()).await.unwrap();
         deck.pages[0].sections[0].controls.push(deck_lib::deck::Control {id:format!("ctl_{id}"),label:id.into(),row_span:None,column_span:None,icon:None,presentation:None,action:deck_lib::deck::ControlAction::Plugin {plugin_id:id.into(),plugin_action:"set-volume".into(),plugin_args:json!({"volume":volume}).as_object().unwrap().clone()}});
     }
-    env.deck.save(1,deck).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
+    env.deck.save(1, deck, vec![]).await.unwrap();let (_,token)=approved_device(&env,"Multi plugin").await;
     for (id,volume) in [("alpha",17),("beta",83)] {
         let command=json!({"id":format!("run_{id}"),"revision":2,"controlId":format!("ctl_{id}")}).to_string();
         let response=http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&command)).await;
@@ -1535,7 +1551,7 @@ rl.on('line',line=>{
             let mut deck = env.deck.load().await.unwrap().deck;
             let control = deck.pages[0].sections[0].controls.last_mut().unwrap();
             if let deck_lib::deck::ControlAction::Plugin { plugin_action, .. } = &mut control.action { *plugin_action = "unknown".into(); }
-            env.deck.save(2,deck).await.unwrap();
+            env.deck.save(2, deck, vec![]).await.unwrap();
             let setup = json!({"id":"plugin_setup","revision":3,"controlId":"ctl_plugin"}).to_string();
             let r = http_request(env.port,"POST","/api/v1/commands",PUBLIC_HOST,Some(ORIGIN),Some(&token),Some(&setup)).await;
             assert_eq!(r.json()["state"],"failed"); assert_eq!(r.json()["code"],"plugin_setup_required");
@@ -2965,7 +2981,7 @@ mod browser_smoke {
                             page.name = name;
                         }
                         store
-                            .save(snapshot.revision, deck)
+                            .save(snapshot.revision, deck, vec![])
                             .await
                             .map(|saved| json!({ "revision": saved.revision }))
                             .map_err(|error| format!("{error:?}"))
@@ -3017,7 +3033,7 @@ mod browser_smoke {
         let mut deck = default_deck();
         deck.pages[0].sections[0].controls[3].label = "Fixture playback".to_string();
         deck.accent = "#f4b860".to_string();
-        store.save(0, deck).await.expect("save fixture deck");
+        store.save(0, deck, vec![]).await.expect("save fixture deck");
         let runner = Arc::new(FakeRunner::new(vec![]));
         let config = ServiceConfig {
             origin: ORIGIN.to_string(),

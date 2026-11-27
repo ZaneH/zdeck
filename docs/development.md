@@ -198,20 +198,20 @@ The browser and native stores are independent. Internal names (`deck-editor`, `d
 
 ### Browser storage
 
-`localStorage` key `deck.local.v1` holds the deck. Current schema v2 supports plugin controls; valid v1 documents upgrade in memory. Validation covers version, non-empty pages, existing active page, unique IDs, bounded strings/control counts and valid action fields/volume. No credentials or observed runtime state belong in the document.
+`localStorage` key `deck.local.v1` holds one envelope, `{ envelopeVersion: 1, deck, trash }`. The deck keeps its own versioned schema (v3); valid v1/v2 decks and an older bare deck value upgrade in memory and are written as the envelope on the next save. Trash is a separate bounded list outside the deck: at most 10 deleted controls/sections with their original page, section and index, capped at 256 KiB of encoded entries. Validation covers the deck as before plus trash payloads, unique trash IDs and the cap. No credentials or observed runtime state belong in the document.
 
 Empty storage loads the sample deck. Malformed/unsupported/invalid data loads a sample **with a visible warning**; the next edit replaces the invalid document. Saves validate before a single-key write and report failures rather than claiming success. The browser phone preview reads this same store and listens for other-tab edits. Back up invalid data before editing if recovery matters.
 
 ### Native store
 
-`deck.v1.json` lives in Tauri's resolved app-data directory, typically `$XDG_DATA_HOME/com.deck.local/` or `~/.local/share/com.deck.local/` on Linux. The frontend never supplies a path. The document contains `{ revision, deck }`, not credentials or runtime action state; the filename remains unchanged even when the deck schema is v2.
+`deck.v1.json` lives in Tauri's resolved app-data directory, typically `$XDG_DATA_HOME/com.deck.local/` or `~/.local/share/com.deck.local/` on Linux. The frontend never supplies a path. The document contains `{ revision, deck, trash? }`; `trash` is omitted when empty, so a trash-free document stays readable by older builds. A document with saved Trash is refused by older builds that do not know the field (their unknown-field check is deliberate), so restoring an older build may require moving that file aside. Trash never contains credentials or runtime action state, and the filename remains unchanged.
 
-- **Validation:** Rust enforces schema/limits and rejects files over 256 KiB before reading. Shared fixtures in `tests/fixtures/` help enforce parity with frontend validation.
+- **Validation:** Rust enforces schema/limits and rejects files over 256 KiB deck + 256 KiB trash + 4 KiB envelope overhead before reading. Shared fixtures in `tests/fixtures/` help enforce parity with frontend validation.
 - **Atomic saves:** serialized in-process writes go to a same-directory temporary file, are flushed/synced, then renamed. Revision advances only after success. Expected-revision compare-and-swap rejects stale writes without overwriting a newer deck.
 - **Missing file:** initialize once from a valid browser-local webview deck if present, otherwise the sample. Browser data is not deleted. An existing native file always wins; this is not continuous browser/native sync.
 - **Invalid/newer file:** preserve the original bytes and show recovery, not a silent sample overwrite. Errors include `invalid_file`, `unsupported_version` and `file_too_large`. Back up the file, repair or move it deliberately, then **Reload deck**.
 - **Save failures:** the sequential latest-state queue retains in-memory edits, reports the failure and does not silently retry. Conflict blocks further saves until authoritative reload; preserve any needed unsaved work before reloading.
-- **Migration:** valid v1 decks upgrade in memory; migration alone does not rewrite disk. The next explicit edit/save writes v2. Older apps cannot read that new schema; keep a backup before downgrading.
+- **Migration:** valid v1 decks upgrade in memory; migration alone does not rewrite disk. The next explicit edit/save writes v3 with Trash in the same atomic revision write. Older apps cannot read the v3 schema; keep a backup before downgrading.
 - **Preview:** native `#/phone` uses the in-memory native deck, not browser `localStorage`.
 
 There is no deck export/import, cloud sync or automatic backup. Compare-and-swap coordinates only a **single native process**: do not run two instances against the same app-data directory.

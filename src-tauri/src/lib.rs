@@ -237,8 +237,9 @@ async fn native_deck_save(
     state: tauri::State<'_, AppState>,
     expected_revision: u64,
     deck: Deck,
+    trash: Option<Vec<deck::TrashEntry>>,
 ) -> Result<deck::DeckSnapshot, DeckError> {
-    state.store()?.save(expected_revision, deck).await
+    state.store()?.save(expected_revision, deck, trash.unwrap_or_default()).await
 }
 
 /// Explicit native user gesture only; no phone service or direct action payload.

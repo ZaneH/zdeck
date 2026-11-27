@@ -219,7 +219,7 @@ describe("deck history", () => {
     const undone = undoDeck(history, added.deck)!;
 
     expect(saveDeck(storage, undone.deck)).toBe(true);
-    expect(loadDeck(storage)).toEqual({ deck: undone.deck, status: "loaded" });
+    expect(loadDeck(storage)).toEqual({ deck: undone.deck, trash: [], status: "loaded" });
   });
 
   it("resets empty so an authoritative reload cannot be undone", () => {

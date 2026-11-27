@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { addControl, createDefaultDeck, findControl, updateControl } from "../src/lib/deck";
+import { addControl, createDefaultDeck, findControl, removeControl, updateControl } from "../src/lib/deck";
 import {
+  LOCAL_DOCUMENT_VERSION,
   loadDeck,
   loadSidebar,
   saveSidebar,
@@ -11,6 +12,7 @@ import {
 } from "../src/lib/persistence";
 import { addSection, moveSection, renameSection, setSectionAccent, setSectionTheme } from "../src/lib/sections";
 import { ACCENTS } from "../src/lib/types";
+import { deriveTrash } from "../src/lib/trash";
 import type { StorageLike } from "../src/lib/types";
 
 class MemoryStorage implements StorageLike {
@@ -199,5 +201,52 @@ describe("deck persistence", () => {
     invalid.pages[0].sections[0].controls[0].label = "   ";
     expect(saveDeck(storage, invalid)).toBe(false);
     expect(storage.getItem(STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("local deck envelope and trash", () => {
+  const entry = (() => {
+    const deck = createDefaultDeck();
+    const next = removeControl(deck, "page_stream", "ctl_mic");
+    return { deck: next, trash: deriveTrash(deck, next, [], 1234) };
+  })();
+
+  it("migrates an existing bare deck to an empty trash without rewriting it", () => {
+    const storage = new MemoryStorage();
+    const deck = createDefaultDeck();
+    storage.setItem(STORAGE_KEY, JSON.stringify(deck));
+    const loaded = loadDeck(storage);
+    expect(loaded).toEqual({ deck, status: "loaded", trash: [] });
+    expect(JSON.parse(storage.getItem(STORAGE_KEY)!)).toEqual(deck);
+  });
+
+  it("round-trips deck and trash in one atomic envelope", () => {
+    const storage = new MemoryStorage();
+    expect(saveDeck(storage, entry.deck, entry.trash)).toBe(true);
+    const raw = JSON.parse(storage.getItem(STORAGE_KEY)!);
+    expect(raw).toMatchObject({ envelopeVersion: LOCAL_DOCUMENT_VERSION, trash: entry.trash });
+    expect(raw.deck).toEqual(entry.deck);
+    expect(loadDeck(storage)).toEqual({ deck: entry.deck, trash: entry.trash, status: "loaded" });
+  });
+
+  it("treats malformed trash or an unknown envelope as invalid and preserves the raw data", () => {
+    for (const raw of [
+      JSON.stringify({ envelopeVersion: 1, deck: createDefaultDeck(), trash: [{ kind: "control" }] }),
+      JSON.stringify({ envelopeVersion: 2, deck: createDefaultDeck(), trash: [] }),
+      JSON.stringify({ envelopeVersion: 1, deck: createDefaultDeck(), trash: entry.trash, extra: true }),
+    ]) {
+      const storage = new MemoryStorage();
+      storage.setItem(STORAGE_KEY, raw);
+      expect(loadDeck(storage).status).toBe("invalid");
+      expect(storage.getItem(STORAGE_KEY)).toBe(raw);
+    }
+  });
+
+  it("refuses to save invalid trash instead of silently dropping it", () => {
+    const storage = new MemoryStorage();
+    saveDeck(storage, createDefaultDeck());
+    const before = storage.getItem(STORAGE_KEY);
+    expect(saveDeck(storage, createDefaultDeck(), [{ ...entry.trash[0], id: "mismatch" }])).toBe(false);
+    expect(storage.getItem(STORAGE_KEY)).toBe(before);
   });
 });

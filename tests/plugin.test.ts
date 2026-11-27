@@ -259,7 +259,7 @@ describe("legacy local deck migration", () => {
     expect(JSON.parse(stored).version).toBe(1);
     expect(writes).toBe(0);
     expect(saveDeck(storage, loaded.deck)).toBe(true);
-    expect(JSON.parse(stored).version).toBe(3);
+    expect(JSON.parse(stored).deck.version).toBe(3);
     expect(writes).toBe(1);
   });
 

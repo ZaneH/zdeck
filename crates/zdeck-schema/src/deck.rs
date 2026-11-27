@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 pub const DECK_VERSION: u32 = 3;
 pub const MAX_PAGES: usize = 12;
 pub const MAX_CONTROLS_PER_PAGE: usize = 24;
+/// Newest deleted controls and sections kept for restore, outside the deck.
+pub const MAX_TRASH_ITEMS: usize = 10;
+/// Separate trash budget so trash growth cannot make a valid deck unsavable.
+pub const MAX_TRASH_BYTES: usize = 256 * 1024;
 const MAX_ID_BYTES: usize = 128;
 const MAX_NAME_BYTES: usize = 128;
 const MAX_LABEL_BYTES: usize = 256;
@@ -141,20 +145,172 @@ pub struct Deck {
     pub accent: String,
 }
 
+/// Where a deleted control or section came from, for restore clamping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrashLocation {
+    pub page_id: String,
+    pub page_name: String,
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub section_id: Option<String>,
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub section_name: Option<String>,
+    pub index: u32,
+}
+
+/// A recoverable deletion. Trash lives in the local document, never in a deck.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+pub enum TrashEntry {
+    Control {
+        id: String,
+        #[serde(rename = "deletedAt")]
+        deleted_at: u64,
+        control: Control,
+        location: TrashLocation,
+    },
+    Section {
+        id: String,
+        #[serde(rename = "deletedAt")]
+        deleted_at: u64,
+        section: Section,
+        location: TrashLocation,
+    },
+}
+
+fn validate_location(location: &TrashLocation, control: bool) -> Result<(), DeckError> {
+    if location.page_id.is_empty() || location.page_id.len() > MAX_ID_BYTES
+        || location.page_name.trim().is_empty() || location.page_name.len() > MAX_NAME_BYTES
+    {
+        return Err(DeckError::invalid_input("Trash locations must reference a bounded page."));
+    }
+    let section_fields_valid = match (&location.section_id, &location.section_name) {
+        (Some(id), Some(name)) => {
+            control && !id.is_empty() && id.len() <= MAX_ID_BYTES
+                && !name.trim().is_empty() && name.len() <= MAX_NAME_BYTES
+        }
+        (None, None) => !control,
+        _ => false,
+    };
+    if !section_fields_valid {
+        return Err(DeckError::invalid_input("Trash locations must match their entry kind."));
+    }
+    Ok(())
+}
+
+fn valid_control_payload(control: &Control) -> bool {
+    Deck {
+        version: DECK_VERSION,
+        pages: vec![Page {
+            id: "__trash_page".into(),
+            name: "Trash".into(),
+            sections: vec![Section {
+                id: "__trash_section".into(),
+                name: "Trash".into(),
+                controls: vec![control.clone()],
+                theme: None,
+                accent: None,
+            }],
+        }],
+        active_page_id: "__trash_page".into(),
+        theme: Theme::Dark,
+        accent: ACCENTS[0].to_string(),
+    }
+    .validate()
+    .is_ok()
+}
+
+fn valid_section_payload(section: &Section) -> bool {
+    Deck {
+        version: DECK_VERSION,
+        pages: vec![Page {
+            id: "__trash_page".into(),
+            name: "Trash".into(),
+            sections: vec![section.clone()],
+        }],
+        active_page_id: "__trash_page".into(),
+        theme: Theme::Dark,
+        accent: ACCENTS[0].to_string(),
+    }
+    .validate()
+    .is_ok()
+}
+
+impl TrashEntry {
+    fn validate(&self) -> Result<(), DeckError> {
+        let (id, deleted_at) = match self {
+            Self::Control { id, deleted_at, .. } | Self::Section { id, deleted_at, .. } => (id, deleted_at),
+        };
+        if id.is_empty() || id.len() > MAX_ID_BYTES {
+            return Err(DeckError::invalid_input("Trash IDs must be non-empty and bounded."));
+        }
+        if *deleted_at == 0 {
+            return Err(DeckError::invalid_input("Trash entries need a deletion time."));
+        }
+        match self {
+            Self::Control { id, control, location, .. } => {
+                validate_location(location, true)?;
+                if control.id != *id || !valid_control_payload(control) {
+                    return Err(DeckError::invalid_input("Deleted controls must be valid and match their ID."));
+                }
+            }
+            Self::Section { id, section, location, .. } => {
+                validate_location(location, false)?;
+                if section.id != *id || !valid_section_payload(section) {
+                    return Err(DeckError::invalid_input("Deleted sections must be valid and match their ID."));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Validate the bounded trash beside an unchanged per-deck schema.
+pub fn validate_trash(trash: &[TrashEntry]) -> Result<(), DeckError> {
+    if trash.len() > MAX_TRASH_ITEMS {
+        return Err(DeckError::invalid_input(format!(
+            "Trash holds at most {MAX_TRASH_ITEMS} items."
+        )));
+    }
+    if serde_json::to_vec(trash).map(|bytes| bytes.len() > MAX_TRASH_BYTES).unwrap_or(true) {
+        return Err(DeckError::invalid_input(format!(
+            "Trash is larger than {MAX_TRASH_BYTES} bytes."
+        )));
+    }
+    let mut control_ids = HashSet::new();
+    let mut section_ids = HashSet::new();
+    for entry in trash {
+        entry.validate()?;
+        let unique = match entry {
+            TrashEntry::Control { id, .. } => control_ids.insert(id),
+            TrashEntry::Section { id, .. } => section_ids.insert(id),
+        };
+        if !unique {
+            return Err(DeckError::invalid_input("Trash IDs must be unique per kind."));
+        }
+    }
+    Ok(())
+}
+
 /// The persisted document. No secrets or runtime action state belong here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeckDocument {
     pub revision: u64,
     pub deck: Deck,
+    /// Absent in older files; empty trash is omitted so old readers keep working.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trash: Vec<TrashEntry>,
 }
 
 /// The wire shape returned to the frontend, including whether the file existed.
+/// Phone snapshots serialize only `deck`, so trash never leaves the desktop.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeckSnapshot {
     pub revision: u64,
     pub deck: Deck,
+    pub trash: Vec<TrashEntry>,
     pub exists: bool,
 }
 
@@ -503,6 +659,8 @@ pub fn decode_document(bytes: &[u8]) -> Result<DeckDocument, DeckError> {
         DeckError::UnsupportedVersion { message } => DeckError::UnsupportedVersion { message },
         _ => DeckError::invalid_file("The deck file failed schema validation."),
     })?;
+    validate_trash(&document.trash)
+        .map_err(|_| DeckError::invalid_file("The deck file has invalid trash."))?;
     Ok(document)
 }
 
@@ -566,7 +724,7 @@ mod tests {
         let value = stored_fixture();
         let bytes = serde_json::to_vec(&value).unwrap();
         let document = decode_document(&bytes).unwrap();
-        assert_eq!(document, DeckDocument { revision: 7, deck: fixture_deck() });
+        assert_eq!(document, DeckDocument { revision: 7, deck: fixture_deck(), trash: vec![] });
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(), value);
         let current = serde_json::to_vec(&document).unwrap();
         assert_eq!(decode_document(&current).unwrap(), document);
@@ -636,7 +794,7 @@ mod tests {
             .collect();
         assert_eq!(kinds, expected);
 
-        let document = DeckDocument { revision: 7, deck };
+        let document = DeckDocument { revision: 7, deck, trash: vec![] };
         let encoded = serde_json::to_vec(&document).unwrap();
         let decoded: DeckDocument = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, document);
@@ -794,6 +952,98 @@ mod tests {
         deck.pages[0].sections[0].id = "x".repeat(MAX_ID_BYTES);
         deck.pages[0].sections[0].name = "é".repeat(MAX_NAME_BYTES / 2 + 1);
         assert!(deck.validate().is_err());
+    }
+
+    fn control_trash_entry() -> TrashEntry {
+        let deck = default_deck();
+        let control = deck.pages[0].sections[0].controls[0].clone();
+        TrashEntry::Control {
+            id: control.id.clone(),
+            deleted_at: 1,
+            control,
+            location: TrashLocation {
+                page_id: "page_stream".into(),
+                page_name: "Stream".into(),
+                section_id: Some("page_stream_section".into()),
+                section_name: Some("Stream".into()),
+                index: 0,
+            },
+        }
+    }
+
+    fn section_trash_entry() -> TrashEntry {
+        let deck = default_deck();
+        let section = deck.pages[0].sections[0].clone();
+        TrashEntry::Section {
+            id: section.id.clone(),
+            deleted_at: 2,
+            section,
+            location: TrashLocation {
+                page_id: "page_stream".into(),
+                page_name: "Stream".into(),
+                section_id: None,
+                section_name: None,
+                index: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn trash_round_trips_beside_the_deck_and_old_documents_stay_empty() {
+        let document = DeckDocument {
+            revision: 7,
+            deck: default_deck(),
+            trash: vec![control_trash_entry(), section_trash_entry()],
+        };
+        let bytes = serde_json::to_vec(&document).unwrap();
+        assert_eq!(decode_document(&bytes).unwrap(), document);
+
+        let old = serde_json::json!({"revision": 7, "deck": serde_json::to_value(default_deck()).unwrap()});
+        assert!(decode_document(&serde_json::to_vec(&old).unwrap()).unwrap().trash.is_empty());
+        let empty = DeckDocument { revision: 7, deck: default_deck(), trash: vec![] };
+        let encoded: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&empty).unwrap()).unwrap();
+        assert!(encoded.get("trash").is_none());
+
+        let encoded = serde_json::to_value(&document).unwrap();
+        assert_eq!(encoded["trash"][0]["deletedAt"], 1);
+        assert_eq!(encoded["trash"][1]["location"].get("sectionId"), None);
+    }
+
+    #[test]
+    fn trash_is_bounded_and_strictly_validated() {
+        let control = control_trash_entry();
+        let section = section_trash_entry();
+        validate_trash(&[control.clone(), section.clone()]).unwrap();
+        assert!(validate_trash(&vec![control.clone(); MAX_TRASH_ITEMS + 1]).is_err());
+
+        let mut mismatched = control.clone();
+        if let TrashEntry::Control { id, .. } = &mut mismatched { *id = "other".into(); }
+        assert!(validate_trash(&[mismatched]).is_err());
+
+        let mut bad_section_location = section.clone();
+        if let TrashEntry::Section { location, .. } = &mut bad_section_location {
+            location.section_id = Some("page_stream_section".into());
+        }
+        assert!(validate_trash(&[bad_section_location]).is_err());
+
+        let mut missing_section_name = control.clone();
+        if let TrashEntry::Control { location, .. } = &mut missing_section_name {
+            location.section_name = None;
+        }
+        assert!(validate_trash(&[missing_section_name]).is_err());
+
+        let mut bad_control_payload = control.clone();
+        if let TrashEntry::Control { control: payload, .. } = &mut bad_control_payload {
+            payload.label = " ".into();
+        }
+        assert!(validate_trash(&[bad_control_payload]).is_err());
+
+        let mut zero_time = control;
+        if let TrashEntry::Control { deleted_at, .. } = &mut zero_time { *deleted_at = 0; }
+        assert!(validate_trash(&[zero_time]).is_err());
+
+        let duplicate = section.clone();
+        assert!(validate_trash(&[section, duplicate]).is_err());
     }
 
     #[test]

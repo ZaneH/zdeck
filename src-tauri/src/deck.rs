@@ -23,8 +23,12 @@ use tokio::sync::{watch, Mutex};
 
 pub use zdeck_schema::deck::*;
 
-/// Upper bound on the on-disk document; checked before the bytes are read.
+/// Upper bound on the deck portion; checked before the bytes are read.
 pub const MAX_DECK_FILE_BYTES: u64 = 256 * 1024;
+/// Separate trash budget so trash growth cannot make a previously valid deck unsavable.
+pub const MAX_TRASH_FILE_BYTES: u64 = MAX_TRASH_BYTES as u64;
+/// Combined document budget, including minimal envelope and separator overhead.
+pub const MAX_DOCUMENT_FILE_BYTES: u64 = MAX_DECK_FILE_BYTES + MAX_TRASH_FILE_BYTES + 4096;
 /// File name inside the app data directory. Relative, never frontend-supplied.
 pub const DECK_FILE_NAME: &str = "deck.v1.json";
 
@@ -81,8 +85,10 @@ impl DeckStore {
         &self,
         expected_revision: u64,
         deck: Deck,
+        trash: Vec<TrashEntry>,
     ) -> Result<DeckSnapshot, DeckError> {
         deck.validate()?;
+        validate_trash(&trash)?;
 
         let mut inner = self.inner.lock().await;
         self.load_locked(&mut inner)?;
@@ -100,10 +106,19 @@ impl DeckStore {
         let revision = current_revision
             .checked_add(1)
             .ok_or_else(|| DeckError::invalid_input("Deck revision is exhausted."))?;
-        let document = DeckDocument { revision, deck };
+        // Bound the deck itself separately so Trash growth can never make a
+        // previously valid deck unsavable.
+        let deck_bytes = serde_json::to_vec(&deck)
+            .map_err(|_| DeckError::invalid_input("The deck could not be encoded."))?;
+        if deck_bytes.len() as u64 > MAX_DECK_FILE_BYTES {
+            return Err(DeckError::file_too_large(
+                "The deck is too large to save safely.",
+            ));
+        }
+        let document = DeckDocument { revision, deck, trash };
         let bytes = serde_json::to_vec(&document)
             .map_err(|_| DeckError::invalid_input("The deck could not be encoded."))?;
-        if bytes.len() as u64 > MAX_DECK_FILE_BYTES {
+        if bytes.len() as u64 > MAX_DOCUMENT_FILE_BYTES {
             return Err(DeckError::file_too_large(
                 "The deck document is too large to save safely.",
             ));
@@ -147,15 +162,15 @@ impl DeckStore {
                 ))
             })?
             .len();
-        if size > MAX_DECK_FILE_BYTES {
+        if size > MAX_DOCUMENT_FILE_BYTES {
             return Err(DeckError::file_too_large(format!(
-                "The deck file is larger than {MAX_DECK_FILE_BYTES} bytes."
+                "The deck file is larger than {MAX_DOCUMENT_FILE_BYTES} bytes."
             )));
         }
 
         // Read with a hard cap in case the file grows between stat and read.
         let mut bytes = Vec::new();
-        file.take(MAX_DECK_FILE_BYTES + 1)
+        file.take(MAX_DOCUMENT_FILE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| {
                 DeckError::io(format!(
@@ -163,13 +178,22 @@ impl DeckStore {
                     error.kind()
                 ))
             })?;
-        if bytes.len() as u64 > MAX_DECK_FILE_BYTES {
+        if bytes.len() as u64 > MAX_DOCUMENT_FILE_BYTES {
             return Err(DeckError::file_too_large(format!(
-                "The deck file is larger than {MAX_DECK_FILE_BYTES} bytes."
+                "The deck file is larger than {MAX_DOCUMENT_FILE_BYTES} bytes."
             )));
         }
 
-        decode_document(&bytes).map(Some)
+        let document = decode_document(&bytes)?;
+        let deck_size = serde_json::to_vec(&document.deck)
+            .map_err(|_| DeckError::invalid_file("The deck could not be decoded."))?
+            .len() as u64;
+        if deck_size > MAX_DECK_FILE_BYTES {
+            return Err(DeckError::file_too_large(
+                "The deck is larger than the per-deck bound.",
+            ));
+        }
+        Ok(Some(document))
     }
 
     fn write_atomic(&self, bytes: &[u8]) -> Result<(), DeckError> {
@@ -243,11 +267,13 @@ fn snapshot_of(inner: &StoreInner) -> DeckSnapshot {
         Some(document) => DeckSnapshot {
             revision: document.revision,
             deck: document.deck.clone(),
+            trash: document.trash.clone(),
             exists: true,
         },
         None => DeckSnapshot {
             revision: 0,
             deck: default_deck(),
+            trash: Vec::new(),
             exists: false,
         },
     }
@@ -312,7 +338,7 @@ mod tests {
         let dir = TempDir::new();
         let store = DeckStore::new(dir.0.join(DECK_FILE_NAME));
         let initial = store.load().await.unwrap();
-        store.save(initial.revision, deck.clone()).await.unwrap();
+        store.save(initial.revision, deck.clone(), vec![]).await.unwrap();
         assert_eq!(DeckStore::new(dir.0.join(DECK_FILE_NAME)).load().await.unwrap().deck, deck);
         deck.pages[0].sections[0].controls[0].column_span = Some(5);
         assert!(deck.validate().is_err());
@@ -331,11 +357,11 @@ mod tests {
         assert_eq!(snapshot.revision, 7);
         assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
         let mut invalid = snapshot.deck.clone(); invalid.pages.clear();
-        assert!(store.save(7, invalid).await.is_err());
+        assert!(store.save(7, invalid, vec![]).await.is_err());
         assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
-        assert!(store.save(6, snapshot.deck.clone()).await.is_err());
+        assert!(store.save(6, snapshot.deck.clone(), vec![]).await.is_err());
         assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
-        store.save(7, snapshot.deck).await.unwrap();
+        store.save(7, snapshot.deck, vec![]).await.unwrap();
         let saved: DeckDocument = serde_json::from_slice(&std::fs::read(dir.file()).unwrap()).unwrap();
         assert_eq!(saved.deck.version, DECK_VERSION); assert_eq!(saved.revision, 8);
     }
@@ -353,7 +379,7 @@ mod tests {
             std::fs::write(dir.file(), &bytes).unwrap();
             let store = DeckStore::new(dir.file());
             assert!(matches!(store.load().await, Err(DeckError::InvalidFile { .. })));
-            assert!(store.save(0, fixture_deck()).await.is_err());
+            assert!(store.save(0, fixture_deck(), vec![]).await.is_err());
             assert_eq!(std::fs::read(dir.file()).unwrap(), bytes);
         }
         let dir = TempDir::new();
@@ -361,7 +387,7 @@ mod tests {
         v["deck"]["pages"][0]["controls"][0] = json!({"id":"p","label":"P","action":"plugin","pluginId":"fake","pluginAction":"go","pluginArgs":{}});
         let bytes = serde_json::to_vec(&v).unwrap(); std::fs::write(dir.file(), &bytes).unwrap();
         let store = DeckStore::new(dir.file()); assert!(store.load().await.is_err());
-        assert!(store.save(0, fixture_deck()).await.is_err()); assert_eq!(std::fs::read(dir.file()).unwrap(),bytes);
+        assert!(store.save(0, fixture_deck(), vec![]).await.is_err()); assert_eq!(std::fs::read(dir.file()).unwrap(),bytes);
     }
 
     #[tokio::test]
@@ -372,7 +398,7 @@ mod tests {
             .join(format!(".{DECK_FILE_NAME}.{}.0.tmp", std::process::id()));
         std::fs::write(&temp, b"existing data").unwrap();
         let store = DeckStore::new(dir.file());
-        assert!(store.save(0, fixture_deck()).await.is_err());
+        assert!(store.save(0, fixture_deck(), vec![]).await.is_err());
         assert_eq!(std::fs::read(&temp).unwrap(), b"existing data");
         assert!(!store.load().await.unwrap().exists);
     }
@@ -385,7 +411,7 @@ mod tests {
         let mut deck = default_deck();
         deck.pages[0].sections[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "data:image/svg+xml;base64,PHN2Zy8+".into() });
         deck.pages[0].sections[0].controls[1].icon = Some(crate::icons::ControlIcon::Builtin { name: "music".into() });
-        let saved = store.save(0, deck.clone()).await.unwrap();
+        let saved = store.save(0, deck.clone(), vec![]).await.unwrap();
         assert_eq!(saved.deck, deck);
         assert_eq!(DeckStore::new(dir.file()).load().await.unwrap().deck, deck);
         let encoded = serde_json::to_value(&deck).unwrap();
@@ -397,7 +423,7 @@ mod tests {
             assert!(serde_json::from_value::<Deck>(bad).is_err());
         }
         deck.pages[0].sections[0].controls[0].icon = Some(crate::icons::ControlIcon::Image { src: "file:///private".into() });
-        assert!(store.save(saved.revision, deck).await.is_err());
+        assert!(store.save(saved.revision, deck, vec![]).await.is_err());
         assert_eq!(store.load().await.unwrap().revision, saved.revision);
     }
 
@@ -416,7 +442,7 @@ mod tests {
     async fn first_save_creates_the_file_and_a_restart_loads_it() {
         let dir = TempDir::new();
         let store = DeckStore::new(dir.file());
-        let saved = store.save(0, fixture_deck()).await.unwrap();
+        let saved = store.save(0, fixture_deck(), vec![]).await.unwrap();
         assert!(saved.exists);
         assert_eq!(saved.revision, 1);
         assert!(dir.file().exists());
@@ -432,11 +458,11 @@ mod tests {
     async fn revision_increments_and_a_stale_save_conflicts() {
         let dir = TempDir::new();
         let store = DeckStore::new(dir.file());
-        assert_eq!(store.save(0, fixture_deck()).await.unwrap().revision, 1);
+        assert_eq!(store.save(0, fixture_deck(), vec![]).await.unwrap().revision, 1);
 
         let mut changed = fixture_deck();
         changed.theme = Theme::Light;
-        let conflict = store.save(0, changed).await.unwrap_err();
+        let conflict = store.save(0, changed, vec![]).await.unwrap_err();
         match conflict {
             DeckError::Conflict {
                 current_revision, ..
@@ -445,7 +471,7 @@ mod tests {
         }
         assert_eq!(store.load().await.unwrap().revision, 1);
 
-        assert_eq!(store.save(1, fixture_deck()).await.unwrap().revision, 2);
+        assert_eq!(store.save(1, fixture_deck(), vec![]).await.unwrap().revision, 2);
     }
 
     #[tokio::test]
@@ -459,13 +485,14 @@ mod tests {
             store.load().await.unwrap_err(),
             DeckError::InvalidFile { .. }
         ));
-        assert!(store.save(0, fixture_deck()).await.is_err());
+        assert!(store.save(0, fixture_deck(), vec![]).await.is_err());
         assert_eq!(std::fs::read(&malformed).unwrap(), b"{not json");
 
         let unknown = dir.file();
         let mut document = DeckDocument {
             revision: 4,
             deck: fixture_deck(),
+            trash: vec![],
         };
         document.deck.version = DECK_VERSION + 1;
         std::fs::write(&unknown, serde_json::to_vec(&document).unwrap()).unwrap();
@@ -474,7 +501,7 @@ mod tests {
             store.load().await.unwrap_err(),
             DeckError::UnsupportedVersion { .. }
         ));
-        assert!(store.save(0, fixture_deck()).await.is_err());
+        assert!(store.save(0, fixture_deck(), vec![]).await.is_err());
         assert_eq!(
             serde_json::from_slice::<DeckDocument>(&std::fs::read(&unknown).unwrap())
                 .unwrap()
@@ -487,7 +514,7 @@ mod tests {
     async fn oversize_file_is_rejected_before_reading_and_left_untouched() {
         let dir = TempDir::new();
         let file = dir.file();
-        let oversize = vec![b' '; MAX_DECK_FILE_BYTES as usize + 1];
+        let oversize = vec![b' '; MAX_DOCUMENT_FILE_BYTES as usize + 1];
         std::fs::write(&file, &oversize).unwrap();
 
         let store = DeckStore::new(file.clone());
@@ -502,15 +529,69 @@ mod tests {
     async fn a_disk_error_preserves_prior_bytes_and_in_memory_revision() {
         let dir = TempDir::new();
         let store = DeckStore::new(dir.file());
-        store.save(0, fixture_deck()).await.unwrap();
+        store.save(0, fixture_deck(), vec![]).await.unwrap();
         let before = std::fs::read(dir.file()).unwrap();
 
         let mut changed = fixture_deck();
         changed.theme = Theme::Light;
         store.fail_next_write();
         assert!(matches!(
-            store.save(1, changed).await.unwrap_err(),
+            store.save(1, changed, vec![]).await.unwrap_err(),
             DeckError::Io { .. }
+        ));
+        assert_eq!(std::fs::read(dir.file()).unwrap(), before);
+        assert_eq!(store.load().await.unwrap().revision, 1);
+    }
+
+    fn trash_entry() -> TrashEntry {
+        let deck = default_deck();
+        let control = deck.pages[0].sections[0].controls[0].clone();
+        TrashEntry::Control {
+            id: control.id.clone(),
+            deleted_at: 1,
+            control,
+            location: TrashLocation {
+                page_id: "page_stream".into(),
+                page_name: "Stream".into(),
+                section_id: Some("page_stream_section".into()),
+                section_name: Some("Stream".into()),
+                index: 0,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn trash_round_trips_in_the_same_atomic_document() {
+        let dir = TempDir::new();
+        let store = DeckStore::new(dir.file());
+        let entry = trash_entry();
+        let saved = store.save(0, default_deck(), vec![entry.clone()]).await.unwrap();
+        assert_eq!(saved.trash, vec![entry.clone()]);
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.file()).unwrap()).unwrap();
+        assert_eq!(raw["trash"][0]["id"], "ctl_starting_soon");
+        assert_eq!(raw["revision"], 1);
+
+        let restarted = DeckStore::new(dir.file());
+        let loaded = restarted.load().await.unwrap();
+        assert_eq!(loaded.trash, vec![entry]);
+        assert_eq!(loaded.revision, saved.revision);
+        assert_eq!(loaded.deck, default_deck());
+    }
+
+    #[tokio::test]
+    async fn invalid_trash_is_rejected_without_overwriting_the_document() {
+        let dir = TempDir::new();
+        let store = DeckStore::new(dir.file());
+        store.save(0, default_deck(), vec![]).await.unwrap();
+        let before = std::fs::read(dir.file()).unwrap();
+        let mut entry = trash_entry();
+        if let TrashEntry::Control { id, .. } = &mut entry {
+            *id = "other".into();
+        }
+        assert!(matches!(
+            store.save(1, default_deck(), vec![entry]).await,
+            Err(DeckError::InvalidInput { .. })
         ));
         assert_eq!(std::fs::read(dir.file()).unwrap(), before);
         assert_eq!(store.load().await.unwrap().revision, 1);
@@ -527,7 +608,7 @@ mod tests {
             tasks.spawn(async move {
                 let mut deck = fixture_deck();
                 deck.theme = if index % 2 == 0 { Theme::Dark } else { Theme::Light };
-                store.save(0, deck).await
+                store.save(0, deck, vec![]).await
             });
         }
 

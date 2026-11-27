@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { createDefaultDeck, isDeck, normalizeDeck } from "../src/lib/deck";
+import { createDefaultDeck, isDeck, normalizeDeck, removeControl } from "../src/lib/deck";
 import { DeckSync } from "../src/lib/deckSync";
 import type { DeckBackend, DeckSyncStatus } from "../src/lib/deckSync";
 import { nativeAvailable } from "../src/lib/native";
@@ -11,6 +11,8 @@ import {
   toDeckError,
 } from "../src/lib/nativeDeck";
 import type { DeckSnapshot } from "../src/lib/nativeDeck";
+import { deriveTrash } from "../src/lib/trash";
+import type { TrashEntry } from "../src/lib/trash";
 import type { Deck } from "../src/lib/types";
 
 function deferred<T>() {
@@ -26,7 +28,7 @@ function deferred<T>() {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const existingBackend = (save: DeckBackend["save"]): DeckBackend => ({
-  load: async () => ({ revision: 0, deck: createDefaultDeck(), exists: true }),
+  load: async () => ({ revision: 0, deck: createDefaultDeck(), trash: [], exists: true }),
   save,
 });
 
@@ -47,7 +49,7 @@ describe("native deck errors", () => {
     await expect(nativeDeckLoad()).rejects.toMatchObject({
       kind: "unavailable",
     });
-    await expect(nativeDeckSave(0, createDefaultDeck())).rejects.toMatchObject({
+    await expect(nativeDeckSave(0, createDefaultDeck(), [])).rejects.toMatchObject({
       kind: "unavailable",
     });
   });
@@ -55,7 +57,7 @@ describe("native deck errors", () => {
 
 describe("native v3 snapshot boundary", () => {
   it("accepts only validated v3 decks from Rust, which owns native v1/v2 migration", () => {
-    const snapshot = { revision: 3, exists: true, deck: createDefaultDeck() };
+    const snapshot = { revision: 3, exists: true, deck: createDefaultDeck(), trash: [] };
     expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
     for (const bad of [null, { ...snapshot, revision: -1 }, { ...snapshot, exists: "true" },
       { ...snapshot, deck: { ...snapshot.deck, version: 1 } }, { ...snapshot, deck: { ...snapshot.deck, extra: true } }]) {
@@ -66,10 +68,10 @@ describe("native v3 snapshot boundary", () => {
 
 describe("native deck save queue", () => {
   it("serializes saves and writes only the latest pending deck", async () => {
-    const calls: { expectedRevision: number; deck: Deck }[] = [];
+    const calls: { expectedRevision: number; deck: Deck; trash: unknown[] }[] = [];
     const gates: ReturnType<typeof deferred<DeckSnapshot>>[] = [];
-    const backend = existingBackend((expectedRevision, deck) => {
-      calls.push({ expectedRevision, deck });
+    const backend = existingBackend((expectedRevision, deck, trash) => {
+      calls.push({ expectedRevision, deck, trash });
       const gate = deferred<DeckSnapshot>();
       gates.push(gate);
       return gate.promise;
@@ -88,12 +90,12 @@ describe("native deck save queue", () => {
     expect(calls).toHaveLength(1);
     expect(statuses.at(-1)).toEqual({ phase: "saving" });
 
-    gates[0].resolve({ revision: 1, deck: first, exists: true });
+    gates[0].resolve({ revision: 1, deck: first, trash: [], exists: true });
     await tick();
     expect(calls).toHaveLength(2);
-    expect(calls[1]).toEqual({ expectedRevision: 1, deck: third });
+    expect(calls[1]).toEqual({ expectedRevision: 1, deck: third, trash: [] });
 
-    gates[1].resolve({ revision: 2, deck: third, exists: true });
+    gates[1].resolve({ revision: 2, deck: third, trash: [], exists: true });
     await tick();
     expect(calls).toHaveLength(2);
     expect(statuses.at(-1)).toEqual({ phase: "saved", revision: 2 });
@@ -101,13 +103,14 @@ describe("native deck save queue", () => {
   });
 
   it("initializes a missing native deck through a revision-0 save", async () => {
-    const save = vi.fn(async (expectedRevision: number, deck: Deck) => ({
+    const save = vi.fn(async (expectedRevision: number, deck: Deck, trash: TrashEntry[]) => ({
       revision: expectedRevision + 1,
       deck,
+      trash,
       exists: true,
     }));
     const backend: DeckBackend = {
-      load: async () => ({ revision: 0, deck: createDefaultDeck(), exists: false }),
+      load: async () => ({ revision: 0, deck: createDefaultDeck(), trash: [], exists: false }),
       save,
     };
     const statuses: DeckSyncStatus[] = [];
@@ -115,7 +118,7 @@ describe("native deck save queue", () => {
 
     sync.update(createDefaultDeck());
     await tick();
-    expect(save).toHaveBeenCalledWith(0, createDefaultDeck());
+    expect(save).toHaveBeenCalledWith(0, createDefaultDeck(), []);
     expect(sync.currentRevision).toBe(1);
     expect(statuses.at(-1)).toEqual({ phase: "saved", revision: 1 });
   });
@@ -140,23 +143,24 @@ describe("native deck save queue", () => {
 
   it("keeps the revision after a failed save and retries on the next edit", async () => {
     let attempts = 0;
-    const save = vi.fn(async (expectedRevision: number, deck: Deck) => {
+    const save = vi.fn(async (expectedRevision: number, deck: Deck, trash: TrashEntry[]) => {
       attempts += 1;
       if (attempts === 1) throw { kind: "io", message: "disk full" };
-      return { revision: expectedRevision + 1, deck, exists: true };
+      return { revision: expectedRevision + 1, deck, trash, exists: true };
     });
     const statuses: DeckSyncStatus[] = [];
     const sync = new DeckSync(existingBackend(save), (s) => statuses.push(s), 5);
 
-    sync.update(createDefaultDeck());
+    const trash = deriveTrash(createDefaultDeck(), removeControl(createDefaultDeck(), "page_stream", "ctl_mic"), [], 1234);
+    sync.update(createDefaultDeck(), trash);
     await tick();
     expect(statuses.at(-1)).toMatchObject({ phase: "error" });
     expect(sync.currentRevision).toBe(5);
 
     const next: Deck = { ...createDefaultDeck(), theme: "light" };
-    sync.update(next);
+    sync.update(next, trash);
     await tick();
-    expect(save).toHaveBeenLastCalledWith(5, next);
+    expect(save).toHaveBeenLastCalledWith(5, next, trash);
     expect(sync.currentRevision).toBe(6);
   });
 });
@@ -185,5 +189,40 @@ describe("shared deck fixture", () => {
 
     // Round-trips through JSON unchanged, so it can be re-parsed by any reader.
     expect(isDeck(JSON.parse(JSON.stringify(deck)))).toBe(true);
+  });
+});
+
+describe("native trash boundary", () => {
+  const trash = (() => {
+    const deck = createDefaultDeck();
+    return deriveTrash(deck, removeControl(deck, "page_stream", "ctl_mic"), [], 1234);
+  })();
+
+  it("accepts validated trash and rejects malformed or missing trash", () => {
+    const snapshot = { revision: 3, exists: true, deck: createDefaultDeck(), trash };
+    expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
+    expect(parseDeckSnapshot({ ...snapshot, trash: [] })).toEqual({ ...snapshot, trash: [] });
+    for (const bad of [
+      { ...snapshot, trash: undefined },
+      { ...snapshot, trash: [{ kind: "control" }] },
+      { ...snapshot, trash: [...trash, ...trash] },
+    ]) {
+      expect(() => parseDeckSnapshot(bad)).toThrow();
+    }
+  });
+
+  it("saves deck and trash through one CAS write", async () => {
+    const save = vi.fn(async (expectedRevision: number, deck: Deck, savedTrash: TrashEntry[]) => ({
+      revision: expectedRevision + 1, deck, trash: savedTrash, exists: true,
+    }));
+    const backend: DeckBackend = {
+      load: async () => ({ revision: 0, deck: createDefaultDeck(), trash: [], exists: true }),
+      save,
+    };
+    const sync = new DeckSync(backend, () => {}, 0);
+    const deck = removeControl(createDefaultDeck(), "page_stream", "ctl_mic");
+    sync.update(deck, trash);
+    await tick();
+    expect(save).toHaveBeenCalledWith(0, deck, trash);
   });
 });
