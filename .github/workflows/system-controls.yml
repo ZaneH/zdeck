@@ -40,7 +40,9 @@ jobs:
         run: |
           python -m pip wheel --no-deps --wheel-dir wheelhouse .
           python -B -c "import glob,sys,unittest; sys.path.insert(0, glob.glob('wheelhouse/*.whl')[0]); suite=unittest.defaultTestLoader.discover('tests'); result=unittest.TextTestRunner(verbosity=2).run(suite); sys.exit(not result.wasSuccessful())"
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
+        with:
+          toolchain: '1.90.0'
       - name: Standalone schema tests (no desktop dependencies)
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p zdeck-schema
       - name: Standalone OBS fake-peer tests (no desktop dependencies)

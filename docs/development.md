@@ -75,7 +75,8 @@ Set the Argos project's reference/default branch to `dev` and run the workflow o
 
 ## Native development
 
-Install the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust. The checked-in Tauri bundle targets are `deb` and `appimage`; neither packaging nor macOS/Windows installers are validated. A successful no-bundle build is not a release installer.
+Install the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust **1.90+** (the locked Tauri core's minimum; desktop CI is pinned to 1.90.0).
+Local release-preparation checks used 1.100.0, not proof of minimum-version compilation. The checked-in Tauri bundle targets are `deb` and `appimage`; neither packaging nor macOS/Windows installers are validated. A successful no-bundle build is not a release installer.
 
 ### Pinned Linux/Nix shell
 

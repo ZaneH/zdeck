@@ -9,7 +9,7 @@ description = "Deck local editor and phone preview"
 authors = ["Zane Helton"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.89"
+rust-version = "1.90"
 
 [lib]
 name = "deck_lib"
@@ -27,9 +27,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-# Dialog 2.8 requires Rust 1.90; keep the declared 1.89 MSRV and the locked plugin dependencies.
+# Keep reviewed plugin versions; the locked Tauri core requires Rust 1.90.
 tauri-plugin-dialog = "=2.7.0"
-# Stay on Tauri 2 plugins compatible with the declared Rust 1.89 MSRV.
+# Upgrade plugins deliberately, independently of the core MSRV correction.
 tauri-plugin-opener = "=2.5.3"
 tauri-plugin-deep-link = "=2.4.5"
 tauri-plugin-single-instance = { version = "=2.3.6", features = ["deep-link"] }
