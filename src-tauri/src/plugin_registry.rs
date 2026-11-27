@@ -5,6 +5,16 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+// Independently shipped public trust root; never discovered from the registry server.
+const DEFAULT_REGISTRY_URL: &str = "https://zreg.zaaane.com/";
+const DEFAULT_PUBLIC_KEYS: &str = include_str!("../registry-public-keys.json");
+
+fn resolver_configuration<'a>(endpoint: Option<&'a str>, keys: Option<&'a str>) -> (Option<&'a str>, Option<&'a str>) {
+    // A partial custom override must not silently borrow the official endpoint or keys.
+    if endpoint.is_none() && keys.is_none() { (Some(DEFAULT_REGISTRY_URL), Some(DEFAULT_PUBLIC_KEYS)) }
+    else { (endpoint, keys) }
+}
+
 const UNCONFIGURED: &str = "Registry website not configured for this build.";
 const INVALID_WEBSITE: &str = "Registry website configuration is invalid. Rebuild with a valid HTTPS website URL.";
 
@@ -30,7 +40,7 @@ fn website_url(value: Option<&str>, development: bool) -> Result<Url, &'static s
     Ok(url)
 }
 fn configured_website() -> Result<Url, &'static str> {
-    website_url(option_env!("ZDECK_REGISTRY_WEBSITE_URL"), cfg!(debug_assertions))
+    website_url(option_env!("ZDECK_REGISTRY_WEBSITE_URL").or(Some(DEFAULT_REGISTRY_URL)), cfg!(debug_assertions))
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +78,8 @@ pub fn plugin_registry_open_website(app: tauri::AppHandle, window: tauri::Webvie
 
 pub(crate) const RESOLUTION_UNAVAILABLE: &str = zdeck_plugin_host::registry_release::UNAVAILABLE;
 pub(crate) fn configured_resolver() -> Result<zdeck_plugin_host::registry_release::Resolver, &'static str> {
-    zdeck_plugin_host::registry_release::Resolver::configured(option_env!("ZDECK_REGISTRY_RELEASE_URL"), option_env!("ZDECK_REGISTRY_PUBLIC_KEYS"))
+    let (endpoint, keys) = resolver_configuration(option_env!("ZDECK_REGISTRY_RELEASE_URL"), option_env!("ZDECK_REGISTRY_PUBLIC_KEYS"));
+    zdeck_plugin_host::registry_release::Resolver::configured(endpoint, keys)
 }
 const INVALID_REQUEST: &str = "This plugin install link is invalid. Use a link containing only a plugin ID and exact version. Nothing was downloaded or installed.";
 const REQUEST_LIMIT: &str = "Too many different plugin install links in this session. Close and reopen zDeck before reviewing more links. Nothing was downloaded or installed.";
@@ -133,6 +144,25 @@ pub fn setup_links(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shipped_public_defaults_and_custom_pairs_are_validated_without_key_discovery() {
+        use zdeck_plugin_host::registry_release::Resolver;
+        let (endpoint, keys) = resolver_configuration(None, None);
+        assert_eq!(endpoint, Some("https://zreg.zaaane.com/"));
+        assert!(Resolver::configured(endpoint, keys).is_ok());
+        assert!(website_url(endpoint, false).is_ok());
+        for (endpoint, keys) in [(Some("https://custom.example.test/"), None), (None, Some(DEFAULT_PUBLIC_KEYS)), (Some(""), Some(""))] {
+            let (endpoint, keys) = resolver_configuration(endpoint, keys);
+            assert!(Resolver::configured(endpoint, keys).is_err());
+        }
+        let (endpoint, keys) = resolver_configuration(Some("https://custom.example.test/"), Some(DEFAULT_PUBLIC_KEYS));
+        assert_eq!(endpoint, Some("https://custom.example.test/"));
+        assert!(Resolver::configured(endpoint, keys).is_ok());
+        let build = include_str!("../build.rs");
+        for variable in ["ZDECK_REGISTRY_RELEASE_URL", "ZDECK_REGISTRY_PUBLIC_KEYS", "ZDECK_REGISTRY_WEBSITE_URL"] {
+            assert!(build.contains(&format!("cargo:rerun-if-env-changed={variable}")));
+        }
+    }
     #[test]
     fn website_is_explicit_validated_and_preview_http_is_debug_only() {
         assert_eq!(website_url(None, false), Err(UNCONFIGURED));

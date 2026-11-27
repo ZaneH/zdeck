@@ -1,13 +1,16 @@
 # Signed registry releases v1 (unreleased)
 
-This contract is implemented, but **no production endpoint, trust keys or published releases are
-configured in this checkout**. The website preview seeds remain unavailable. A signature is
+This checkout ships the public default `https://zreg.zaaane.com/` and reviewed public key
+`registry-2026-01` in `src-tauri/registry-public-keys.json`. No signed release is published by this
+change; the website remains `ready:false` and its seeds unavailable. The private key was not
+accessed. A configured resolver is not evidence of native release readiness. A signature is
 registry-key provenance/integrity, not a safety review, publisher identity, sandbox or execution
 permission. Local unsigned imports are unchanged. Updates/replacements are still out of scope.
 
 ## Build-owned bootstrap
 
-Set these Rust compile-time variables deliberately when building the desktop:
+Normal builds need no registry environment variables. To build for a custom registry, deliberately
+set these Rust compile-time overrides (not `VITE_*`):
 
 - `ZDECK_REGISTRY_RELEASE_URL`: an owned public HTTPS base ending in `/`, without credentials,
   query, fragment or a non-443 port. Lookup is exactly
@@ -16,10 +19,15 @@ Set these Rust compile-time variables deliberately when building the desktop:
   lowercase letters/digits/hyphens, 1–64 bytes. Unknown fields are rejected.
 - `ZDECK_REGISTRY_WEBSITE_URL`: separate, optional external catalogue website (see `zdx.md`).
 
-There are intentionally no default values, runtime URL/key preferences, renderer configuration,
-key discovery endpoint or private-network debug bypass for release traffic. Missing/invalid trust
-configuration produces a visible unavailable notice only when a link is requested; it never
-blocks launch. Do not put a private signing key in any of these variables or in a Vite variable.
+If neither release URL nor keys override is set, use the independently checked-in defaults.
+If either is set, **both must be supplied**; partial/empty/invalid overrides fail closed without
+borrowing official trust. Setting both to empty disables the resolver. The separate website
+override defaults to the same public site; set it explicitly for a custom catalogue, or empty to
+disable the menu item. Cargo rebuilds on all three environment changes and public-key file edits.
+There are no runtime URL/key preferences, renderer trust configuration, key discovery endpoint or
+private-network debug bypass. Invalid trust configuration produces a visible unavailable notice
+only on request, never blocks launch. Existing TLS, public DNS pinning, no-proxy/no-redirect and
+signature gates are unchanged. Do not put a private signing key in any of these variables or in a Vite variable.
 
 Distribute reviewed public keys independently in the desktop build, after an out-of-band
 maintainer review of key ownership/fingerprint. Never bootstrap trust from the website/lookup

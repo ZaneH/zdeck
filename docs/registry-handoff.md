@@ -20,9 +20,9 @@ URLs, executable fields, ranges/prereleases and malformed encoding fail. At most
 native callback are examined. Up to 128 identities are retained for the entire session without
 eviction (including canceled/rejected links); invalid and overflow notices are bounded.
 
-The signed resolver is now implemented. **This checkout still has no configured endpoint/public
-keys or genuine published release**, so its default behavior remains an unavailable notice, not
-a download. See [registry-releases.md](registry-releases.md) for the exact Ed25519 payload,
+The signed resolver now ships an independently compiled public endpoint/key default for
+`https://zreg.zaaane.com/`; no genuine signed release is published by this change. Lookup still
+requires explicit user intent, and absent metadata fails without downloading an archive. See [registry-releases.md](registry-releases.md) for the exact Ed25519 payload,
 build-owned key bootstrap/rotation/revocation, fixed lookup paths, public-DNS-pinned HTTPS,
 byte/time limits, content types and isolated smoke commands.
 
@@ -51,8 +51,10 @@ The separate `zdeck-registry` repo now has external-key signing/verification too
 contract gate. A decorative signature field no longer enables anything. A published record needs
 a verified local envelope matching its source/compatibility facts, and the reviewed website gate
 must deliberately match the distributed app's endpoint/public keys. The preview Spotify and
-in-development Home Assistant entries remain unchanged and un-installable. There is no canonical
-deployed website, artifact store, real signing key or remote in these changes.
+in-development Home Assistant entries remain un-installable with `ready:false`. Read-only live
+checks on 2026-11-27 confirmed the public page/health and release-path 404 policy, not a published
+artifact or OS handler. The first HA archive is an unsigned local candidate pending native QA and
+deliberate offline signing/publication; no private key was accessed.
 
 ## Native registration/release gates
 
@@ -75,7 +77,7 @@ No user plugins/settings, credentials, integrations, OS associations or remote d
 exercised. A native development binary is built but not launched against the user's live plugin
 directory. Browser evidence must never be reported as three-OS native parity.
 
-## Verification of this resolver milestone
+## Historical verification of the resolver milestone
 
 Executed on the macOS development host:
 
@@ -99,8 +101,8 @@ Executed on the macOS development host:
   These remain local unsigned artifacts, not registry releases.
 
 Storybook retains a large-chunk advisory and Node a `module.register()` deprecation warning.
-Dependency metadata also exposes an **inherited** MSRV mismatch: the pre-existing locked Tauri
-2.12.7 family/muda/tray-icon declares Rust 1.90 despite this project's `rust-version = 1.89`.
-The new resolver dependencies do not add a >1.89 declaration. Builds used the local Rust 1.100.0;
-Rust 1.89 and Windows/Linux compilation/packaging were not checked. Resolving that existing
-Tauri/MSRV mismatch is a separate release gate, not evidence of supported 1.89 compilation.
+The 2026-11-27 preparation corrects the desktop manifest's inherited 1.89 mismatch to **1.90**
+(required by locked Tauri 2.12.7 family/muda/tray-icon) and pins desktop CI to 1.90.0. Standalone
+crates retain their independent declarations. Local checks use Rust 1.100.0; no local 1.90
+compiler or Windows/Linux packaging result is claimed. The newly pinned CI has not run until
+pushed/authorized; the declared minimum still requires that CI evidence.

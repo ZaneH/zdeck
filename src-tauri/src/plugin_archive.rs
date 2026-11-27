@@ -55,12 +55,12 @@ impl Inbox {
         self.pending_notice = Some(notice);
         self.flush_notice();
     }
-    fn request_link(&mut self, link: &str) -> bool {
+    fn request_link(&mut self, link: &str, resolver_available: bool) -> bool {
         let Some(received) = self.requests.receive(link) else { return false; };
         match received {
             Received::Notice(notice) => self.notice(notice),
             Received::Release(request) => {
-                if crate::plugin_registry::configured_resolver().is_err() { self.notice(crate::plugin_registry::RESOLUTION_UNAVAILABLE); }
+                if !resolver_available { self.notice(crate::plugin_registry::RESOLUTION_UNAVAILABLE); }
                 else { self.queue_request(request); }
             }
         }
@@ -169,7 +169,7 @@ pub fn drop_paths(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
 // Native links supply only identity. Lookup and download each need a current native review token.
 pub fn request_link(app: &tauri::AppHandle, link: &str) {
     let state = app.state::<ArchiveInbox>();
-    let handled = state.0.lock().unwrap_or_else(|p| p.into_inner()).request_link(link);
+    let handled = state.0.lock().unwrap_or_else(|p| p.into_inner()).request_link(link, crate::plugin_registry::configured_resolver().is_ok());
     if handled { changed(app); let _ = crate::tray::open(app, false); }
 }
 pub fn request_notice(app: &tauri::AppHandle, notice: &'static str) {
@@ -287,22 +287,36 @@ mod tests {
     fn links_never_authorize_install_and_cancellation_suppresses_duplicate_notifications() {
         let mut inbox = Inbox::default();
         let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
-        assert!(inbox.request_link(link));
+        assert!(inbox.request_link(link, false));
         assert_eq!(inbox.view.error.as_deref(), Some(crate::plugin_registry::RESOLUTION_UNAVAILABLE));
         assert!(inbox.view.review.is_none() && inbox.prepared.is_none() && !inbox.view.busy);
         assert!(inbox.take("forged-review").is_err());
         inbox.cancel(None).unwrap();
-        assert!(!inbox.request_link(link));
+        assert!(!inbox.request_link(link, false));
         assert!(inbox.view.error.is_none());
         // Startup and running callbacks canonicalize percent encodings into the same identity.
-        assert!(!inbox.request_link("zdeck://plugins/install?version=1.2.3&id=%66ixture"));
+        assert!(!inbox.request_link("zdeck://plugins/install?version=1.2.3&id=%66ixture", false));
         assert_eq!(inbox.view.installed_epoch, 0);
+    }
+    #[test]
+    fn configured_link_only_creates_identity_intent_never_archive_authorization() {
+        let mut inbox = Inbox::default();
+        let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
+        assert!(inbox.request_link(link, true));
+        let review = inbox.view.registry.as_ref().unwrap().clone();
+        assert_eq!(review.id, "fixture");
+        assert!(review.release.is_none() && review.key_id.is_none());
+        assert!(inbox.view.error.is_none() && inbox.view.review.is_none() && inbox.prepared.is_none());
+        assert!(inbox.take(&review.review_id).is_err());
+        inbox.cancel(Some(&review.review_id)).unwrap();
+        assert!(!inbox.request_link(link, true));
+        assert!(inbox.view.registry.is_none());
     }
     #[test]
     fn link_notice_waits_for_local_picker_review_and_errors_without_replacing_authorization() {
         let mut inbox = Inbox::default();
         inbox.begin().unwrap();
-        assert!(inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3"));
+        assert!(inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3", false));
         assert!(inbox.view.error.is_none() && inbox.view.busy);
         assert!(inbox.cancel(None).is_err());
         // A synthetic collision review stands in for the host's private prepared fixture.
@@ -313,7 +327,7 @@ mod tests {
         inbox.flush_notice();
         assert!(inbox.view.error.is_none());
         assert!(inbox.view.review.as_ref().unwrap().collision);
-        assert!(!inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3"));
+        assert!(!inbox.request_link("zdeck://plugins/install?id=fixture&version=1.2.3", false));
         assert_eq!(inbox.view.review.as_ref().unwrap().review_id, review.review_id);
         assert!(inbox.cancel(Some(&"forged".into())).is_err());
         inbox.cancel(Some(&review.review_id)).unwrap();
@@ -321,7 +335,7 @@ mod tests {
         inbox.cancel(None).unwrap();
         assert!(inbox.view.error.is_none());
         inbox.begin().unwrap();
-        inbox.request_link("zdeck://plugins/install?id=another&version=1.2.3");
+        inbox.request_link("zdeck://plugins/install?id=another&version=1.2.3", false);
         inbox.finish(Err("Fixture archive failed.".into()));
         assert_eq!(inbox.view.error.as_deref(), Some("Fixture archive failed."));
         inbox.cancel(None).unwrap();

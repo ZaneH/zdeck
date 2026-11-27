@@ -3,7 +3,8 @@
 Local imports remain **unsigned custom archives**. The native `zdeck://plugins/install` path can
 also resolve an exact signed release and explicitly download its bounded HTTPS archive into this
 same review/installer, but only with independently configured build-owned public keys and endpoint.
-Neither is configured by default; preview registry entries remain unavailable. See the
+The public endpoint/key defaults are compiled into new desktop builds, but no signed release or
+native QA readiness is implied; preview registry entries remain unavailable. See the
 [signed contract and isolated smoke](registry-releases.md) and [native handoff gates](registry-handoff.md).
 No publisher identity verification, update/replacement flow, bundled runtimes or sandbox is implied.
 
@@ -33,13 +34,14 @@ uninstalling if that is intended, and revoke the credential at its provider sepa
 The right-aligned **Install from…** shared menu sits directly above the installed plugin list.
 **Local .zdx** opens the existing native picker; **Open plugin registry** opens a fixed, build-owned
 website in the external default browser. It never navigates the privileged webview. There is no
-canonical deployed registry URL in either checked-in project configuration as of this milestone.
-The second option stays keyboard-reachable but unavailable, with an inline explanation, until
-configured. There is no end-user URL setting, arbitrary-open-URL IPC, or website privilege grant.
+runtime-editable registry URL. New native builds default to `https://zreg.zaaane.com/` using
+independently shipped public trust; opening it does not imply any release is installable.
+An explicitly empty/invalid website override leaves the option keyboard-reachable but unavailable
+with an inline explanation. There is no end-user URL setting, arbitrary-open-URL IPC, or website privilege grant.
 
 Maintainers can set `ZDECK_REGISTRY_WEBSITE_URL=https://<actual-owned-website>/` when building the
 native app. This is a Rust compile-time variable (not `VITE_*`); changing it rebuilds the binary.
-Missing/invalid configuration disables only that option, never application launch. URLs must be
+An explicitly empty/invalid override disables only that option, never application launch. URLs must be
 bounded ASCII HTTPS without credentials, whitespace, query or fragment. Debug builds additionally
 permit HTTP on exact `localhost`, `127.0.0.1` or `[::1]` for local preview; release builds refuse
 loopback. For example, start the separate registry checkout with `npm run dev` (port 1430), then:

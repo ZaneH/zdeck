@@ -53,6 +53,45 @@ async fn signed_lookup_download_review_install_is_isolated_disabled_untrusted_an
     assert_eq!(http.calls.lock().unwrap()[0], ("https://registry.example.test/v1/releases/fixture/1.2.3.json".into(), METADATA_LIMIT, "application/json".into()));
     assert_eq!(http.calls.lock().unwrap()[1].1, f.bytes.len());
 }
+#[tokio::test]
+#[ignore = "Set ZDECK_ZDX_ARTIFACT for fixture-key crypto/install verification of real archive bytes"]
+async fn generated_artifact_signed_with_fixture_key_installs_without_execution() {
+    let path = std::path::PathBuf::from(std::env::var_os("ZDECK_ZDX_ARTIFACT").expect("artifact path"));
+    assert!(std::fs::metadata(&path).unwrap().len() <= ARCHIVE_LIMIT as u64);
+    let bytes = std::fs::read(&path).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("config/plugins");
+    let install = PluginInstall::new(directory.clone(), vec![]).unwrap();
+    let inspected = install.inspect_archive(path).await.unwrap();
+    let review = inspected.review().clone();
+    drop(inspected);
+    let mut f = Fixture::new();
+    f.payload["id"] = json!(review.id);
+    f.payload["version"] = json!(review.version);
+    f.payload["artifact"]["bytes"] = json!(bytes.len());
+    f.payload["artifact"]["sha256"] = json!(format!("{:x}", Sha256::digest(&bytes)));
+    f.payload["compatibility"]["runtime"] = json!(review.runtime);
+    f.payload["compatibility"]["minimum"] = json!(if matches!(review.runtime, zdeck_plugin_host::plugin_install::PluginRuntime::Node) { "22.18.0" } else { "3.10.0" });
+    // All source/platform facts here are fictional test assertions, never release evidence.
+    let http = Fake::new(vec![Ok(f.sign(&f.payload)), Ok(bytes)]);
+    let verified = f.resolver.lookup_with(&http, &review.id, &review.version).await.unwrap();
+    assert!(!directory.exists());
+    let prepared = verified.download_with(&http, &install).await.unwrap();
+    assert_eq!(prepared.review().identity, review.identity);
+    let token = prepared.review().review_id.clone();
+    let registry = PluginRegistry::default();
+    install.install_archive(&registry, prepared, &token).await.unwrap();
+    assert!(registry.snapshots().await.is_empty());
+    let restarted = PluginInstall::new(directory, vec![]).unwrap();
+    restarted.restore(&registry).await.unwrap();
+    assert!(registry.snapshots().await.is_empty());
+    let catalog = restarted.catalog().await.unwrap();
+    assert_eq!(catalog.plugins.len(), 1);
+    assert!(!catalog.plugins[0].trusted);
+    let preferences: Value = serde_json::from_slice(&std::fs::read(temp.path().join("config/plugin-trust.v1.json")).unwrap()).unwrap();
+    assert_eq!(preferences["enabled"], json!({}));
+    println!("fixture-key isolated archive: {} {} SHA-256 {}", review.id, review.version, review.archive_sha256);
+}
 #[test]
 fn node_signed_public_only_interop_fixture_verifies_in_rust() {
     let f: Value = serde_json::from_str(include_str!("fixtures/ed25519-public-fixture.json")).unwrap();
