@@ -281,8 +281,11 @@ const clickText = (selector, text) =>
 // Native value setter so React's value tracker sees the change for controlled inputs.
 const setValue = (selector, value) =>
   `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); el.blur(); return true; })()`;
-const setSelect = (selector, value) =>
-  `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`;
+async function chooseDropdown(page, selector, text) {
+  await page.eval(click(`${selector} .dropdown-trigger`));
+  await page.waitFor(`!!document.querySelector(${JSON.stringify(`${selector} .dropdown-menu`)})`);
+  await page.eval(clickText(`${selector} .dropdown-menu [role^="menuitem"]`, text));
+}
 // Real input avoids synthetic change/blur racing submission in controlled rename forms.
 async function typeInput(page, selector, text) {
   if (!await page.waitFor(`!!document.querySelector(${JSON.stringify(selector)})`)) throw new Error(`Input did not mount: ${selector}`);
@@ -463,14 +466,16 @@ try {
   check("desktop inspector sits beside the control grid", await editor.eval("(() => { const grid = document.querySelector('.control-grid').getBoundingClientRect(); const dock = document.querySelector('.inspector-dock').getBoundingClientRect(); return dock.left >= grid.right - 1 && dock.top < grid.bottom; })()"));
   check("control keys use 7px corners", await editor.eval("[...document.querySelectorAll('.control-tile')].every(el => getComputedStyle(el).borderRadius === '7px')"));
   check("control keys keep a shallow physical depth", await editor.eval("(() => { const shadow = getComputedStyle(document.querySelector('.control-tile')).boxShadow; return shadow.includes('0px 3px 0px') && !shadow.includes('0px 3px 0px 4px'); })()"), await editor.eval("getComputedStyle(document.querySelector('.control-tile')).boxShadow"));
-  check("page switcher lists the deck pages", await editor.eval("document.querySelectorAll('#page-switcher option').length === 2"));
+  await editor.eval(click('.page-panel .dropdown-trigger'));
+  check("page switcher lists the deck pages", await editor.waitFor("document.querySelectorAll('.page-panel .dropdown-menu [role=menuitemradio]').length === 2"));
+  await pressKey(editor, 'Escape', 'Escape', 27);
   await editor.screenshot("/tmp/deck-design-desktop.png");
   await editor.captureArtifacts("editor-desktop");
 
   // page switcher drives the active page
-  await editor.eval(setSelect("#page-switcher", "page_media"));
+  await chooseDropdown(editor, '.page-panel .dropdown', 'Media');
   check("page switcher changes the active page", await editor.waitFor("document.querySelector('#page-title').textContent === 'Media'"));
-  await editor.eval(setSelect("#page-switcher", "page_stream"));
+  await chooseDropdown(editor, '.page-panel .dropdown', 'Stream');
   await editor.waitFor("document.querySelector('#page-title').textContent === 'Stream'");
 
   // ------------------------------------------------------------ action picker dialog
@@ -1271,12 +1276,12 @@ try {
   check('two plugins enable independently with no automatic state read or execute', await admin.waitFor("document.querySelector('[data-plugin-id=spotify] .plugin-row-actions > button').textContent === 'Disable'") && await admin.eval("!window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute') && window.__pluginCalls.filter(c=>c.command==='plugin_enable').map(c=>c.args.pluginId).sort().join(',')==='other,spotify'"));
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   check('catalog refresh preserves both enabled sessions', await admin.waitFor("!document.querySelector('.plugin-settings .settings-actions button').disabled") && await admin.eval("[...document.querySelectorAll('.plugin-row-actions > button')].filter(b=>b.textContent==='Disable').length===2"));
-  await admin.eval("document.querySelector('[data-plugin-id=broken] .plugin-menu summary').focus()");
+  await admin.eval("document.querySelector('[data-plugin-id=broken] .plugin-menu-trigger').focus()");
   await pressKey(admin, 'Enter', 'Enter', 13, '\r');
-  check('invalid SDK row has a keyboard-accessible diagnostics menu', await admin.waitFor("document.querySelector('[data-plugin-id=broken] .plugin-menu').open"));
+  check('invalid SDK row has a keyboard-accessible diagnostics menu', await admin.waitFor("document.querySelector('[data-plugin-id=broken] .plugin-menu-trigger').getAttribute('aria-expanded') === 'true'"));
   await admin.eval(clickText(`${row('broken')} button`, 'Diagnostics'));
   check('diagnostics are safe, per-row, and never launch/read/execute plugin code', await admin.waitFor("!!document.querySelector('[data-plugin-id=broken] .plugin-diagnostics')") && await admin.eval("document.querySelector('[data-plugin-id=broken]').textContent.includes('complete packaged folder') && !document.querySelector('[data-plugin-id=broken]').textContent.includes('raw secret') && !window.__adminCalls.includes('plugin_state') && !window.__adminCalls.includes('plugin_execute')"));
-  await admin.eval(click(`${row('broken')} .plugin-menu summary`));
+  await admin.eval(click(`${row('broken')} .plugin-menu-trigger`));
   await admin.eval(clickText(`${row('broken')} button`, 'Uninstall…'));
   check('uninstall requires confirmation and explains recoverable backup', await admin.waitFor("document.querySelector('[data-plugin-id=broken] .plugin-confirm')?.textContent.includes('plugin-backups')") && await admin.eval("!window.__adminCalls.includes('plugin_uninstall')"));
   await admin.eval(clickText(`${row('broken')} button`, 'Cancel'));
@@ -1284,7 +1289,7 @@ try {
   await admin.eval("window.__holdCatalog = true");
   await admin.eval(clickText('.plugin-settings button', 'Refresh'));
   await admin.waitFor("!!window.__finishCatalog");
-  await admin.eval(click(`${row('broken')} .plugin-menu summary`));
+  await admin.eval(click(`${row('broken')} .plugin-menu-trigger`));
   await admin.eval(clickText(`${row('broken')} button`, 'Uninstall…'));
   await admin.eval(clickText(`${row('broken')} button`, 'Confirm uninstall'));
   check('confirmed fake uninstall removes only its row and preserves enabled plugins', await admin.waitFor("!document.querySelector('[data-plugin-id=broken]')") && await admin.eval("window.__removedPlugins.join(',')==='broken' && [...document.querySelectorAll('.plugin-row-actions > button')].filter(b=>b.textContent==='Disable').length===2"));
@@ -1515,7 +1520,7 @@ try {
   await admin.eval("window.__holdDesktop = false; window.__finishDesktop()");
   check('confirmed actions keep the footer quiet', await admin.waitFor("!document.querySelector('.control-tile button').disabled && !document.querySelector('.native-feedback') && document.querySelector('.workspace-feedback').textContent === '' && !!document.querySelector('.footer-trigger.is-armed')"));
   await admin.eval("window.__holdSave = true");
-  await admin.eval(setSelect('#page-switcher', 'page_media'));
+  await chooseDropdown(admin, '.page-panel .dropdown', 'Media');
   check('page edits immediately disarm controls and block re-arming while saving', await admin.waitFor("!!window.__finishSave && document.querySelector('.status-footer').dataset.live === 'false' && document.querySelector('.status-footer').dataset.ready === 'false'"));
   check('routine native saves do not flash a saving or readiness message', await admin.eval("!document.querySelector('.desktop-mode-note') && !document.querySelector('.preview-feedback') && !document.querySelector('.workspace-feedback').textContent.includes('Saving')"));
   await admin.eval("window.__holdSave = false; window.__finishSave()");
@@ -1598,7 +1603,9 @@ try {
   await manage.waitFor("!!document.querySelector('.setup-shell')");
   await manage.eval(clickText('.setup-header .button', 'Skip setup'));
   await manage.waitFor("!!document.querySelector('.app-shell')");
-  const initialPages = await manage.eval("document.querySelectorAll('#page-switcher option').length");
+  await manage.eval(click('.page-panel .dropdown-trigger'));
+  const initialPages = await manage.eval("document.querySelectorAll('.page-panel .dropdown-menu [role=menuitemradio]').length");
+  await pressKey(manage, 'Escape', 'Escape', 27);
   check("isolated deck starts with two pages", initialPages === 2, `pages=${initialPages}`);
   await manage.eval("document.querySelector('[aria-label=\"Manage pages\"]').focus()");
   await manage.eval(click('[aria-label="Manage pages"]'));
@@ -1632,7 +1639,9 @@ try {
 
   await manage.eval(click('.page-dialog .add-page'));
   check("adding a page closes the manager", await manage.waitFor("!document.querySelector('.page-dialog').open"));
-  check("page add increases the switcher list", await manage.eval(`document.querySelectorAll('#page-switcher option').length === ${initialPages + 1}`));
+  await manage.eval(click('.page-panel .dropdown-trigger'));
+  check("page add increases the switcher list", await manage.waitFor(`document.querySelectorAll('.page-panel .dropdown-menu [role=menuitemradio]').length === ${initialPages + 1}`));
+  await pressKey(manage, 'Escape', 'Escape', 27);
   check("empty page offers the first-control slot", await manage.eval("!!document.querySelector('.empty-key')"));
   await manage.eval(click('.empty-key'));
   check("empty-key opens the action picker", await manage.eval("document.querySelector('.action-library').open"));
@@ -1663,7 +1672,7 @@ try {
   // Keep the original selected control while choosing a different Add target.
   await manage.eval(click('.control-tile .tile-primary'));
   await manage.eval(click('[aria-label="Add section"]'));
-  check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('#section-target').selectedOptions[0]?.textContent === 'Section 2'"));
+  check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('.section-panel .dropdown-trigger')?.getAttribute('aria-label') === 'Section: Section 2'"));
   await manage.eval(click('.add-control'));
   await manage.eval(clickText('.action-library .action-row', 'Volume slider'));
   check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
@@ -1685,13 +1694,12 @@ try {
   await pressKey(manage, 'Escape', 'Escape', 27);
   check('Escape cancels an inline section rename', await manage.waitFor("document.querySelector('.deck-section:nth-child(2) .section-name-input').value === 'Audio' && !document.querySelector('.deck-section:nth-child(2) .section-error')"));
 
-  check('section appearance reuses the shared text dropdown without decorative icons', await manage.eval("(() => { const triggers = [...document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown-trigger')]; return triggers.length === 2 && triggers.every((trigger) => trigger.querySelectorAll('svg').length === 1 && !trigger.querySelector('.lucide-moon, .lucide-sun, .accent-swatch')); })()"));
-  await manage.eval(click('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-trigger'));
-  check('theme dropdown offers inherit, dark and light choices', await manage.waitFor("document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 3"));
-  await manage.eval(clickText('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
-  await manage.eval(click('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-trigger'));
-  check('accent dropdown offers inherit plus every accent', await manage.waitFor("document.querySelectorAll('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]').length === 6"));
-  await manage.eval(clickText('.deck-section:nth-child(2) .section-actions .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]', 'Mint'));
+  check('section appearance uses one cogwheel settings menu', await manage.eval("(() => { const trigger = document.querySelector('.deck-section:nth-child(2) .section-actions .section-settings-trigger'); return !!trigger && trigger.querySelectorAll('svg').length === 1 && !document.querySelector('.deck-section:nth-child(2) .section-actions .dropdown'); })()"));
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
+  check('section settings menu shows the control count and theme choices', await manage.waitFor("document.querySelector('.section-settings-menu')?.textContent.includes('1 control') && document.querySelectorAll('.section-settings-menu [role=menuitemradio]').length === 9"));
+  await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
+  await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Mint'));
   check('section appearance applies to its controls', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); return s.dataset.theme === 'light' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7'; })()"));
 
   await manage.eval("document.querySelector('.deck-section:nth-child(2) .section-drag').focus()");
@@ -1718,11 +1726,14 @@ try {
   check('populated section deletion focuses the safe Cancel action', await manage.waitFor(`document.querySelector('[aria-labelledby="remove-section-title"]')?.open && document.activeElement.textContent.trim() === 'Cancel'`));
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Cancel'));
   await manage.waitFor("!document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
-  check('cancelling section deletion retains its controls', await manage.eval("document.querySelectorAll('#section-target option').length === 2 && document.querySelectorAll('.deck-section').length === 2"));
+  await manage.eval(click('.section-panel .dropdown-trigger'));
+  check('cancelling section deletion retains its controls', await manage.waitFor("document.querySelectorAll('.section-panel .dropdown-menu [role=menuitemradio]').length === 2 && document.querySelectorAll('.deck-section').length === 2"));
+  await pressKey(manage, 'Escape', 'Escape', 27);
   await manage.eval(click('.deck-section:nth-child(2) [title="Remove section"]'));
   await manage.waitFor("document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Remove section'));
-  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('#section-target option').length === 1 && document.querySelectorAll('.deck-section').length === 1 && document.querySelector('.deck-section [title=\"Remove section\"]').disabled"));
+  await manage.eval(click('.section-panel .dropdown-trigger'));
+  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('.section-panel .dropdown-menu [role=menuitemradio]').length === 1 && document.querySelectorAll('.deck-section').length === 1 && document.querySelector('.deck-section [title=\"Remove section\"]').disabled"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: manageCtx });
 
   // ------------------------------------------------------------ cross-tab sync

@@ -23,6 +23,8 @@ interface ControlTileProps {
   selected?: boolean;
   pressed?: boolean;
   disabled?: boolean;
+  /** Disabled only while a volume gesture is in flight; keep the safety state without a dimmed flash. */
+  transientDisabled?: boolean;
   /** In-flight action; shown separately from disabled controls. */
   busy?: boolean;
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
@@ -36,7 +38,7 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh,
+  transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh,
 }: ControlTileProps) {
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState(false);
@@ -100,7 +102,7 @@ export function ControlTile({
 
   return (
     <article
-      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
+      className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${transientDisabled ? " is-transient-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
       style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}`,
         ...(numeric ? { "--control-fill": `${100 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}%` } : {}),
       } as CSSProperties}

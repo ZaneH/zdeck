@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { useExclusiveMenu } from "../lib/useExclusiveMenu";
 
 export interface DropdownOption {
   value: string;
@@ -31,6 +32,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
     setOpen(false);
     trigger.current?.focus();
   };
+  useExclusiveMenu(open, () => setOpen(false));
 
   useLayoutEffect(() => {
     if (!open || !root.current || !menu.current) return;

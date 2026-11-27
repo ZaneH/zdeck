@@ -6,6 +6,7 @@ import type { Accent, Deck, Page, Section, Theme } from "../lib/types";
 import { sectionNameError, sectionStyle } from "../lib/sections";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import { Dropdown } from "./Dropdown";
+import { SectionSettingsMenu } from "./SectionSettingsMenu";
 
 interface SectionListProps {
   deck: Deck;
@@ -111,17 +112,11 @@ export function SectionList({
   return (
     <>
       <div className="section-panel">
-        <label className="sr-only" htmlFor="section-target">Target section for new controls</label>
-        <select
-          id="section-target"
-          value={selected?.id ?? ""}
-          onChange={(event) => onSelect(event.target.value)}
-          title="Section for new controls"
-        >
-          {page.sections.map((section) => (
-            <option key={section.id} value={section.id}>{section.name}</option>
-          ))}
-        </select>
+        <Dropdown
+          label="Section" value={selected?.id ?? ""}
+          options={page.sections.map((section) => ({ value: section.id, label: section.name }))}
+          onChange={onSelect} disabled={disabled}
+        />
         <button
           type="button" className="button secondary small"
           aria-label="Add section" title="Add section after the selected one"
@@ -210,27 +205,14 @@ export function SectionList({
                     }
                   }}
                 />
-                <span className="section-count" aria-hidden="true">{section.controls.length}</span>
-
                 <div className="section-actions">
-                  <Dropdown
-                    label="Theme"
-                    value={section.theme ?? ""} disabled={disabled}
-                    options={[
-                      { value: "", label: `Inherit (${deck.theme})` },
-                      { value: "dark", label: "Dark" },
-                      { value: "light", label: "Light" },
-                    ]}
-                    onChange={(value) => onTheme(section.id, value ? value as Theme : null)}
-                  />
-                  <Dropdown
-                    label="Accent"
-                    value={section.accent ?? ""} disabled={disabled}
-                    options={[
-                      { value: "", label: `Inherit (${accentName})` },
-                      ...ACCENTS.map((accent) => ({ value: accent.value, label: accent.name })),
-                    ]}
-                    onChange={(value) => onAccent(section.id, value ? value as Accent : null)}
+                  <SectionSettingsMenu
+                    sectionName={section.name} controlCount={section.controls.length}
+                    theme={section.theme ?? null} accent={section.accent ?? null}
+                    inheritedTheme={deck.theme} inheritedAccentName={accentName}
+                    disabled={disabled}
+                    onTheme={(theme) => onTheme(section.id, theme)}
+                    onAccent={(accent) => onAccent(section.id, accent)}
                   />
                   <button
                     type="button" className="icon-button danger"

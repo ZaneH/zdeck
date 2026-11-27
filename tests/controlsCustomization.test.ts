@@ -34,6 +34,16 @@ describe("control layout and ordering", () => {
     }
   });
 
+  it("keeps a transient volume-disabled tile visibly enabled while its real disabled state remains", () => {
+    const control = createDefaultDeck().pages[0].sections[0].controls[0];
+    const html = renderToStaticMarkup(createElement(ControlTile, {
+      control, variant: "editor", volume: 50, disabled: true, transientDisabled: true,
+    }));
+    expect(html).toContain("is-disabled");
+    expect(html).toContain("is-transient-disabled");
+    expect(html).toContain("disabled");
+  });
+
   it("rejects invalid spans at both the document and patch boundaries", () => {
     const deck = createDefaultDeck();
     for (const [key, values] of [["rowSpan", [0, -1, 1.5, 25, Infinity, NaN, "2", null]], ["columnSpan", [0, -1, 1.5, 5, Infinity, NaN, "2", null]]] as const) {

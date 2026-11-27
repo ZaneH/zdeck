@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { PluginSettingsCard } from "./PluginSettingsCard";
 import { EMPTY_PLUGIN, parsePluginDiagnostics, toPluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
@@ -98,6 +98,16 @@ export const PluginErrorWithoutStripe: Story = { args: { initial: "one-failed" }
   const style = getComputedStyle(alert);
   if (style.borderLeftWidth !== "0px") throw new Error("Plugin errors must not carry a colored left stripe.");
   if (parseFloat(style.paddingTop) < 10) throw new Error("Plugin errors need readable padding.");
+}};
+export const OneMenuAtATime: Story = { args: { initial: "ready" }, play: async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  const pluginTrigger = canvas.getByRole("button", { name: "More options for Spotify" });
+  await userEvent.click(pluginTrigger);
+  await expect(canvas.getByRole("menu", { name: "More options for Spotify" })).toBeVisible();
+  await userEvent.click(canvas.getByRole("button", { name: "Install from…" }));
+  await expect(pluginTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(canvas.queryByRole("menu", { name: "More options for Spotify" })).not.toBeInTheDocument();
+  await waitFor(() => expect(canvas.getByRole("menu", { name: "Install from…" })).toBeVisible());
 }};
 
 function HomeAssistantCard({ width = 720 }: { width?: number }) {

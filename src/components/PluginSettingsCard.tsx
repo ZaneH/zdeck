@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { EMPTY_PLUGIN, pluginEntry, pluginIdentifier, runtimeForPlugin, spotifyState, pluginChoices, trustAndEnablePlugin } from "../lib/plugin";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
@@ -7,6 +7,7 @@ import type { PluginConsole } from "../lib/usePluginConsole";
 import { ActionIcon } from "./ActionIcon";
 import { PluginConnectionSettings } from "./PluginConnectionSettings";
 import { PluginInstallDropdown } from "./PluginInstallDropdown";
+import { useExclusiveMenu } from "../lib/useExclusiveMenu";
 
 export function PluginErrorNotice({ error }: { error: PluginError | null }) {
   if (!error) return null;
@@ -36,7 +37,26 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
   const [confirmation, setConfirmation] = useState<"uninstall" | null>(null);
   // Frozen when the confirmation opens so a changed package cannot be trusted silently.
   const [trustIdentity, setTrustIdentity] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRoot = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  useExclusiveMenu(menuOpen, () => setMenuOpen(false));
   useEffect(() => { setConfirmation(null); setTrustIdentity(null); dialogRef.current?.close(); }, [plugin.catalogEpoch, pluginEntry(plugin.trustEpoch, id)]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    menu.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+    const outside = (event: PointerEvent) => {
+      if (!menuRoot.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [menuOpen]);
+  const closeMenu = () => {
+    setMenuOpen(false);
+    menuTrigger.current?.focus();
+  };
   const reason = entry.status !== "ready" ? "Fix this installation before enabling. Diagnostics are available in the row menu."
     : runtimeForPlugin(plugin.catalog, entry)?.status !== "detected" ? entry.runtime === "python" ? "Python 3.10 or newer is required." : "Node.js 22.18.0 or newer is required."
       : !plugin.sessionsReady ? "Cached plugin sessions are unavailable. Reload the app before enabling."
@@ -61,20 +81,53 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
             else if (entry.trusted) void plugin.enable(id);
             else { setTrustIdentity(entry.identity); dialogRef.current?.showModal(); }
           }}>{connected ? "Disable" : "Enable"}</button>
-        <details className="plugin-menu">
-          <summary className="icon-button" aria-label={`More options for ${entry.name}`} title="More options">⋯</summary>
-          <div className="plugin-menu-actions">
-            {!connected ? <button type="button" className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={(event) => {
-              event.currentTarget.closest("details")?.removeAttribute("open"); void plugin.disconnect(id);
+        <div
+          className="plugin-menu" ref={menuRoot}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && menuOpen) {
+              event.preventDefault();
+              event.stopPropagation();
+              closeMenu();
+            }
+            if (!menuOpen && !busy && !plugin.loading && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+              event.preventDefault();
+              setMenuOpen(true);
+            }
+          }}
+        >
+          <button
+            ref={menuTrigger} type="button" className="icon-button plugin-menu-trigger"
+            aria-label={`More options for ${entry.name}`} title="More options"
+            aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? menuId : undefined}
+            onClick={() => setMenuOpen(!menuOpen)}
+          >⋯</button>
+          <div
+            ref={menu} id={menuId} className="plugin-menu-actions" role="menu" aria-label={`More options for ${entry.name}`}
+            hidden={!menuOpen}
+            onKeyDown={(event) => {
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const rows = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
+              const index = rows.indexOf(document.activeElement as HTMLElement);
+              const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1
+                : (index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+              rows[next]?.focus();
+            }}
+          >
+            {!connected ? <button type="button" role="menuitem" tabIndex={-1} className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={() => {
+              closeMenu(); void plugin.disconnect(id);
             }}>Disable on next launch</button> : null}
-            <button type="button" className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={(event) => {
-              event.currentTarget.closest("details")?.removeAttribute("open"); void plugin.diagnose(id);
+            <button type="button" role="menuitem" tabIndex={-1} className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={() => {
+              closeMenu(); void plugin.diagnose(id);
             }}>Diagnostics</button>
-            <button type="button" className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={(event) => {
-              event.currentTarget.closest("details")?.removeAttribute("open"); setConfirmation("uninstall");
+            <button type="button" role="menuitem" tabIndex={-1} className="button quiet" disabled={busy || plugin.loading || !pluginIdentifier(id)} onClick={() => {
+              closeMenu(); setConfirmation("uninstall");
             }}>Uninstall…</button>
           </div>
-        </details>
+        </div>
       </div>
     </div>
     {entry.settings ? <PluginConnectionSettings key={`${id}:${entry.identity}:${entry.trusted}:${connected}`} id={id} schema={entry.settings} trusted={entry.trusted} connected={connected} /> : null}

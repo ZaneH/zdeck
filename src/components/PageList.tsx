@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
+import { Dropdown } from "./Dropdown";
 import type { Deck, Page } from "../lib/types";
 import { pageControls } from "../lib/deck";
 
@@ -36,10 +37,11 @@ export function PageList({
 
   return (
     <div className="page-panel">
-      <label className="sr-only" htmlFor="page-switcher">Current page</label>
-      <select id="page-switcher" value={active.id} onChange={(event) => onSelect(event.target.value)}>
-        {deck.pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
-      </select>
+      <Dropdown
+        label="Page" value={active.id}
+        options={deck.pages.map((page) => ({ value: page.id, label: page.name }))}
+        onChange={onSelect}
+      />
       <button type="button" className="icon-button" aria-label="Manage pages" title="Manage pages" onClick={() => dialogRef.current?.showModal()}>
         <MoreHorizontal size={17} aria-hidden="true" />
       </button>

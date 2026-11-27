@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
-import { activePage, findPage, pageControls } from "../lib/deck";
+import { activePage, findControl, findPage, pageControls } from "../lib/deck";
 import { sectionStyle } from "../lib/sections";
 import { applyTheme } from "../lib/theme";
 import { useRemotePhone } from "../lib/useRemotePhone";
@@ -271,6 +271,9 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
 
   const active = remote.phase === "active";
   const controlsDisabled = !active || remote.busyControlId !== null;
+  const activeBusyControl = remote.busyControlId ? findControl(deck, page.id, remote.busyControlId) : null;
+  const transientSlider = active && !!activeBusyControl
+    && ["slider", "dial"].includes(effectivePresentation(activeBusyControl, remote.plugins));
   const hasVolume = pageControls(page).some((control) => control.action === "volume");
   const latestActivity = remote.activity[0];
 
@@ -307,6 +310,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
                   variant="phone"
                   semantics="remote"
                   disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
+                  transientDisabled={transientSlider && remote.busyControlId !== control.id}
                   volume={targets[control.id] ?? controlVolume(control)}
                   pressed={false}
                   busy={remote.busyControlId === control.id}

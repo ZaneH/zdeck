@@ -293,6 +293,9 @@ export default function App() {
   );
 
   const page = activePage(deck);
+  const activeBusyControl = desktop.busyControlId ? findControl(deck, page.id, desktop.busyControlId) : null;
+  const transientSlider = desktop.inflight && !desktop.pending && !!activeBusyControl
+    && ["slider", "dial"].includes(effectivePresentation(activeBusyControl, plugin.snapshots));
   const selectedControl = selectedControlId
     ? findControl(deck, page.id, selectedControlId) ?? null
     : null;
@@ -711,6 +714,8 @@ export default function App() {
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
                         semantics={desktop.live ? "live" : "preview"}
                         disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}
+                        transientDisabled={transientSlider && desktop.busyControlId !== control.id
+                          && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots))}
                         busy={desktop.busyControlId === control.id}
                         volume={previewVolumes[control.id] ?? controlVolume(control)}
                         selected={selectedControlId === control.id}

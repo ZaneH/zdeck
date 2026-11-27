@@ -7,6 +7,7 @@ import type { RemoteStatus } from "../lib/nativeRemote";
 import { getStorage } from "../lib/persistence";
 import { loadRemoteMode, loadRemoteOrigin } from "../lib/remotePreferences";
 import { HelpTooltip } from "./HelpTooltip";
+import { useExclusiveMenu } from "../lib/useExclusiveMenu";
 
 type MenuItem = { label: string; href?: string; action?: () => void; disabled?: boolean; selected?: boolean };
 
@@ -19,6 +20,7 @@ function FooterMenu({ label, icon, tone, detail, items }: {
   const menu = useRef<HTMLDivElement>(null);
   const id = useId();
   const close = () => { setOpen(false); trigger.current?.focus(); };
+  useExclusiveMenu(open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
     menu.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
