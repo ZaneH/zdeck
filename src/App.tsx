@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus, Settings, Smartphone } from "lucide-react";
+import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus, Redo2, Settings, Smartphone, Undo2 } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
   Accent,
@@ -50,6 +50,18 @@ import {
 import type { DeckError } from "./lib/nativeDeck";
 import { DeckSync } from "./lib/deckSync";
 import type { DeckSyncStatus } from "./lib/deckSync";
+import {
+  canRedo,
+  canUndo,
+  createDeckHistory,
+  deckHistoryShortcut,
+  recordDeckChange,
+  redoDeck,
+  sameDeck,
+  undoDeck,
+} from "./lib/deckHistory";
+import type { DeckHistory } from "./lib/deckHistory";
+import { reconcileControlSelection, reconcileSectionSelection } from "./lib/deckSelection";
 import { applyTheme } from "./lib/theme";
 import { useObsConsole } from "./lib/useObsConsole";
 import { useSystemConsole } from "./lib/useSystemConsole";
@@ -74,6 +86,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { SetupGuide } from "./components/SetupGuide";
 import { DesktopTrayNotice } from "./components/DesktopTrayNotice";
 import { DesktopPreferencesCard } from "./components/DesktopPreferencesCard";
+import { HelpTooltip } from "./components/HelpTooltip";
 
 import { SettingsSections } from "./components/SettingsSections";
 import { StatusFooter } from "./components/StatusFooter";
@@ -186,6 +199,14 @@ export default function App() {
   const [reloadToken, setReloadToken] = useState(0);
   const syncRef = useRef<DeckSync | null>(null);
   const pressTimer = useRef<number | null>(null);
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
+  const historyRef = useRef<DeckHistory>(createDeckHistory());
+  const [, setHistoryVersion] = useState(0);
+  const selectedControlRef = useRef(selectedControlId);
+  selectedControlRef.current = selectedControlId;
+  const selectedSectionRef = useRef(selectedSectionId);
+  selectedSectionRef.current = selectedSectionId;
   const obs = useObsConsole();
   const system = useSystemConsole();
   const plugin = usePluginConsole();
@@ -199,8 +220,18 @@ export default function App() {
     if (status.phase === "conflict") setNativeBlocked(status.error);
   }, []);
 
-  const commitDeck = useCallback(
+  const updateHistory = useCallback((next: DeckHistory) => {
+    historyRef.current = next;
+    setHistoryVersion((version) => version + 1);
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    updateHistory(createDeckHistory());
+  }, [updateHistory]);
+
+  const applyDeck = useCallback(
     (next: Deck) => {
+      deckRef.current = next;
       desktop.invalidate();
       setDeck(next);
       if (nativeMode) {
@@ -214,6 +245,47 @@ export default function App() {
     [nativeMode, desktop.invalidate],
   );
 
+  const commitDeck = useCallback(
+    (next: Deck, record = true) => {
+      const current = deckRef.current;
+      if (sameDeck(current, next)) return;
+      if (record) updateHistory(recordDeckChange(historyRef.current, current, next));
+      applyDeck(next);
+    },
+    [applyDeck, updateHistory],
+  );
+
+  const reconcileSelection = useCallback((previous: Deck, next: Deck) => {
+    const controlId = reconcileControlSelection(previous, next, selectedControlRef.current);
+    const sectionId = reconcileSectionSelection(previous, next, selectedSectionRef.current);
+    selectedControlRef.current = controlId;
+    selectedSectionRef.current = sectionId;
+    setSelectedControlId(controlId);
+    setSelectedSectionId(sectionId);
+  }, []);
+
+  const undo = useCallback(() => {
+    if (desktop.inflight || desktop.pending) return;
+    const previous = deckRef.current;
+    const result = undoDeck(historyRef.current, previous);
+    if (!result) return;
+    setPreviewNotice(null);
+    reconcileSelection(previous, result.deck);
+    updateHistory(result.history);
+    applyDeck(result.deck);
+  }, [applyDeck, desktop.inflight, desktop.pending, reconcileSelection, updateHistory]);
+
+  const redo = useCallback(() => {
+    if (desktop.inflight || desktop.pending) return;
+    const previous = deckRef.current;
+    const result = redoDeck(historyRef.current, previous);
+    if (!result) return;
+    setPreviewNotice(null);
+    reconcileSelection(previous, result.deck);
+    updateHistory(result.history);
+    applyDeck(result.deck);
+  }, [applyDeck, desktop.inflight, desktop.pending, reconcileSelection, updateHistory]);
+
   // Native: load the authoritative deck before enabling edits. A missing file
   // is initialized once from the browser-local deck (if any) or the default,
   // through an explicit revision-0 compare-and-swap.
@@ -224,6 +296,7 @@ export default function App() {
     setNativeBlocked(null);
     setNativeSave({ phase: "idle" });
     syncRef.current = null;
+    resetHistory();
 
     void (async () => {
       try {
@@ -239,11 +312,13 @@ export default function App() {
         if (snapshot.exists) {
           setNativeSave({ phase: "saved", revision: snapshot.revision });
           setSetupOpen(false);
+          deckRef.current = snapshot.deck;
           setDeck(snapshot.deck);
         } else {
           const browser = loadDeck(getStorage());
           const initialDeck =
             browser.status === "loaded" ? browser.deck : snapshot.deck;
+          deckRef.current = initialDeck;
           setDeck(initialDeck);
           setSetupOpen(browser.status !== "loaded" && !setupDismissed(getStorage()));
           sync.update(initialDeck);
@@ -259,7 +334,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [nativeMode, handleNativeStatus, reloadToken]);
+  }, [nativeMode, handleNativeStatus, reloadToken, resetHistory]);
 
   const reloadNativeDeck = useCallback(() => {
     setReloadToken((token) => token + 1);
@@ -276,13 +351,15 @@ export default function App() {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY && event.key !== null) return;
       const result = loadDeck(getStorage());
+      deckRef.current = result.deck;
       setDeck(result.deck);
       setLoadStatus(result.status);
       setSaveError(result.status === "unavailable");
+      resetHistory();
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [nativeMode]);
+  }, [nativeMode, resetHistory]);
 
   useEffect(() => {
     applyTheme(deck.theme, deck.accent);
@@ -389,7 +466,8 @@ export default function App() {
 
   const handleSelectPage = (pageId: string) => {
     setSelectedSectionId(findPage(deck, pageId)?.sections[0]?.id ?? null);
-    commitDeck(setActivePage(deck, pageId));
+    // Navigation is saved but not an edit; keep the redo branch when switching pages.
+    commitDeck(setActivePage(deck, pageId), false);
     setSelectedControlId(null);
     setPreviewNotice(null);
   };
@@ -474,9 +552,20 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (route !== "editor") return;
+    if (route !== "editor" || setupOpen || nativeLoading || nativeBlocked) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (document.querySelector("dialog[open]")) return;
+      if (event.defaultPrevented || document.querySelector("dialog[open], [role='menu']")) return;
+      const shortcut = deckHistoryShortcut(event);
+      if (shortcut === "undo" && canUndo(historyRef.current)) {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      if (shortcut === "redo" && canRedo(historyRef.current)) {
+        event.preventDefault();
+        redo();
+        return;
+      }
       const delta = pageArrowDelta(event);
       if (!delta) return;
       const index = deck.pages.findIndex((item) => item.id === page.id);
@@ -487,7 +576,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [route, deck]);
+  }, [route, setupOpen, nativeLoading, nativeBlocked, deck, undo, redo]);
 
   if (nativeMode && nativeLoading) return <NativeGate error={null} onRetry={reloadNativeDeck} />;
   if (nativeMode && nativeBlocked) return <NativeGate error={nativeBlocked} onRetry={reloadNativeDeck} />;
@@ -546,7 +635,7 @@ export default function App() {
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
       onClick={(event) => {
         if (route === "editor" && event.target instanceof Element &&
-          !event.target.closest(".control-tile, .inspector-dock, .sidebar-toggle, .status-footer, dialog")) setSelectedControlId(null);
+          !event.target.closest(".control-tile, .inspector-dock, .sidebar-toggle, .status-footer, .history-actions, dialog")) setSelectedControlId(null);
       }}
     >
       <PluginArchiveInstaller onInstalled={() => { window.location.hash = "#/settings/integrations"; void plugin.refreshCatalog(); }} />
@@ -564,6 +653,28 @@ export default function App() {
           <button type="button" className="button secondary add-control" disabled={pageControls(page).length >= MAX_CONTROLS_PER_PAGE} onClick={openActionPicker}>
             <Plus size={15} aria-hidden="true" /> Add control
           </button>
+        ) : null}
+        {route === "editor" ? (
+          <div className="history-actions" role="group" aria-label="Deck history">
+            <HelpTooltip label="Undo help" trigger={(descriptionId) => (
+              <button type="button" className="icon-button" aria-label="Undo" aria-describedby={descriptionId}
+                aria-keyshortcuts="Control+Z Meta+Z" disabled={!canUndo(historyRef.current) || desktop.inflight || !!desktop.pending}
+                onClick={undo}>
+                <Undo2 size={16} aria-hidden="true" />
+              </button>
+            )}>
+              Undo change
+            </HelpTooltip>
+            <HelpTooltip label="Redo help" trigger={(descriptionId) => (
+              <button type="button" className="icon-button" aria-label="Redo" aria-describedby={descriptionId}
+                aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y" disabled={!canRedo(historyRef.current) || desktop.inflight || !!desktop.pending}
+                onClick={redo}>
+                <Redo2 size={16} aria-hidden="true" />
+              </button>
+            )}>
+              Redo change
+            </HelpTooltip>
+          </div>
         ) : null}
 
         <a

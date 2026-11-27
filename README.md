@@ -10,6 +10,7 @@ zDeck is a free, MIT-licensed desktop app for arranging buttons and sliders into
 
 ## What you can do
 
+- **Undo mistakes in the editor:** Undo or redo page, section, control, layout, and appearance changes during the current session. Undo only changes saved deck configuration; it never reverses a control action that already ran. History is session-only and is cleared when the authoritative deck reloads.
 - **Make your own deck.** Add, label, configure and reorder controls; organize them into pages and ordered sections. Insert, rename, reorder or remove sections, with optional theme and accent overrides that otherwise follow the deck.
 - **Navigate your sections.** On the phone, swipe left/right between pages and up/down between sections, without a persistent navigation footer. Taller sections scroll naturally until their boundary; keyboard and screen-reader navigation remain available. On desktop, scroll through sections and use left/right arrow keys between pages when not operating another control. Existing decks migrate automatically; reload an older companion client after upgrading.
 - **Try it safely.** Setup rehearsals and the phone preview simulate presses. Desktop tiles start in **Preview** each session.
@@ -81,7 +82,7 @@ macOS playback permission setup is available in the Inspector. Fully sent native
 
 **Linux system controls:** Install WirePlumber (`wpctl`) and `playerctl`; the Nix shell includes both. Audio needs an active PipeWire/WirePlumber session, and media needs an MPRIS player. Microphone mute affects the **default system input**, not an OBS input; volume affects the **default system output**. Media uses playerctl's default player, not a selected app or a Spotify-specific binding. With several players open, it may target the wrong one. Real audio/media verification remains incomplete.
 
-**Not included:** dial controls, drag-and-drop editing, multi-select, undo/redo, deck export/import, cloud sync, automatic plugin downloads/updates, or bundled Node. See the [roadmap](roadmap.md) for plans, not a list of delivered features.
+**Not included:** dial controls, drag-and-drop editing, multi-select, deck export/import, cloud sync, automatic plugin downloads/updates, or bundled Node. See the [roadmap](roadmap.md) for plans, not a list of delivered features.
 
 ## Put your deck on a phone
 
