@@ -101,6 +101,11 @@ fn prepare(path: &Path) -> Result<PreparedArchive, PluginError> {
     let mut bytes = Vec::new();
     (&mut input).take(ARCHIVE_BYTES + 1).read_to_end(&mut bytes).map_err(|_| io_error())?;
     if bytes.len() as u64 > ARCHIVE_BYTES { return Err(invalid()); }
+    prepare_bytes(bytes)
+}
+
+fn prepare_bytes(bytes: Vec<u8>) -> Result<PreparedArchive, PluginError> {
+    if bytes.len() as u64 > ARCHIVE_BYTES { return Err(invalid()); }
     let digest = hex(Sha256::digest(&bytes));
     let mut zip = bounded_zip(&bytes)?;
     // This also rejects exact duplicate names, overlapping entries, hidden local headers and
@@ -190,6 +195,16 @@ impl PluginInstall {
     /// Path comes exclusively from native picker/drop APIs (or isolated tests), never renderer IPC.
     pub async fn inspect_archive(&self, path: PathBuf) -> Result<PreparedArchive, PluginError> {
         let mut prepared = tokio::task::spawn_blocking(move || prepare(&path)).await.map_err(|_| io_error())??;
+        self.complete_review(&mut prepared).await?;
+        Ok(prepared)
+    }
+    /// Verified registry snapshots use exactly the same ZIP validation and private staging.
+    pub async fn inspect_archive_bytes(&self, bytes: Vec<u8>) -> Result<PreparedArchive, PluginError> {
+        let mut prepared = tokio::task::spawn_blocking(move || prepare_bytes(bytes)).await.map_err(|_| io_error())??;
+        self.complete_review(&mut prepared).await?;
+        Ok(prepared)
+    }
+    async fn complete_review(&self, prepared: &mut PreparedArchive) -> Result<(), PluginError> {
         let runtime = match prepared.review.runtime {
             PluginRuntime::Node => detect_node(&self.candidates).await,
             PluginRuntime::Python => detect_python(&self.python_candidates).await,
@@ -197,7 +212,7 @@ impl PluginInstall {
         prepared.review.runtime_status = runtime.status;
         prepared.review.runtime_version = runtime.version;
         prepared.review.collision = self.archive_collision(&prepared.review.id)?;
-        Ok(prepared)
+        Ok(())
     }
     fn archive_collision(&self, id: &str) -> Result<bool, PluginError> {
         let Some(root) = self.root()? else { return Ok(false); };
