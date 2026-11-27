@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=ZDECK_REGISTRY_WEBSITE_URL");
     let target = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     if target == "windows" {
         println!("cargo:rerun-if-changed=windows-app.rc");

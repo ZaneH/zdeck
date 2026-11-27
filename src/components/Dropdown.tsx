@@ -5,18 +5,20 @@ export interface DropdownOption {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 /**
  * Shared text dropdown for choosing a value. Mirrors the inspector's icon
  * disclosure: a bordered trigger with a value and a menu of checked rows.
  */
-export function Dropdown({ label, value, options, onChange, disabled = false }: {
+export function Dropdown({ label, value, options, onChange, disabled = false, actionMenu = false }: {
   label: string;
   value: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  actionMenu?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState({ above: false, maxHeight: 280 });
@@ -62,7 +64,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
 
   return (
     <div
-      className="dropdown" ref={root}
+      className={`dropdown${actionMenu ? " dropdown-actions" : ""}`} ref={root}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
@@ -81,11 +83,11 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
       <button
         ref={trigger} type="button" className="dropdown-trigger"
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
-        aria-label={`${label}: ${current?.label ?? ""}`} aria-description={current?.description} disabled={disabled}
+        aria-label={actionMenu ? label : `${label}: ${current?.label ?? ""}`} aria-description={actionMenu ? undefined : current?.description} disabled={disabled}
         onClick={() => setOpen(!open)}
       >
         <span className="dropdown-label">{label}</span>
-        <span className="dropdown-value">{current?.label}</span>
+        {!actionMenu ? <span className="dropdown-value">{current?.label}</span> : null}
         <ChevronDown size={14} aria-hidden="true" />
       </button>
       {open ? (
@@ -103,12 +105,13 @@ export function Dropdown({ label, value, options, onChange, disabled = false }: 
         >
           {options.map((option) => (
             <button
-              key={option.value} type="button" role="menuitemradio" tabIndex={-1}
-              aria-checked={option.value === value} aria-label={option.label} aria-description={option.description}
-              onClick={() => { onChange(option.value); close(); }}
+              key={option.value} type="button" role={actionMenu ? "menuitem" : "menuitemradio"} tabIndex={-1}
+              aria-checked={actionMenu ? undefined : option.value === value} aria-label={option.label} aria-description={option.description}
+              aria-disabled={option.disabled || undefined}
+              onClick={() => { if (!option.disabled) { onChange(option.value); close(); } }}
             >
               <span className="dropdown-option-copy"><span className="dropdown-option-label">{option.label}</span>{option.description ? <span className="dropdown-option-description">{option.description}</span> : null}</span>
-              <span className="dropdown-check" aria-hidden="true">{option.value === value ? "✓" : ""}</span>
+              {!actionMenu ? <span className="dropdown-check" aria-hidden="true">{option.value === value ? "✓" : ""}</span> : null}
             </button>
           ))}
         </div>

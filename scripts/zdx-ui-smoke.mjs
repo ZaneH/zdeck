@@ -52,6 +52,7 @@ try {
       window.__zdxCalls.push({command,args});
       if(command==='plugin:event|listen'){listeners.add(args.handler);return args.handler;}
       if(command==='plugin:event|unlisten'){listeners.delete(args.eventId);return null;}
+      if(command==='plugin_registry_website_status')return {available:false,explanation:'Registry website not configured for this build.'};
       if(command==='plugin_archive_view')return structuredClone(view);
       if(command==='plugin_archive_pick'){select();return null;}
       if(command==='plugin_archive_cancel'){if(args.reviewId!==(view.review?.reviewId??null))throw 'Stale review';view={...view,review:null,error:null};changed();return null;}
@@ -76,8 +77,9 @@ try {
     }};
   },{deck});
   await app.goto(`${appUrl}/#/settings/integrations`); await app.waitForLoadState('networkidle');
-  const picker=app.getByRole('button',{name:'Install .zdx…'});
-  await picker.click(); await app.locator('dialog.archive-dialog[open]').waitFor();
+  const picker=app.getByRole('button',{name:'Install from…'});
+  await picker.click();
+  await app.getByRole('menuitem',{name:'Local .zdx'}).click(); await app.locator('dialog.archive-dialog[open]').waitFor();
   const picked=await app.locator('.archive-facts').first().textContent();
   await app.keyboard.press('Escape'); await app.locator('dialog.archive-dialog[open]').waitFor({state:'detached'});
   assert.equal(await picker.evaluate(e=>e===document.activeElement),true,'Escape restores picker focus');
@@ -115,7 +117,7 @@ try {
   for(const call of calls.filter(c=>c.command.startsWith('plugin_archive_')))assert.ok(Object.keys(call.args??{}).every(k=>k==='reviewId'),'no renderer paths or targets');
   await app.screenshot({path:`${output}/installed-disabled.png`,fullPage:true});
   const preview=await browser.newPage();await preview.goto(`${appUrl}/#/settings/integrations`);await preview.waitForLoadState('networkidle');
-  assert.equal(await preview.getByRole('button',{name:'Install .zdx…'}).count(),0);
+  assert.equal(await preview.getByRole('button',{name:'Install from…'}).count(),0);
   assert.ok(await preview.getByText(/browser stays preview-only/).count());
   await writeFile(`${output}/results.json`,JSON.stringify({measurements,archiveCalls:calls.filter(c=>c.command.startsWith('plugin_archive_')),checks:'Storybook six states at 960/320, hashes, keyboard/backdrop busy, picker/drop parity, cancel/focus, collision, runtime missing, publication error, uncertain delivery, disabled install, no trust/enable, browser preview. All browser fakes; no native parity claim.'},null,2));
   console.log(`zdx UI checks passed; screenshots and results: ${output}`);

@@ -7,7 +7,7 @@ install buttons must remain disabled.
 
 ## User flow
 
-1. In desktop **Settings → Integrations → External plugins**, choose **Install .zdx…**, or drop
+1. In desktop **Settings → Integrations → External plugins**, choose **Install from… → Local .zdx**, or drop
    exactly one local `.zdx` onto the desktop editor/settings window. Both native sources use the
    same inspector and installer. Browser preview has no native file installation.
 2. Review the actual static manifest ID/version/protocol, detected runtime compatibility, local
@@ -25,6 +25,30 @@ install buttons must remain disabled.
 Deck controls and OS-stored credentials are preserved. Uninstall still moves the old folder to
 `plugin-backups`; it does not delete credentials. Use a secret's **Forget** control before
 uninstalling if that is intended, and revoke the credential at its provider separately.
+
+## Registry website menu
+
+The right-aligned **Install from…** shared menu sits directly above the installed plugin list.
+**Local .zdx** opens the existing native picker; **Open plugin registry** opens a fixed, build-owned
+website in the external default browser. It never navigates the privileged webview. There is no
+canonical deployed registry URL in either checked-in project configuration as of this milestone.
+The second option stays keyboard-reachable but unavailable, with an inline explanation, until
+configured. There is no end-user URL setting, arbitrary-open-URL IPC, or website privilege grant.
+
+Maintainers can set `ZDECK_REGISTRY_WEBSITE_URL=https://<actual-owned-website>/` when building the
+native app. This is a Rust compile-time variable (not `VITE_*`); changing it rebuilds the binary.
+Missing/invalid configuration disables only that option, never application launch. URLs must be
+bounded ASCII HTTPS without credentials, whitespace, query or fragment. Debug builds additionally
+permit HTTP on exact `localhost`, `127.0.0.1` or `[::1]` for local preview; release builds refuse
+loopback. For example, start the separate registry checkout with `npm run dev` (port 1430), then:
+
+```sh
+ZDECK_REGISTRY_WEBSITE_URL=http://localhost:1430 npm run tauri:dev
+```
+
+This opens a local prototype, not a published registry or an installable release. The native opener
+has no general renderer opener permission and automatic JS link opening is disabled. Remote pages
+are not Tauri origins. Browser previews cannot install local files or call the native opener.
 
 ## Canonical layout
 

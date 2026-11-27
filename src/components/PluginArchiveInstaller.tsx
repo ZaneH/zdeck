@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { nativeAvailable } from "../lib/native";
-import { archiveCancel, archiveError, archiveInstall, archiveListen, archivePick, archiveView, EMPTY_ARCHIVE } from "../lib/nativePluginArchive";
+import { archiveCancel, archiveError, archiveInstall, archiveListen, archiveView, EMPTY_ARCHIVE } from "../lib/nativePluginArchive";
 import type { ArchiveView } from "../lib/nativePluginArchive";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 
@@ -83,13 +83,4 @@ export function PluginArchiveInstaller({ onInstalled }: { onInstalled: () => voi
   };
   return <PluginArchiveDialog view={view} onCancel={() => void run(() => archiveCancel(view.review?.reviewId ?? null))}
     onInstall={() => { if (view.review) void run(() => archiveInstall(view.review!.reviewId), true); }} />;
-}
-
-export function PluginArchivePicker() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return <><button type="button" className="button secondary" disabled={busy} onClick={() => {
-    setBusy(true); setError(null);
-    void archivePick().catch((cause) => setError(archiveError(cause))).finally(() => setBusy(false));
-  }}>Install .zdx…</button>{error ? <p className="settings-error" role="alert">{error}</p> : null}</>;
 }

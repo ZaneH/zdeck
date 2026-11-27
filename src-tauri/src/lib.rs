@@ -10,6 +10,7 @@ mod obs_preferences;
 pub use zdeck_plugin_host::{plugin, plugin_install};
 mod plugin_preferences;
 mod plugin_archive;
+mod plugin_registry;
 pub mod remote;
 pub use zdeck_system as system;
 mod tray;
@@ -461,6 +462,7 @@ pub fn run() {
     linux_display::initialize();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .on_webview_event(|webview, event| {
             use tauri::Manager;
             if webview.label() == "main" {
@@ -547,6 +549,8 @@ pub fn run() {
             native_deck_save,
             desktop_run_control,
             plugin_catalog,
+            plugin_registry::plugin_registry_website_status,
+            plugin_registry::plugin_registry_open_website,
             plugin_archive::plugin_archive_view,
             plugin_archive::plugin_archive_pick,
             plugin_archive::plugin_archive_cancel,

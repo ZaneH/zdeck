@@ -6,7 +6,7 @@ import type { PluginCatalogEntry, PluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { ActionIcon } from "./ActionIcon";
 import { PluginConnectionSettings } from "./PluginConnectionSettings";
-import { PluginArchivePicker } from "./PluginArchiveInstaller";
+import { PluginInstallDropdown } from "./PluginInstallDropdown";
 
 export function PluginErrorNotice({ error }: { error: PluginError | null }) {
   if (!error) return null;
@@ -155,10 +155,11 @@ export function PluginSettingsCard({ plugin }: { plugin: PluginConsole }) {
       <details className="plugin-locations settings-help"><summary className="disclosure">Local folder and runtime details</summary>
         <p>Plugin folder: <code>{plugin.catalog?.directory ?? "~/.config/zdeck/plugins"}</code></p>{runtime?.path ? <p>Node runtime: <code>{runtime.path}</code></p> : null}{python?.path ? <p>Python runtime: <code>{python.path}</code></p> : null}
       </details>
-      <div className="settings-actions"><PluginArchivePicker /><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
+      <div className="settings-actions"><button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.openDirectory()}>Open plugin folder</button>
         <button type="button" className="button secondary" disabled={plugin.catalogBusy} onClick={() => void plugin.refreshCatalog()}>Refresh</button></div>
       {!plugin.sessionsReady && !plugin.loading ? <p className="settings-error" role="alert">Cached plugin sessions could not be loaded. Reload the app before enabling plugins.</p> : null}
-      {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Choose Install .zdx or drop a local archive onto this window. Complete self-contained plugin folders can also be copied into the plugin folder, then discovered with Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
+      {plugin.catalog?.plugins.length === 0 && entries.length === 0 ? <p>Nothing installed yet. Choose Install from… → Local .zdx or drop a local archive onto this window. Complete self-contained plugin folders can also be copied into the plugin folder, then discovered with Refresh. Source/developer npm layouts and SDK symlinks are not distribution installs.</p> : null}
+      <PluginInstallDropdown />
       <ul className="plugin-list" aria-label="Installed plugins">{entries.map((entry, index) => <PluginRow key={entry.id || `invalid-${index}`} entry={entry} plugin={plugin} />)}</ul>
       <PluginErrorNotice error={plugin.catalogError} />
     </>}
