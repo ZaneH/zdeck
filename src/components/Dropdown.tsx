@@ -130,8 +130,6 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
               key={option.value} type="button" role={actionMenu ? "menuitem" : "menuitemradio"} tabIndex={-1}
               aria-checked={actionMenu ? undefined : option.value === value} aria-label={option.label} aria-description={option.description}
               aria-disabled={option.disabled || undefined}
-              // Keep WebKit from blurring the menu before the clicked row receives its click.
-              onMouseDown={event => event.preventDefault()}
               onClick={() => { if (!option.disabled) { close(); onChange(option.value); } }}
             >
               <span className="dropdown-option-copy"><span className="dropdown-option-label">{option.label}</span>{option.description ? <span className="dropdown-option-description">{option.description}</span> : null}</span>
