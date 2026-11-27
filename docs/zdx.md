@@ -1,10 +1,11 @@
 # Local `.zdx` installation (unreleased)
 
-This milestone installs **local, unsigned custom archives only**. The native `zdeck://plugins/install`
-request boundary is registered, but reports signed resolution unavailable: it cannot download or
-install. No downloads, signatures, publisher verification, update checks, replacement/update flow,
-bundled runtimes or plugin sandbox are implemented. Registry install buttons must remain disabled.
-See [the handoff implementation, publishing prerequisites and OS registration gates](registry-handoff.md).
+Local imports remain **unsigned custom archives**. The native `zdeck://plugins/install` path can
+also resolve an exact signed release and explicitly download its bounded HTTPS archive into this
+same review/installer, but only with independently configured build-owned public keys and endpoint.
+Neither is configured by default; preview registry entries remain unavailable. See the
+[signed contract and isolated smoke](registry-releases.md) and [native handoff gates](registry-handoff.md).
+No publisher identity verification, update/replacement flow, bundled runtimes or sandbox is implied.
 
 ## User flow
 
@@ -98,8 +99,9 @@ with the project packager; do not weaken inspection just because another unzip t
 ## Native boundary and publication
 
 Only the Rust Tauri picker callback and native `WebviewEvent::DragDrop(Drop)` handler provide
-paths. Native commands and drop delivery require the local main editor URL; registry links never
-provide paths or review authorization. No renderer command accepts a source path, executable, download URL or extraction target.
+local paths. A separately authorized registry download supplies a signature/digest-verified bounded
+byte snapshot, never a local path, into the same ZIP validator. Native commands and drop delivery
+require the local main editor URL; registry links never provide paths or review authorization. No renderer command accepts a source path, executable, download URL or extraction target.
 The picker uses the cross-platform Tauri dialog plugin from Rust; the frontend has **no dialog,
 filesystem, shell or event-emission permission**. Only event listen/unlisten is granted to `main`.
 Notifications carry no paths/metadata; the renderer re-reads authoritative native review state.

@@ -31,6 +31,21 @@ try {
       } else { await page.keyboard.press('Escape'); await page.locator('dialog[open]').waitFor({state:'detached'}); }
     }
   }
+  for (const state of ['intent','metadata','lookup-busy','download-busy','error','archive']) {
+    for (const width of [960,320]) {
+      await page.setViewportSize({width,height:800});
+      await page.goto(`${stories}/iframe.html?id=settings-registry-release--metadata&viewMode=story&args=state:${state}`);
+      await page.waitForLoadState('networkidle'); await page.locator('dialog[open]').waitFor();
+      await fits(page,`registry-${state}-${width}`);
+      if (state !== 'archive') assert.equal(await page.getByRole('button',{name:'Install disabled',exact:true}).count(),0,'metadata never authorizes install');
+      if (state.endsWith('-busy')) {
+        assert.equal(await page.getByRole('button',{name:/Look up release|Download for review/}).isDisabled(),true);
+        assert.equal(await page.getByRole('button',{name:'Cancel',exact:true}).isEnabled(),true);
+      }
+      await page.screenshot({path:`${output}/registry-${state}-${width}.png`,fullPage:true});
+      await page.keyboard.press('Escape'); await page.locator('dialog[open]').waitFor({state:'detached'});
+    }
+  }
   const deck = {version:3,theme:'dark',accent:'#4cc9f0',activePageId:'fixture',pages:[{id:'fixture',name:'Fixture',sections:[{id:'section',name:'Controls',controls:[{id:'media',label:'Play / pause',action:'media-play-pause'}]}]}]};
   const app = await browser.newPage({ viewport: {width:960,height:800}, reducedMotion:'reduce' });
   await app.addInitScript(({deck}) => {
@@ -152,6 +167,6 @@ try {
   const preview=await browser.newPage();await preview.goto(`${appUrl}/#/settings/integrations`);await preview.waitForLoadState('networkidle');
   assert.equal(await preview.getByRole('button',{name:'Install from…'}).count(),0);
   assert.ok(await preview.getByText(/browser stays preview-only/).count());
-  await writeFile(`${output}/results.json`,JSON.stringify({measurements,archiveCalls:calls.filter(c=>c.command.startsWith('plugin_archive_')),checks:'Storybook seven states at 960/320, hashes, keyboard/backdrop busy, picker/drop parity, cancel/focus, collision, runtime missing, publication error, uncertain delivery, disabled install, no trust/enable, browser preview; install menu ordering, unavailable explanation/keyboard, right-aligned above list at 960/320, no overflow, disabled cursor, fixed website opener and persistent error. All browser fakes; no native parity claim.'},null,2));
+  await writeFile(`${output}/results.json`,JSON.stringify({measurements,archiveCalls:calls.filter(c=>c.command.startsWith('plugin_archive_')),checks:'Storybook seven local and six registry states at 960/320, authenticated metadata vs actual archive authorization, registry lookup/download busy cancellation, long IDs/URLs, hashes, keyboard/backdrop busy, picker/drop parity, cancel/focus, collision, runtime missing, publication error, uncertain delivery, disabled install, no trust/enable, browser preview; install menu ordering, unavailable explanation/keyboard, right-aligned above list at 960/320, no overflow, disabled cursor, fixed website opener and persistent error. All browser fakes; no native parity claim.'},null,2));
   console.log(`zdx UI checks passed; screenshots and results: ${output}`);
 } finally {await browser.close();}

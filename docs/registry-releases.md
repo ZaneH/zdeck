@@ -28,7 +28,11 @@ releases under the new key. Removing an ID in a new desktop build manually revok
 build; already installed packages/older offline builds are not remotely revoked. There is no
 expiry, online revocation, transparency log or automated key rollover in v1. A compromised key
 requires a new desktop release and publication response, not a website-only edit. Never overwrite
-an `(id,version)` record to change keys or content; publish a new exact version.
+an `(id,version)` record to change keys or content; publish a new exact version. Removing a website
+verification key also fails its whole build while historical records reference that key; maintainers
+must explicitly withdraw affected records from future build input/catalogue without overwriting
+historically hosted bytes. Older trusted app builds may still accept that history. V1 deliberately
+has no separate historical-verification PKI or silent record skipping.
 
 ## Exact signed bytes
 

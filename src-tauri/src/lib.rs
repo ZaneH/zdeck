@@ -559,6 +559,7 @@ pub fn run() {
             plugin_archive::plugin_archive_pick,
             plugin_archive::plugin_archive_cancel,
             plugin_archive::plugin_archive_install,
+            plugin_archive::plugin_archive_resolve,
             plugin_enable,
             plugin_trust,
             plugin_open_directory,

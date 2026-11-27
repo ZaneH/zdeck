@@ -66,12 +66,17 @@ pub fn plugin_registry_open_website(app: tauri::AppHandle, window: tauri::Webvie
         .map_err(|_| "Could not open the registry website. Check your default browser and try again.".into())
 }
 
-pub(crate) const RESOLUTION_UNAVAILABLE: &str = "Registry install requests are not available in this build: no trusted signed release resolver is configured. Nothing was downloaded or installed. Use Install from… → Local .zdx for a separately obtained archive; local archives remain unsigned and unverified.";
+pub(crate) const RESOLUTION_UNAVAILABLE: &str = zdeck_plugin_host::registry_release::UNAVAILABLE;
+pub(crate) fn configured_resolver() -> Result<zdeck_plugin_host::registry_release::Resolver, &'static str> {
+    zdeck_plugin_host::registry_release::Resolver::configured(option_env!("ZDECK_REGISTRY_RELEASE_URL"), option_env!("ZDECK_REGISTRY_PUBLIC_KEYS"))
+}
 const INVALID_REQUEST: &str = "This plugin install link is invalid. Use a link containing only a plugin ID and exact version. Nothing was downloaded or installed.";
 const REQUEST_LIMIT: &str = "Too many different plugin install links in this session. Close and reopen zDeck before reviewing more links. Nothing was downloaded or installed.";
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct InstallRequest { id: String, version: String }
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct InstallRequest { pub id: String, pub version: String }
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Received { Release(InstallRequest), Notice(&'static str) }
 fn parse_request(value: &str) -> Option<InstallRequest> {
     if value.len() > 512 || !value.is_ascii() || value.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control()) { return None; }
     let query = value.strip_prefix("zdeck://plugins/install?")?;
@@ -99,17 +104,16 @@ fn parse_request(value: &str) -> Option<InstallRequest> {
 #[derive(Default)]
 pub(crate) struct InstallRequests { seen: HashSet<InstallRequest>, invalid_seen: bool, limit_seen: bool }
 impl InstallRequests {
-    pub(crate) fn receive(&mut self, link: &str) -> Option<&'static str> {
+    pub(crate) fn receive(&mut self, link: &str) -> Option<Received> {
         let request = match parse_request(link) {
             Some(request) => request,
-            None => { return if std::mem::replace(&mut self.invalid_seen, true) { None } else { Some(INVALID_REQUEST) }; }
+            None => { return if std::mem::replace(&mut self.invalid_seen, true) { None } else { Some(Received::Notice(INVALID_REQUEST)) }; }
         };
         if self.seen.contains(&request) { return None; }
         // Do not evict canceled/handled links: an evicted link could re-prompt repeatedly.
-        if self.seen.len() == 128 { return if std::mem::replace(&mut self.limit_seen, true) { None } else { Some(REQUEST_LIMIT) }; }
-        self.seen.insert(request);
-        // shortcut: signed release lookup/download is unavailable until the publishing trust contract exists.
-        Some(RESOLUTION_UNAVAILABLE)
+        if self.seen.len() == 128 { return if std::mem::replace(&mut self.limit_seen, true) { None } else { Some(Received::Notice(REQUEST_LIMIT)) }; }
+        self.seen.insert(request.clone());
+        Some(Received::Release(request))
     }
 }
 
@@ -173,13 +177,13 @@ mod tests {
     fn resolver_fails_closed_and_session_dedup_is_bounded_without_eviction() {
         let mut requests = InstallRequests::default();
         let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
-        assert_eq!(requests.receive(link), Some(RESOLUTION_UNAVAILABLE));
+        assert!(matches!(requests.receive(link), Some(Received::Release(_))));
         assert_eq!(requests.receive(link), None);
         assert_eq!(requests.receive("zdeck://plugins/install?version=1.2.3&id=%66ixture"), None);
-        assert_eq!(requests.receive("invalid"), Some(INVALID_REQUEST));
+        assert_eq!(requests.receive("invalid"), Some(Received::Notice(INVALID_REQUEST)));
         assert_eq!(requests.receive("another-invalid"), None);
-        for index in 0..127 { assert_eq!(requests.receive(&format!("zdeck://plugins/install?id=fixture-{index}&version=1.2.3")), Some(RESOLUTION_UNAVAILABLE)); }
-        assert_eq!(requests.receive("zdeck://plugins/install?id=overflow&version=1.2.3"), Some(REQUEST_LIMIT));
+        for index in 0..127 { assert!(matches!(requests.receive(&format!("zdeck://plugins/install?id=fixture-{index}&version=1.2.3")), Some(Received::Release(_)))); }
+        assert_eq!(requests.receive("zdeck://plugins/install?id=overflow&version=1.2.3"), Some(Received::Notice(REQUEST_LIMIT)));
         assert_eq!(requests.receive("zdeck://plugins/install?id=another&version=1.2.3"), None);
         assert_eq!(requests.receive(link), None);
         assert_eq!(requests.seen.len(), 128);
