@@ -1,9 +1,12 @@
 # Signed registry releases v1 (unreleased)
 
-This checkout ships the public default `https://zreg.zaaane.com/` and reviewed public key
-`registry-2026-01` in `src-tauri/registry-public-keys.json`. The registry has a genuine signed HA
-0.2.0 **macOS-only pilot**, locally retained and verified, awaiting CT deployment. The website
-remains `ready:false`. The operator authorized the registry's existing offline CLI to sign using
+This checkout ships the public default `https://zreg.zaaane.com/` and reviewed public keys
+`registry-2026-01` (historical root, retained for existing records) and `registry-2026-11`
+(prepared rotation root) in `src-tauri/registry-public-keys.json`. A Spotify 0.1.0 candidate is
+signed with the new root and locally verified, but remains unpublished. No updated desktop has
+been distributed yet. Home Assistant 0.2.0 is a publicly hosted, signed **macOS-only pilot**;
+installed-app review, disabled/untrusted installation and restart persistence were verified.
+The website is `ready:true` for that published identity. The operator authorized the registry's existing offline CLI to sign using
 an external private-key file; no private bytes were exposed or added to either repository. A configured resolver is not evidence of native release readiness. A signature is
 registry-key provenance/integrity, not a safety review, publisher identity, sandbox or execution
 permission. Local unsigned imports are unchanged. Updates/replacements are still out of scope.
@@ -33,8 +36,9 @@ signature gates are unchanged. Do not put a private signing key in any of these 
 Distribute reviewed public keys independently in the desktop build, after an out-of-band
 maintainer review of key ownership/fingerprint. Never bootstrap trust from the website/lookup
 response. For rotation, first ship builds trusting both old and new key IDs, then publish new
-releases under the new key. Removing an ID in a new desktop build manually revokes it for that
-build; already installed packages/older offline builds are not remotely revoked. There is no
+releases under the new key. This checkout already trusts both `registry-2026-01` and
+`registry-2026-11`; removing the old ID in a future build manually revokes it for that build, while
+retained historical record bytes stay verifiable only by builds that still trust it. Already installed packages/older offline builds are not remotely revoked. There is no
 expiry, online revocation, transparency log or automated key rollover in v1. A compromised key
 requires a new desktop release and publication response, not a website-only edit. Never overwrite
 an `(id,version)` record to change keys or content; publish a new exact version. Removing a website
