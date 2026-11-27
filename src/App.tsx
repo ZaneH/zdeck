@@ -793,7 +793,7 @@ export default function App() {
             <div className="appearance-fields">
               <Dropdown
                 label="Theme" value={deck.theme}
-                options={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]}
+                options={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }, { value: "glass", label: "Glass" }]}
                 onChange={(value) => handleTheme(value as Theme)}
               />
               <Dropdown

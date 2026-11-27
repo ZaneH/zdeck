@@ -303,11 +303,19 @@ describe("page sections", () => {
     overrides.pages[0].sections[1].theme = "light";
     overrides.pages[0].sections[1].accent = "#6ee7b7";
     expect(isDeck(overrides)).toBe(true);
+    overrides.pages[0].sections[1].theme = "glass";
+    expect(isDeck(overrides)).toBe(true);
     overrides.pages[0].sections[1].theme = "midnight" as never;
     expect(isDeck(overrides)).toBe(false);
     overrides.pages[0].sections[1].theme = "light";
     overrides.pages[0].sections[1].accent = "#000000" as never;
     expect(isDeck(overrides)).toBe(false);
+  });
+
+  it("accepts Glass globally and rejects an unknown deck theme", () => {
+    const deck = createDefaultDeck();
+    expect(isDeck({ ...deck, theme: "glass" })).toBe(true);
+    expect(isDeck({ ...deck, theme: "midnight" as never })).toBe(false);
   });
 
   it("migrates v1 and v2 decks to one deterministic section per page", () => {

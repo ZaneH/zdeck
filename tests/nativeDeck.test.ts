@@ -59,6 +59,9 @@ describe("native v3 snapshot boundary", () => {
   it("accepts only validated v3 decks from Rust, which owns native v1/v2 migration", () => {
     const snapshot = { revision: 3, exists: true, deck: createDefaultDeck(), trash: [] };
     expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
+    const glass = { ...snapshot, deck: { ...createDefaultDeck(), theme: "glass" as const } };
+    expect(parseDeckSnapshot(glass)).toEqual(glass);
+    expect(() => parseDeckSnapshot({ ...snapshot, deck: { ...snapshot.deck, theme: "midnight" } })).toThrow();
     for (const bad of [null, { ...snapshot, revision: -1 }, { ...snapshot, exists: "true" },
       { ...snapshot, deck: { ...snapshot.deck, version: 1 } }, { ...snapshot, deck: { ...snapshot.deck, extra: true } }]) {
       expect(() => parseDeckSnapshot(bad)).toThrow();

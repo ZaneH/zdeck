@@ -332,6 +332,9 @@ describe("protocol validation", () => {
     expect(parseSnapshot({ ...snapshotBody(3, sampleDeck), revision: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
     expect(parseSnapshot(snapshotBody(3, { ...sampleDeck, pages: [] }))).toBeNull();
     expect(parseSnapshot("nope")).toBeNull();
+    const glass = { ...sampleDeck, theme: "glass" as const };
+    expect(parseSnapshot(snapshotBody(3, glass))).toEqual({ revision: 3, deck: glass });
+    expect(parseSnapshot(snapshotBody(3, { ...sampleDeck, theme: "midnight" as never }))).toBeNull();
   });
 
   it("validates typed command results and sanitizes their messages", () => {

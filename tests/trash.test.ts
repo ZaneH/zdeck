@@ -11,7 +11,7 @@ import {
   removeControl,
   removePage,
 } from "../src/lib/deck";
-import { addSection, removeSection } from "../src/lib/sections";
+import { addSection, removeSection, setSectionTheme } from "../src/lib/sections";
 import type { Control, Deck } from "../src/lib/types";
 import {
   MAX_TRASH_ITEMS,
@@ -210,6 +210,17 @@ describe("trash restore", () => {
     if (!("deck" in restored)) return;
     const page = findPage(restored.deck, pageGone.activePageId)!;
     expect(page.sections[0].controls.some((control) => control.id === added.control.id)).toBe(true);
+  });
+
+  it("round-trips a Glass section through trash and restore", () => {
+    const withSection = addSection(createDefaultDeck(), PAGE, SECTION, "Audio")!;
+    const glassDeck = setSectionTheme(withSection.deck, PAGE, withSection.section.id, "glass");
+    const deleted = removeSection(glassDeck, PAGE, withSection.section.id);
+    const trash = deriveTrash(glassDeck, deleted, [], 1050);
+    expect(isTrash(trash)).toBe(true);
+    expect(trash[0].kind === "section" && trash[0].section.theme).toBe("glass");
+    const restored = restoreTrashEntry(deleted, trash[0]);
+    expect("deck" in restored && restored.deck.pages[0].sections[1].theme).toBe("glass");
   });
 
   it("restores a section at its index or appends when the index is stale", () => {

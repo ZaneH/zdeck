@@ -22,6 +22,7 @@ const ACCENTS: [&str; 5] = ["#4cc9f0", "#6ee7b7", "#f4b860", "#ff7a9c", "#a78bfa
 pub enum Theme {
     Dark,
     Light,
+    Glass,
 }
 
 fn presentation_valid(action: &str, p: &str) -> bool {
@@ -708,6 +709,19 @@ mod tests {
             let mut value = original.clone(); value["pages"][0]["sections"][0]["controls"][0]["presentation"] = presentation;
             assert!(serde_json::from_value::<Deck>(value).is_err());
         }
+    }
+
+    #[test]
+    fn glass_theme_round_trips_globally_and_per_section_and_unknown_is_rejected() {
+        use serde_json::json;
+        let mut value = serde_json::to_value(default_deck()).unwrap();
+        value["theme"] = json!("glass");
+        value["pages"][0]["sections"][0]["theme"] = json!("glass");
+        let deck: Deck = serde_json::from_value(value.clone()).unwrap();
+        deck.validate().unwrap();
+        assert_eq!(serde_json::to_value(deck).unwrap(), value);
+        value["theme"] = json!("midnight");
+        assert!(serde_json::from_value::<Deck>(value).is_err());
     }
 
     fn fixture_deck() -> Deck {

@@ -723,13 +723,13 @@ try {
   await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General'");
   check("settings theme and accent reuse the shared text dropdowns", await editor.eval("(() => { const triggers = [...document.querySelectorAll('.appearance-fields .dropdown-trigger')]; return triggers.length === 2 && triggers.every((trigger) => trigger.querySelectorAll('svg').length === 1 && !trigger.querySelector('.lucide-moon, .lucide-sun, .accent-swatch')); })()"));
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
-  check("theme dropdown offers both themes", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 2"));
+  check("theme dropdown offers all three themes", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 3"));
   await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
   check("theme dropdown switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
   await pressKey(editor, 'ArrowDown', 'ArrowDown', 40);
   check("text dropdown opens from the keyboard and focuses its menu", await editor.waitFor("document.activeElement?.getAttribute('role') === 'menuitemradio'"));
   await pressKey(editor, 'End', 'End', 35);
-  check("text dropdown keyboard navigation reaches the last choice", await editor.eval("document.activeElement?.getAttribute('aria-label') === 'Light'"));
+  check("text dropdown keyboard navigation reaches the last choice", await editor.eval("document.activeElement?.getAttribute('aria-label') === 'Glass'"));
   await pressKey(editor, 'Escape', 'Escape', 27);
   check("text dropdown Escape closes its menu and returns focus", await editor.waitFor("!document.querySelector('.appearance-fields .dropdown-menu') && document.activeElement === document.querySelector('.appearance-fields .dropdown-trigger')"));
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(2) .dropdown-trigger'));
@@ -740,6 +740,26 @@ try {
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
   check("light editor shows the default page", await editor.waitFor("document.querySelector('#page-title').textContent === 'Stream'"));
   await editor.screenshot("/tmp/deck-design-light.png");
+  await editor.eval(click('[aria-label="Open settings"]'));
+  await editor.waitFor("!!document.querySelector('.settings-view')");
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Glass'));
+  check("Glass applies the opted-in backdrop and theme color", await editor.waitFor("document.documentElement.dataset.theme === 'glass' && getComputedStyle(document.body).backgroundColor === 'rgb(48, 40, 68)' && getComputedStyle(document.body).backgroundImage.includes('radial-gradient') && document.querySelector('meta[name=theme-color]').content === '#302844'"));
+  check("Appearance labels and the Glass value stay unclipped", await editor.eval("(() => { const labels = [...document.querySelectorAll('.appearance-fields .dropdown-label, .appearance-fields .dropdown-value')]; const field = document.querySelector('.appearance-fields'); return labels.length === 4 && labels.every((el) => el.scrollWidth <= el.clientWidth + 1) && field.scrollWidth <= field.clientWidth + 1 && [...document.querySelectorAll('.appearance-fields .dropdown-trigger')].every((el) => el.getBoundingClientRect().right <= innerWidth + 1); })()"));
+  await editor.screenshot("/tmp/deck-design-glass-settings.png");
+  await editor.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 680, deviceScaleFactor: 1, mobile: false });
+  check("Appearance labels and the Glass value stay unclipped at 320px", await editor.eval("(() => { const labels = [...document.querySelectorAll('.appearance-fields .dropdown-label, .appearance-fields .dropdown-value')]; const field = document.querySelector('.appearance-fields'); return labels.length === 4 && labels.every((el) => el.scrollWidth <= el.clientWidth + 1) && field.scrollWidth <= field.clientWidth + 1 && [...document.querySelectorAll('.appearance-fields .dropdown-trigger')].every((el) => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1; }); })()"));
+  await editor.screenshot("/tmp/deck-design-glass-settings-narrow.png");
+  await editor.send("Emulation.clearDeviceMetricsOverride");
+  await editor.eval("location.hash = '#/'");
+  await editor.waitFor("!!document.querySelector('.canvas-panel')");
+  check("Glass editor groups and tiles use the rounded material", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '22px' && getComputedStyle(document.querySelector('.control-tile')).borderRadius === '20px'"));
+  check("Glass blurs only the group boundary", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(tile).trim()) && (!supported || filter(section).includes('blur(18px)')); })()"));
+  await editor.screenshot("/tmp/deck-design-glass.png");
+  await editor.send("Emulation.setEmulatedMedia", { features: [{ name: "forced-colors", value: "active" }] });
+  const forcedGlass = await editor.eval("(() => { const section = getComputedStyle(document.querySelector('.deck-section')); const tile = getComputedStyle(document.querySelector('.control-tile')); const root = getComputedStyle(document.documentElement); const button = document.querySelector('.control-tile .tile-primary'); button.focus(); const focus = getComputedStyle(button); return root.getPropertyValue('--card-border').trim() === 'CanvasText' && root.getPropertyValue('--focus').trim() !== '' && section.boxShadow === 'none' && tile.boxShadow === 'none' && section.backgroundColor === tile.backgroundColor && focus.outlineStyle === 'solid' && focus.outlineWidth !== '0px'; })()");
+  check("forced colors flatten Glass surfaces and keep focus visible", forcedGlass);
+  await editor.send("Emulation.setEmulatedMedia", { features: [] });
   await editor.eval(click('[aria-label="Open settings"]'));
   await editor.waitFor("!!document.querySelector('.settings-view')");
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
@@ -1696,11 +1716,18 @@ try {
 
   check('section appearance uses one cogwheel settings menu', await manage.eval("(() => { const trigger = document.querySelector('.deck-section:nth-child(2) .section-actions .section-settings-trigger'); return !!trigger && trigger.querySelectorAll('svg').length === 1 && !document.querySelector('.deck-section:nth-child(2) .section-actions .dropdown'); })()"));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
-  check('section settings menu shows the control count and theme choices', await manage.waitFor("document.querySelector('.section-settings-menu')?.textContent.includes('1 control') && document.querySelectorAll('.section-settings-menu [role=menuitemradio]').length === 9"));
+  check('section settings menu shows the control count and theme choices', await manage.waitFor("document.querySelector('.section-settings-menu')?.textContent.includes('1 control') && document.querySelectorAll('.section-settings-menu [role=menuitemradio]').length === 10"));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Mint'));
   check('section appearance applies to its controls', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); return s.dataset.theme === 'light' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7'; })()"));
+
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
+  await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Glass'));
+  check('a Glass section inside a dark deck keeps its local accent and material', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); const tile = s.querySelector('.control-tile'); return s.dataset.theme === 'glass' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7' && getComputedStyle(s).backgroundColor.startsWith('rgba(') && getComputedStyle(s).borderRadius === '22px' && getComputedStyle(tile).borderRadius === '20px'; })()"));
+  await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
+  await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
+  await manage.waitFor("document.querySelector('.deck-section:nth-child(2)').dataset.theme === 'light'");
 
   await manage.eval("document.querySelector('.deck-section:nth-child(2) .section-drag').focus()");
   await altArrow(manage, 'ArrowUp');
@@ -2188,6 +2215,9 @@ try {
     "deck-design-phone.png",
     "deck-design-volume.png",
     "deck-design-light.png",
+    "deck-design-glass.png",
+    "deck-design-glass-settings.png",
+    "deck-design-glass-settings-narrow.png",
     "deck-design-preview-landscape.png",
     "deck-design-preview-portrait.png",
     "deck-design-pairing-narrow.png",

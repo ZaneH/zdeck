@@ -1,5 +1,5 @@
 import { isControlIcon } from "./icons";
-import { ACCENTS, DECK_VERSION } from "./types";
+import { ACCENTS, DECK_VERSION, THEMES } from "./types";
 import type {
   Accent,
   ActionKind,
@@ -365,7 +365,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function isTheme(value: unknown): value is Theme {
-  return value === "dark" || value === "light";
+  return THEMES.includes(value as Theme);
 }
 
 export function isAccent(value: unknown): value is Accent {

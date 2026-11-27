@@ -8,6 +8,7 @@ const THEMES: { value: "" | Theme; label: string }[] = [
   { value: "", label: "Inherit" },
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
+  { value: "glass", label: "Glass" },
 ];
 
 export function SectionSettingsMenu({

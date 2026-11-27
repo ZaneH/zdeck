@@ -41,7 +41,7 @@ Keep zDeck available in the background                 // desktop.tray
 
 ## Pages and sections
 
-Status: implemented with automated migration, persistence, editor and phone-navigation coverage. Phone navigation is swipe-first with focus-revealed accessible alternatives, routine Connected text is hidden, and deck-accent inheritance is fixed on the remote phone and theme-only sections. Version 3 migrates existing pages into one section without changing their controls. Physical-phone gesture verification and native runtime verification on Windows, macOS and Linux remain open; browser checks do not establish native parity.
+Status: implemented with automated migration, persistence, editor and phone-navigation coverage. Phone navigation is swipe-first with focus-revealed accessible alternatives, routine Connected text is hidden, and deck-accent inheritance is fixed on the remote phone and theme-only sections. Appearance offers Dark (default), Light and the opt-in Glass theme; Glass uses the existing deck/section `theme` field, so older clients that predate it reject the document and fail closed rather than silently rendering a different theme. Version 3 migrates existing pages into one section without changing their controls. Physical-phone gesture verification and native runtime verification on Windows, macOS and Linux remain open; browser checks do not establish native parity.
 
 ```text
 Organize controls into pages and sections              // deck.sections
@@ -67,8 +67,8 @@ Organize controls into pages and sections              // deck.sections
 │   ├── Left / right arrow keys switch pages without wrapping at the ends
 │   └── Do not intercept keys while typing, editing, or using controls that own those keys
 ├── Configure appearance                               // deck.sections.appearance
-│   ├── Sections immediately inherit the saved deck theme and accent on desktop and phone, including new sections
-│   ├── Allow independent optional theme and accent overrides per section
+│   ├── Sections immediately inherit the saved deck theme (Dark, Light or Glass) and accent on desktop and phone, including new sections
+│   ├── Allow independent optional Dark, Light or Glass theme and accent overrides per section
 │   └── Reset an override to resume inheritance; inherited values follow deck changes
 └── Preserve configuration                             // deck.sections.persistence
     ├── Migrate each existing page to one section containing its original controls
