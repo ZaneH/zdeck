@@ -65,6 +65,14 @@ in-memory mock backend and no plugin runtime/settings loader is attached. XDG/HO
 not sufficient isolation on macOS. The Linux launcher was updated for the new data layout;
 its current Linux rerun remains outstanding. Previous successful runs were on AMD/KDE Wayland with matching EGL/GBM libraries. This does not prove visual correctness, normal-user-data behavior, real actions, desktop admin lifecycle, bundled remote asset resolution or installer packaging.
 
+The same smoke `.app` can be launched directly on macOS with `ZDECK_NATIVE_SMOKE=1`. Its five
+layout reports are emitted, but the Settings report currently contains six `.settings-view
+.disclosure` nodes (three hidden zero-height copies), so the Linux assertion `length === 3`
+would fail; this predates the Spotify candidate check and is not investigated. Exact-candidate
+registry smoke uses `ZDECK_REGISTRY_SMOKE=local`, `ZDECK_SMOKE_ARCHIVE`, `ZDECK_SMOKE_ID` and
+`ZDECK_SMOKE_VERSION`, or `ZDECK_REGISTRY_SMOKE=remote` with the same ID/version against the live
+production endpoint; see [registry-releases.md](registry-releases.md).
+
 ### Storybook boundaries
 
 Stories render real components with the local Geist font, app CSS tokens and Dark/Light toolbar. Control presses, slider releases, setup completion and plugin actions update local fixtures only. They never launch plugins, read media, probe Node, open folders, move real files or start phone services. Narrow stories constrain width without a viewport addon. Reload or switch stories to reset state.

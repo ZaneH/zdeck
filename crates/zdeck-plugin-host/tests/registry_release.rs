@@ -107,26 +107,31 @@ fn macos_pilot_explicitly_rejects_other_operating_systems() {
 #[tokio::test]
 #[ignore = "Explicit production-key candidate check; set ZDECK_REVIEWED_RELEASE and ZDECK_ZDX_ARTIFACT, optionally ZDECK_PUBLIC_RELEASE=1 after hosting"]
 async fn reviewed_production_release_installs_disabled_without_execution() {
+    // Exact candidate under review; defaults retain the published Home Assistant pilot.
+    let id = std::env::var("ZDECK_REVIEWED_ID").unwrap_or_else(|_| "home-assistant".into());
+    let version = std::env::var("ZDECK_REVIEWED_VERSION").unwrap_or_else(|_| "0.2.0".into());
+    let sha = std::env::var("ZDECK_REVIEWED_SHA").unwrap_or_else(|_| "2bc4fde8f462feabbf91b929a9b5213eee63183972f34435b53485de225e979d".into());
+    let commit = std::env::var("ZDECK_REVIEWED_COMMIT").unwrap_or_else(|_| "c688567f8359f6d20ff4a7ee30ba6c18e25cc963".into());
     let bytes = std::fs::read(std::env::var_os("ZDECK_ZDX_ARTIFACT").expect("reviewed archive")).unwrap();
     let envelope = std::fs::read(std::env::var_os("ZDECK_REVIEWED_RELEASE").expect("reviewed signed public envelope")).unwrap();
     let resolver = Resolver::configured(Some("https://zreg.zaaane.com/"), Some(include_str!("../../../src-tauri/registry-public-keys.json"))).unwrap();
-    let verified = resolver.verify(&envelope, "home-assistant", "0.2.0", std::env::consts::OS).unwrap();
-    for platform in ["windows", "linux"] { assert!(resolver.verify(&envelope, "home-assistant", "0.2.0", platform).is_err()); }
+    let verified = resolver.verify(&envelope, &id, &version, std::env::consts::OS).unwrap();
+    for platform in ["windows", "linux"] { assert!(resolver.verify(&envelope, &id, &version, platform).is_err()); }
     let mut tampered: Value = serde_json::from_slice(&envelope).unwrap();
     tampered["signature"] = json!(STANDARD.encode([0u8; 64]));
-    assert!(resolver.verify(&serde_json::to_vec(&tampered).unwrap(), "home-assistant", "0.2.0", std::env::consts::OS).is_err());
-    assert_eq!(verified.release().artifact.sha256, "2bc4fde8f462feabbf91b929a9b5213eee63183972f34435b53485de225e979d");
-    assert_eq!(verified.release().source.commit, "c688567f8359f6d20ff4a7ee30ba6c18e25cc963");
+    assert!(resolver.verify(&serde_json::to_vec(&tampered).unwrap(), &id, &version, std::env::consts::OS).is_err());
+    assert_eq!(verified.release().artifact.sha256, sha);
+    assert_eq!(verified.release().source.commit, commit);
     let temp = tempfile::tempdir().unwrap();
     let directory = temp.path().join("config/plugins");
     let install = PluginInstall::new(directory.clone(), vec![]).unwrap();
     let prepared = if std::env::var("ZDECK_PUBLIC_RELEASE").as_deref() == Ok("1") {
-        let remote = resolver.lookup("home-assistant", "0.2.0").await.unwrap();
+        let remote = resolver.lookup(&id, &version).await.unwrap();
         assert_eq!(serde_json::to_value(remote.release()).unwrap(), serde_json::to_value(verified.release()).unwrap());
         remote.download(&install).await.unwrap()
     } else {
         let http = Fake::new(vec![Ok(envelope), Ok(bytes.clone())]);
-        resolver.lookup_with(&http, "home-assistant", "0.2.0").await.unwrap().download_with(&http, &install).await.unwrap()
+        resolver.lookup_with(&http, &id, &version).await.unwrap().download_with(&http, &install).await.unwrap()
     };
     assert_eq!(format!("{:x}", Sha256::digest(&bytes)), prepared.review().archive_sha256);
     let token = prepared.review().review_id.clone();
@@ -143,7 +148,7 @@ async fn reviewed_production_release_installs_disabled_without_execution() {
     assert!(collision.review().collision);
     let token = collision.review().review_id.clone();
     assert!(restarted.install_archive(&registry, collision, &token).await.is_err());
-    println!("production-key HA candidate verified; disabled/untrusted install, restart and collision refusal passed; public HTTP: {}", std::env::var("ZDECK_PUBLIC_RELEASE").as_deref() == Ok("1"));
+    println!("production-key {id} {version} candidate verified; disabled/untrusted install, restart and collision refusal passed; public HTTP: {}", std::env::var("ZDECK_PUBLIC_RELEASE").as_deref() == Ok("1"));
 }
 
 #[test]

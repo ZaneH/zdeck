@@ -29,7 +29,7 @@
       await invoke('plugin_archive_resolve', { reviewId: state.registry.reviewId });
       state = await settled();
     }
-    assert(!state.error && state.review?.id === 'home-assistant' && state.review.version === '0.2.0', 'Exact HA archive review missing');
+    assert(!state.error && state.review?.id === 'EXPECTED_ID' && state.review.version === 'EXPECTED_VERSION', 'Exact candidate archive review missing');
     const review = state.review;
     assert(!review.collision, 'Unexpected existing plugin');
     await invoke('plugin_archive_install', { reviewId: review.reviewId });

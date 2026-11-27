@@ -4,11 +4,22 @@ use tauri::Manager;
 
 pub struct IsolatedData(pub tempfile::TempDir);
 
+// Exact candidate under review; defaults retain the published Home Assistant pilot.
+fn smoke_target() -> (String, String) {
+    (
+        std::env::var("ZDECK_SMOKE_ID").unwrap_or_else(|_| "home-assistant".into()),
+        std::env::var("ZDECK_SMOKE_VERSION").unwrap_or_else(|_| "0.2.0".into()),
+    )
+}
+
 // Feature-only native delivery hook, never renderer IPC or an OS association rewrite.
 pub fn registry_delivery(app: &tauri::AppHandle) {
     match std::env::var("ZDECK_REGISTRY_SMOKE").as_deref() {
         Ok("local") => crate::plugin_archive::drop_paths(app, vec![std::env::var_os("ZDECK_SMOKE_ARCHIVE").expect("explicit smoke archive").into()]),
-        Ok("remote" | "missing") => crate::plugin_archive::request_link(app, "zdeck://plugins/install?id=home-assistant&version=0.2.0"),
+        Ok("remote" | "missing") => {
+            let (id, version) = smoke_target();
+            crate::plugin_archive::request_link(app, &format!("zdeck://plugins/install?id={id}&version={version}"));
+        }
         Ok(_) => panic!("Use local, remote or missing registry smoke mode"),
         Err(_) => (),
     }
@@ -19,7 +30,11 @@ pub fn check_registry(webview: tauri::Webview) {
     let missing = std::env::var("ZDECK_REGISTRY_SMOKE").as_deref() == Ok("missing");
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(2));
-        let script = include_str!("registry-smoke.js").replace("EXPECTED_MISSING", if missing { "true" } else { "false" });
+        let (id, version) = smoke_target();
+        let script = include_str!("registry-smoke.js")
+            .replace("EXPECTED_MISSING", if missing { "true" } else { "false" })
+            .replace("EXPECTED_ID", &id)
+            .replace("EXPECTED_VERSION", &version);
         webview.eval(script).expect("start registry smoke in bundled WebKit");
         for _ in 0..90 {
             std::thread::sleep(Duration::from_secs(1));

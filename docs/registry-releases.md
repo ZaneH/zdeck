@@ -2,9 +2,10 @@
 
 This checkout ships the public default `https://zreg.zaaane.com/` and reviewed public keys
 `registry-2026-01` (historical root, retained for existing records) and `registry-2026-11`
-(prepared rotation root) in `src-tauri/registry-public-keys.json`. A Spotify 0.1.0 candidate is
-signed with the new root and locally verified, but remains unpublished. No updated desktop has
-been distributed yet. Home Assistant 0.2.0 is a publicly hosted, signed **macOS-only pilot**;
+(prepared rotation root) in `src-tauri/registry-public-keys.json`. A Spotify 0.1.0 release is
+signed with the new root; its public release/artifact paths serve the exact signed bytes
+(website activation is separate). The local installed QA app now trusts both roots; broader
+app distribution remains pending. Home Assistant 0.2.0 is a publicly hosted, signed **macOS-only pilot**;
 installed-app review, disabled/untrusted installation and restart persistence were verified.
 The website is `ready:true` for that published identity. The operator authorized the registry's existing offline CLI to sign using
 an external private-key file; no private bytes were exposed or added to either repository. A configured resolver is not evidence of native release readiness. A signature is
@@ -179,3 +180,37 @@ execution, and collision refusal in a fresh temporary directory. Default transpo
 local bytes, explicitly **not public-host evidence**. Only after the exact bytes are hosted, set
 `ZDECK_PUBLIC_RELEASE=1` to use the real production HTTPS lookup and download with unchanged
 DNS/TLS/signature policy. No signing key, user settings, credentials or devices are accessed.
+
+For another exact candidate, also set `ZDECK_REVIEWED_ID`, `ZDECK_REVIEWED_VERSION`,
+`ZDECK_REVIEWED_SHA` and `ZDECK_REVIEWED_COMMIT`; the defaults remain the Home Assistant 0.2.0
+pilot. The feature-only native smoke link/assertions take the same target through
+`ZDECK_SMOKE_ID` and `ZDECK_SMOKE_VERSION` (defaults: Home Assistant 0.2.0), so `ZDECK_REGISTRY_SMOKE=local`
+with `ZDECK_SMOKE_ARCHIVE` exercises its exact bytes in the bundled WebKit path;
+`ZDECK_REGISTRY_SMOKE=remote` uses the same build's live production HTTPS lookup and download.
+
+On 2026-11-27 the signed Spotify 0.1.0 candidate passed the production-key verifier against both
+shipped roots: exact archive SHA-256 `4483286c…80d8a` (42176 bytes), 11 files, disabled/untrusted
+install, restart with no execution and collision refusal. The same bytes passed the isolated
+macOS smoke `.app` (distinct identifier/scheme, temporary native data and plugin roots, no runtime
+candidates or settings loader), installing as `trusted:false` with no snapshots.
+
+The live public paths were then exercised from the same isolated smoke `.app` with
+`ZDECK_REGISTRY_SMOKE=remote`: `releases/spotify/0.1.0.json` returned `200 application/json`
+(716 bytes, immutable) with envelope key `registry-2026-11`; the artifact returned
+`200 application/zip` at exactly 42176 bytes and the signed SHA-256; the bundled WebKit path
+looked up, downloaded, reviewed and installed it disabled/untrusted with no execution or
+snapshots. (A direct `curl` also confirmed the same headers; it never substitutes for the app's
+resolver.) The production-key `ZDECK_PUBLIC_RELEASE=1` route was verified separately by the
+coordinator.
+
+The installed QA bundle at `~/Applications/zDeck.app` was replaced with the staged normal build
+containing both key IDs and the clipping fix; the previous bundle is kept at
+`~/.local/state/zdeck-app-backups/zDeck-2026-11-27T0202-before-spotify.app`. The new binary embeds
+both roots' IDs and public keys and the current frontend assets (`index-C-QwI0Gu.css`,
+`index-DGMQgTk3.js`; the backup has older asset hashes and no `registry-2026-11`). After normal
+LaunchServices registration the sole `zdeck` claim points at `~/Applications/zDeck.app`; opening
+`zdeck://plugins/install?id=spotify&version=0.1.0` launched that bundle once, frontmost. The
+identity prompt's rendered contents were not inspected (no accessibility/screen-capture
+permission), and no enable/trust/install/uninstall command was issued; the existing enabled
+Spotify plugin was left untouched. The registered `zdeck-smoke` scheme belongs to the opt-in
+smoke bundles only and is not the normal handler.
