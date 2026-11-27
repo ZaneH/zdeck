@@ -16,7 +16,7 @@ async function fits(page, name) {
 }
 try {
   const page = await browser.newPage({ viewport: { width: 960, height: 800 }, reducedMotion:'reduce' });
-  for (const state of ['inspect','invalid','replace','busy','error','runtime-missing']) {
+  for (const state of ['inspect','invalid','replace','busy','error','runtime-missing','registry-unavailable']) {
     for (const width of [960,320]) {
       await page.setViewportSize({width,height:800});
       // Error has no auto-play: override its args to inspect each state without dismissing it.
@@ -52,7 +52,8 @@ try {
       window.__zdxCalls.push({command,args});
       if(command==='plugin:event|listen'){listeners.add(args.handler);return args.handler;}
       if(command==='plugin:event|unlisten'){listeners.delete(args.eventId);return null;}
-      if(command==='plugin_registry_website_status')return {available:false,explanation:'Registry website not configured for this build.'};
+      if(command==='plugin_registry_website_status')return location.search.includes('registry-configured') ? {available:true,explanation:null} : {available:false,explanation:'Registry website not configured for this build.'};
+      if(command==='plugin_registry_open_website'){if(window.__zdxOpenError)throw 'Could not open the registry website. Check your default browser and try again.';return null;}
       if(command==='plugin_archive_view')return structuredClone(view);
       if(command==='plugin_archive_pick'){select();return null;}
       if(command==='plugin_archive_cancel'){if(args.reviewId!==(view.review?.reviewId??null))throw 'Stale review';view={...view,review:null,error:null};changed();return null;}
@@ -79,6 +80,11 @@ try {
   await app.goto(`${appUrl}/#/settings/integrations`); await app.waitForLoadState('networkidle');
   const picker=app.getByRole('button',{name:'Install from…'});
   await picker.click();
+  const unavailable=app.getByRole('menuitem',{name:'Open plugin registry'});
+  assert.equal(await unavailable.getAttribute('aria-disabled'),'true');
+  await app.keyboard.press('End');assert.equal(await unavailable.evaluate(e=>e===document.activeElement),true);
+  await app.keyboard.press('Enter');assert.equal(await app.getByRole('menu').count(),1);
+  await app.screenshot({path:`${output}/install-menu-unconfigured.png`,fullPage:true});
   await app.getByRole('menuitem',{name:'Local .zdx'}).click(); await app.locator('dialog.archive-dialog[open]').waitFor();
   const picked=await app.locator('.archive-facts').first().textContent();
   await app.keyboard.press('Escape'); await app.locator('dialog.archive-dialog[open]').waitFor({state:'detached'});
@@ -116,9 +122,36 @@ try {
   assert.equal(calls.some(c=>['plugin_enable','plugin_trust','plugin_execute','plugin_state'].includes(c.command)),false,'installation never runs or trusts');
   for(const call of calls.filter(c=>c.command.startsWith('plugin_archive_')))assert.ok(Object.keys(call.args??{}).every(k=>k==='reviewId'),'no renderer paths or targets');
   await app.screenshot({path:`${output}/installed-disabled.png`,fullPage:true});
+  for(const width of [960,320]){
+    await app.setViewportSize({width,height:800});await picker.scrollIntoViewIfNeeded();
+    await picker.focus();await app.keyboard.press('ArrowDown');await app.keyboard.press('End');
+    await app.getByRole('menu').waitFor();
+    assert.equal(await app.getByRole('menu').evaluate(e=>getComputedStyle(e).animationName),'none','menu respects reduced motion');
+    assert.equal(await app.getByRole('menuitem',{name:'Open plugin registry'}).evaluate(e=>e===document.activeElement),true,'disabled explanation has keyboard focus');
+    const geometry=await app.locator('.plugin-install-tools').evaluate(e=>{
+      const trigger=e.querySelector('.dropdown-trigger').getBoundingClientRect();const menu=e.querySelector('.dropdown-menu').getBoundingClientRect();const list=e.nextElementSibling.getBoundingClientRect();
+      return {trigger:trigger.toJSON(),menu:menu.toJSON(),list:list.toJSON(),width:innerWidth,scroll:e.scrollWidth,client:e.clientWidth,cursor:getComputedStyle(e.querySelector('[aria-disabled=true]')).cursor};
+    });
+    assert.ok(geometry.trigger.bottom<=geometry.list.top&&Math.abs(geometry.trigger.right-geometry.list.right)<2,'dropdown above and right-aligned with list');
+    assert.ok(geometry.menu.left>=0&&geometry.menu.right<=width,'install menu within viewport');
+    assert.ok(geometry.scroll<=geometry.client+1,'install toolbar has no overflow');assert.equal(geometry.cursor,'not-allowed');
+    measurements.push({name:`install-menu-${width}`,...geometry});
+    await app.screenshot({path:`${output}/install-menu-${width}.png`,fullPage:true});
+    await app.keyboard.press('Escape');assert.equal(await picker.evaluate(e=>e===document.activeElement),true);
+  }
+  await app.setViewportSize({width:960,height:800});
+  await app.goto(`${appUrl}/?registry-configured#/settings/integrations`);await app.waitForLoadState('networkidle');
+  await picker.click();await app.getByRole('menuitem',{name:'Open plugin registry'}).click();
+  await app.waitForFunction(()=>window.__zdxCalls.some(c=>c.command==='plugin_registry_open_website'));
+  const openerCalls=await app.evaluate(()=>window.__zdxCalls.filter(c=>c.command==='plugin_registry_open_website'));
+  assert.deepEqual(openerCalls,[{command:'plugin_registry_open_website',args:{}}],'opener has no URL/command IPC');
+  await app.evaluate(()=>{window.__zdxOpenError=true;});
+  await picker.click();await app.getByRole('menuitem',{name:'Open plugin registry'}).click();
+  await app.getByRole('alert').filter({hasText:'Could not open the registry website'}).waitFor();
+  await app.screenshot({path:`${output}/registry-open-error.png`,fullPage:true});
   const preview=await browser.newPage();await preview.goto(`${appUrl}/#/settings/integrations`);await preview.waitForLoadState('networkidle');
   assert.equal(await preview.getByRole('button',{name:'Install from…'}).count(),0);
   assert.ok(await preview.getByText(/browser stays preview-only/).count());
-  await writeFile(`${output}/results.json`,JSON.stringify({measurements,archiveCalls:calls.filter(c=>c.command.startsWith('plugin_archive_')),checks:'Storybook six states at 960/320, hashes, keyboard/backdrop busy, picker/drop parity, cancel/focus, collision, runtime missing, publication error, uncertain delivery, disabled install, no trust/enable, browser preview. All browser fakes; no native parity claim.'},null,2));
+  await writeFile(`${output}/results.json`,JSON.stringify({measurements,archiveCalls:calls.filter(c=>c.command.startsWith('plugin_archive_')),checks:'Storybook seven states at 960/320, hashes, keyboard/backdrop busy, picker/drop parity, cancel/focus, collision, runtime missing, publication error, uncertain delivery, disabled install, no trust/enable, browser preview; install menu ordering, unavailable explanation/keyboard, right-aligned above list at 960/320, no overflow, disabled cursor, fixed website opener and persistent error. All browser fakes; no native parity claim.'},null,2));
   console.log(`zdx UI checks passed; screenshots and results: ${output}`);
 } finally {await browser.close();}

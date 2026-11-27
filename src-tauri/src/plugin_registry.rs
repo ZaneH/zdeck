@@ -1,5 +1,7 @@
 //! Website configuration is build-owned, never a URL supplied by renderer IPC or a link.
+use std::collections::HashSet;
 use serde::Serialize;
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
@@ -12,10 +14,16 @@ fn website_url(value: Option<&str>, development: bool) -> Result<Url, &'static s
         return Err(INVALID_WEBSITE);
     }
     let url = Url::parse(value).map_err(|_| INVALID_WEBSITE)?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let preview_host = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let loopback = match url.host() {
+        Some(url::Host::Domain(host)) => { let host = host.trim_end_matches('.'); host == "localhost" || host.ends_with(".localhost") },
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|ip| ip.is_loopback()),
+        None => false,
+    };
     if url.host_str().is_none() || !url.username().is_empty() || url.password().is_some()
-        || url.query().is_some() || url.fragment().is_some()
-        || !(url.scheme() == "https" || (development && loopback && url.scheme() == "http"))
+        || url.query().is_some() || url.fragment().is_some() || url.port() == Some(0)
+        || !(url.scheme() == "https" || (development && preview_host && url.scheme() == "http"))
         || (!development && loopback) {
         return Err(INVALID_WEBSITE);
     }
@@ -30,6 +38,8 @@ pub struct WebsiteStatus { available: bool, explanation: Option<&'static str> }
 
 // Defense in depth: no remote window/origin can invoke the fixed website opener.
 pub(crate) fn local_editor(label: &str, url: &Url) -> bool {
+    let mut url = url.clone();
+    url.set_fragment(None);
     label == "main" && (url.as_str() == "tauri://localhost/"
         || url.as_str() == "http://tauri.localhost/"
         || url.as_str() == "https://tauri.localhost/"
@@ -37,9 +47,7 @@ pub(crate) fn local_editor(label: &str, url: &Url) -> bool {
 }
 pub(crate) fn require_local(window: &tauri::WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "The local desktop editor is unavailable.")?;
-    // The editor's hash route is local UI state, not part of its origin.
-    let mut base = url; base.set_fragment(None);
-    if !local_editor(window.label(), &base) { return Err("Plugin installation is only available in the local desktop editor.".into()); }
+    if !local_editor(window.label(), &url) { return Err("Plugin installation is only available in the local desktop editor.".into()); }
     Ok(())
 }
 #[tauri::command]
@@ -58,6 +66,66 @@ pub fn plugin_registry_open_website(app: tauri::AppHandle, window: tauri::Webvie
         .map_err(|_| "Could not open the registry website. Check your default browser and try again.".into())
 }
 
+pub(crate) const RESOLUTION_UNAVAILABLE: &str = "Registry install requests are not available in this build: no trusted signed release resolver is configured. Nothing was downloaded or installed. Use Install from… → Local .zdx for a separately obtained archive; local archives remain unsigned and unverified.";
+const INVALID_REQUEST: &str = "This plugin install link is invalid. Use a link containing only a plugin ID and exact version. Nothing was downloaded or installed.";
+const REQUEST_LIMIT: &str = "Too many different plugin install links in this session. Close and reopen zDeck before reviewing more links. Nothing was downloaded or installed.";
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct InstallRequest { id: String, version: String }
+fn parse_request(value: &str) -> Option<InstallRequest> {
+    if value.len() > 512 || !value.is_ascii() || value.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control()) { return None; }
+    let query = value.strip_prefix("zdeck://plugins/install?")?;
+    if query.contains('#') || query.split('&').count() != 2 { return None; }
+    // Decode values only; encoded/duplicate/unknown field names are not part of this contract.
+    if query.split('&').any(|part| !matches!(part.split_once('=').map(|p| p.0), Some("id" | "version"))) { return None; }
+    let mut id = None;
+    let mut version = None;
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        match key.as_ref() {
+            "id" if id.is_none() => id = Some(value.into_owned()),
+            "version" if version.is_none() => version = Some(value.into_owned()),
+            _ => return None,
+        }
+    }
+    let id = id?;
+    let version = version?;
+    if id.is_empty() || id.len() > 64 || !id.as_bytes()[0].is_ascii_lowercase()
+        || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') { return None; }
+    let parts: Vec<_> = version.split('.').collect();
+    if parts.len() != 3 || parts.iter().any(|part| part.is_empty() || part.len() > 4 || !part.bytes().all(|b| b.is_ascii_digit())) { return None; }
+    Some(InstallRequest { id, version })
+}
+
+#[derive(Default)]
+pub(crate) struct InstallRequests { seen: HashSet<InstallRequest>, invalid_seen: bool, limit_seen: bool }
+impl InstallRequests {
+    pub(crate) fn receive(&mut self, link: &str) -> Option<&'static str> {
+        let request = match parse_request(link) {
+            Some(request) => request,
+            None => { return if std::mem::replace(&mut self.invalid_seen, true) { None } else { Some(INVALID_REQUEST) }; }
+        };
+        if self.seen.contains(&request) { return None; }
+        // Do not evict canceled/handled links: an evicted link could re-prompt repeatedly.
+        if self.seen.len() == 128 { return if std::mem::replace(&mut self.limit_seen, true) { None } else { Some(REQUEST_LIMIT) }; }
+        self.seen.insert(request);
+        // shortcut: signed release lookup/download is unavailable until the publishing trust contract exists.
+        Some(RESOLUTION_UNAVAILABLE)
+    }
+}
+
+pub fn setup_links(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    app.deep_link().on_open_url(move |event| {
+        for url in event.urls().iter().take(16) { crate::plugin_archive::request_link(&handle, url.as_str()); }
+    });
+    // Subscribe first, then read startup state; native deduplication covers overlapping delivery.
+    match app.deep_link().get_current() {
+        Ok(Some(urls)) => { for url in urls.iter().take(16) { crate::plugin_archive::request_link(app, url.as_str()); } }
+        Ok(None) => (),
+        Err(_) => crate::plugin_archive::request_notice(app, "Native plugin links are unavailable. Use Install from… → Local .zdx. Nothing was downloaded or installed."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,7 +134,7 @@ mod tests {
         assert_eq!(website_url(None, false), Err(UNCONFIGURED));
         assert_eq!(website_url(Some(""), true), Err(UNCONFIGURED));
         assert!(website_url(Some("https://registry.example.test/plugins/"), false).is_ok());
-        for input in ["http://registry.example.test", "https://user:password@example.test", "https://example.test/?redirect=evil", "https://example.test/#code", "file:///tmp/test", "javascript:alert(1)", "zdeck://plugins/install", "https://example.test\\evil", " https://example.test", "https://example.test/\n", "http://localhost:1430", "https://localhost"] {
+        for input in ["http://registry.example.test", "https://user:password@example.test", "https://example.test/?redirect=evil", "https://example.test/#code", "file:///tmp/test", "javascript:alert(1)", "zdeck://plugins/install", "https://example.test\\evil", " https://example.test", "https://example.test/\n", "http://localhost:1430", "https://localhost", "https://localhost.", "https://registry.localhost", "https://127.0.0.2", "https://[::ffff:127.0.0.1]", "https://example.test:0"] {
             assert!(website_url(Some(input), false).is_err(), "{input}");
         }
         for input in ["http://localhost:1430", "http://127.0.0.1:1430", "http://[::1]:1430"] {
@@ -74,6 +142,59 @@ mod tests {
         }
         assert!(website_url(Some("http://localhost.evil.test:1430"), true).is_err());
         assert!(website_url(Some(&format!("https://example.test/{}", "a".repeat(2048))), true).is_err());
+    }
+    #[test]
+    fn exact_install_request_rejects_unknown_duplicate_and_executable_fields() {
+        let expected = InstallRequest { id: "home-assistant".into(), version: "0.2.0".into() };
+        assert_eq!(parse_request("zdeck://plugins/install?id=home-assistant&version=0.2.0"), Some(expected));
+        assert_eq!(parse_request("zdeck://plugins/install?version=1%2E2%2E3&id=%66ixture"), Some(InstallRequest { id: "fixture".into(), version: "1.2.3".into() }));
+        for input in [
+            "https://plugins/install?id=fixture&version=1.2.3", "zdeck://plugins/install",
+            "zdeck://plugins/install/?id=fixture&version=1.2.3", "zdeck://plugins/../install?id=fixture&version=1.2.3",
+            "zdeck://user@plugins/install?id=fixture&version=1.2.3", "zdeck://plugins:80/install?id=fixture&version=1.2.3",
+            "zdeck://plugins/install?id=fixture&version=1.2.3#fragment", "zdeck://plugins/install?id=fixture&version=1.2.3#",
+            "zdeck://plugins/install?id=fixture&version=latest", "zdeck://plugins/install?id=fixture&version=1.2.3-pre",
+            "zdeck://plugins/install?id=fixture&version=10000.2.3", "zdeck://plugins/install?id=fixture&version=1.2",
+            "zdeck://plugins/install?id=fixture&version=1..3", "zdeck://plugins/install?id=fixture&version=1.2.3&url=https://evil.test/a.zdx",
+            "zdeck://plugins/install?id=fixture&id=other", "zdeck://plugins/install?version=1.2.3&version=1.2.3",
+            "zdeck://plugins/install?id=fixture&version=1.2.3&version=1.2.3", "zdeck://plugins/install?%69d=fixture&version=1.2.3",
+            "zdeck://plugins/install?id=../fixture&version=1.2.3", "zdeck://plugins/install?id=%2fbin%2fsh&version=1.2.3",
+            "zdeck://plugins/install?id=fixture%00&version=1.2.3", "zdeck://plugins/install?id=Fixture&version=1.2.3",
+            "zdeck://plugins/install?id=fixture&exec=main.py", "zdeck://plugins/install?id=fixture&path=/tmp/test.zdx",
+            "zdeck://plugins/install?id=fixture&version=1.2.3%", "zdeck://plugins/install?id=fixture&version=%ff",
+            "zdeck://plugins/install?id=fixture&version=1.2.3\n", "zdeck://plugins/install?id=fixture&version=1.2.3&",
+            "zdeck://plugins/install?id=&version=1.2.3", "zdeck://plugins/install?id=☃&version=1.2.3",
+        ] { assert!(parse_request(input).is_none(), "{input}"); }
+        for input in [format!("zdeck://plugins/install?id={}&version=1.2.3", "a".repeat(65)), format!("zdeck://plugins/install?id=fixture&version={}", "1".repeat(512))] {
+            assert!(parse_request(&input).is_none());
+        }
+    }
+    #[test]
+    fn resolver_fails_closed_and_session_dedup_is_bounded_without_eviction() {
+        let mut requests = InstallRequests::default();
+        let link = "zdeck://plugins/install?id=fixture&version=1.2.3";
+        assert_eq!(requests.receive(link), Some(RESOLUTION_UNAVAILABLE));
+        assert_eq!(requests.receive(link), None);
+        assert_eq!(requests.receive("zdeck://plugins/install?version=1.2.3&id=%66ixture"), None);
+        assert_eq!(requests.receive("invalid"), Some(INVALID_REQUEST));
+        assert_eq!(requests.receive("another-invalid"), None);
+        for index in 0..127 { assert_eq!(requests.receive(&format!("zdeck://plugins/install?id=fixture-{index}&version=1.2.3")), Some(RESOLUTION_UNAVAILABLE)); }
+        assert_eq!(requests.receive("zdeck://plugins/install?id=overflow&version=1.2.3"), Some(REQUEST_LIMIT));
+        assert_eq!(requests.receive("zdeck://plugins/install?id=another&version=1.2.3"), None);
+        assert_eq!(requests.receive(link), None);
+        assert_eq!(requests.seen.len(), 128);
+    }
+    #[test]
+    fn lifecycle_registers_only_native_scheme_and_does_not_grant_remote_privileges() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["plugins"]["deep-link"]["desktop"]["schemes"], serde_json::json!(["zdeck"]));
+        let source = include_str!("lib.rs");
+        assert!(source.find(".plugin(tauri_plugin_single_instance").unwrap() < source.find(".plugin(tauri_plugin_deep_link").unwrap());
+        assert!(source.contains("plugin_registry::setup_links(app.handle())"));
+        let registry = include_str!("plugin_registry.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(registry.contains("on_open_url")); assert!(registry.contains("get_current()"));
+        assert!(!registry.contains("register_all()"));
+        assert!(!registry.contains("reqwest") && !registry.contains("inspect_archive") && !registry.contains("install_archive"));
     }
     #[test]
     fn privileged_commands_are_local_only() {

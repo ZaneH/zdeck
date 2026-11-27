@@ -23,7 +23,7 @@ function PluginExample({ initial = "ready", width = 720 }: { initial?: Fixture; 
   const [catalog, setCatalog] = useState<PluginCatalog>(() => ({ directory: "/example/zdeck/plugins", truncated: false,
     node: initial === "runtime-missing" ? { status: "not_found", version: null, path: null } : { status: "detected", version: "22.18.0", path: "/example/bin/node" },
     plugins: initial === "nothing-installed" || initial === "runtime-missing" ? [] : ["spotify", "notes"].map((id) => ({ id, name: id === "spotify" ? "Spotify" : "Notes", version: "0.1.0", protocolVersion: 1,
-      icon: id === "spotify" ? "data:image/svg+xml;base64,PHN2Zy8+" : null, trusted: initial === "two-enabled" && id === "notes",
+      icon: id === "spotify" ? "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyOCIgaGVpZ2h0PSIyOCI+PHJlY3Qgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiBmaWxsPSIjNGNjOWYwIi8+PC9zdmc+" : null, trusted: initial === "two-enabled" && id === "notes",
       identity: initial === "invalid-sdk" && id === "spotify" ? null : "0123456789abcdef".repeat(4),
       status: initial === "invalid-sdk" && id === "spotify" ? "invalid" : "ready", message: initial === "invalid-sdk" && id === "spotify" ? "SDK symlink/source layout. Copy the complete packaged folder, including node_modules; do not use npm install as distribution repair." : null })) }));
   const [snapshots, setSnapshots] = useState<PluginSnapshots>((): PluginSnapshots => initial === "two-enabled" || initial === "one-failed" || initial === "long-content" ? {

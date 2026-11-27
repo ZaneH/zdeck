@@ -13,7 +13,7 @@ export function PluginArchiveDialog({ view, onCancel, onInstall }: { view: Archi
   const review = view.review;
   return <dialog ref={ref} className="dialog plugin-dialog archive-dialog" aria-labelledby="archive-heading" aria-busy={view.busy || undefined}
     onCancel={(event) => { event.preventDefault(); if (!view.busy) onCancel(); }}>
-    <div className="dialog-heading"><h2 id="archive-heading">Review local plugin</h2>
+    <div className="dialog-heading"><h2 id="archive-heading">{review ? "Review local plugin" : "Plugin installation unavailable"}</h2>
       <button type="button" className="icon-button" aria-label="Close archive review" disabled={view.busy} onClick={onCancel}><X size={16} aria-hidden="true" /></button></div>
     {review ? <>
       <dl className="archive-facts"><dt>Plugin ID</dt><dd>{review.id}</dd><dt>Version</dt><dd>{review.version}</dd>

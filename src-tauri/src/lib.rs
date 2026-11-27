@@ -461,11 +461,15 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     linux_display::initialize();
     tauri::Builder::default()
+        .manage(plugin_archive::ArchiveInbox::default())
+        // Must be first: subsequent Windows/Linux launches forward URLs to the first process.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| { let _ = tray::open(app, false); }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .on_webview_event(|webview, event| {
             use tauri::Manager;
-            if webview.label() == "main" {
+            if webview.url().is_ok_and(|url| plugin_registry::local_editor(webview.label(), &url)) {
                 if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                     plugin_archive::drop_paths(webview.app_handle(), paths.clone());
                 }
@@ -506,7 +510,6 @@ pub fn run() {
                 tauri::async_runtime::block_on(admin.restore(config));
             }
             app.manage(admin);
-            app.manage(plugin_archive::ArchiveInbox::default());
             // Restore in the background so slow/broken plugins cannot hold up the window.
             let install = local_plugin_install(app.handle());
             let restoring = plugin.clone();
@@ -516,6 +519,7 @@ pub fn run() {
             app.manage(PluginStartupState(tokio::sync::Mutex::new(PluginStartup { task: Some(task), error: None })));
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
             tray::setup(app.handle());
+            plugin_registry::setup_links(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

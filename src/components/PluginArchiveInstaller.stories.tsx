@@ -7,10 +7,10 @@ import { EMPTY_ARCHIVE } from "../lib/nativePluginArchive";
 
 const review = { reviewId: "a".repeat(32), id: "home-assistant", version: "0.2.0", protocolVersion: 1, runtime: "node" as const,
   identity: "b".repeat(64), archiveSha256: "c".repeat(64), files: 11, bytes: 100000, collision: false, runtimeStatus: "detected" as const, runtimeVersion: "22.18.0" };
-function Example({ state = "inspect" }: { state?: "inspect" | "invalid" | "replace" | "busy" | "error" | "runtime-missing" }) {
+function Example({ state = "inspect" }: { state?: "inspect" | "invalid" | "replace" | "busy" | "error" | "runtime-missing" | "registry-unavailable" }) {
   const [view, setView] = useState<ArchiveView>({ ...EMPTY_ARCHIVE,
-    review: state === "invalid" ? null : { ...review, collision: state === "replace", runtimeStatus: state === "runtime-missing" ? "not_found" : "detected" },
-    busy: state === "busy", error: state === "invalid" ? "This is not a supported .zdx ZIP. Use a complete root-layout prebuilt plugin with no links, ambiguous paths or ZIP extras."
+    review: state === "invalid" || state === "registry-unavailable" ? null : { ...review, collision: state === "replace", runtimeStatus: state === "runtime-missing" ? "not_found" : "detected" },
+    busy: state === "busy", error: state === "registry-unavailable" ? "Registry install requests are not available in this build: no trusted signed release resolver is configured. Nothing was downloaded or installed. Use Install from… → Local .zdx for a separately obtained archive; local archives remain unsigned and unverified." : state === "invalid" ? "This is not a supported .zdx ZIP. Use a complete root-layout prebuilt plugin with no links, ambiguous paths or ZIP extras."
       : state === "error" ? "The package could not be published without replacing existing files. Nothing was overwritten; refresh the catalog before trying again." : null });
   return <><p>Storybook simulation only. No files are installed, trusted or enabled.</p>
     <PluginArchiveDialog view={view} onCancel={() => setView(EMPTY_ARCHIVE)} onInstall={() => setView({ ...EMPTY_ARCHIVE, error: "Fixture install refused. No native files were written." })} /></>;
@@ -51,6 +51,12 @@ export const Busy: Story = { args: { state: "busy" }, play: async ({ canvasEleme
   await userEvent.keyboard("{Escape}"); await expect(dialog).toBeVisible();
 } };
 export const Error: Story = { args: { state: "error" } };
+export const RegistryUnavailable: Story = { args: { state: "registry-unavailable" }, play: async ({ canvasElement }) => {
+  const ui = within(canvasElement.querySelector("dialog")!);
+  await expect(ui.getByRole("heading", { name: "Plugin installation unavailable" })).toBeVisible();
+  await expect(ui.getByRole("alert")).toHaveTextContent("Nothing was downloaded or installed.");
+  await expect(ui.getByRole("button", { name: "Install disabled" })).toBeDisabled();
+} };
 export const RuntimeMissing: Story = { args: { state: "runtime-missing" }, play: async ({ canvasElement }) => {
   const ui = within(canvasElement.querySelector("dialog")!);
   await expect(ui.getByText(/Install is allowed/)).toBeVisible();
