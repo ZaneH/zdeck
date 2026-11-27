@@ -96,7 +96,8 @@ export const PluginErrorWithoutStripe: Story = { args: { initial: "one-failed" }
   const alert = canvasElement.querySelector<HTMLElement>(`[data-plugin-id=spotify] .settings-error`);
   if (!alert || alert.getAttribute("role") !== "alert") throw new Error("A plugin error must remain a visible alert.");
   const style = getComputedStyle(alert);
-  if (style.borderLeftWidth !== "0px") throw new Error("Plugin errors must not carry a colored left stripe.");
+  await expect([style.borderLeftWidth, style.borderLeftStyle, style.borderLeftColor])
+    .toEqual([style.borderRightWidth, style.borderRightStyle, style.borderRightColor]);
   if (parseFloat(style.paddingTop) < 10) throw new Error("Plugin errors need readable padding.");
 }};
 export const OneMenuAtATime: Story = { args: { initial: "ready" }, play: async ({ canvasElement }) => {

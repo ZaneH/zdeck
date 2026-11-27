@@ -429,10 +429,10 @@ input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor:
 .archive-facts { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr); gap: 6px 12px; margin: 0 0 16px; font-size: 12px; line-height: 1.6; }
 .archive-facts dt { color: var(--text-muted); }
 .archive-facts dd { margin: 0; overflow-wrap: anywhere; }
-.archive-dialog .settings-error { color: var(--text); border-left: 0; border-radius: 6px; padding: 12px 14px; }
+.archive-dialog .settings-error { color: var(--text); border-radius: 6px; padding: 12px 14px; }
 .archive-dialog .settings-actions { flex-wrap: wrap; }
-/* Plugin errors read as content, not a colored stripe; keep padding and top separation. */
-.plugin-settings .settings-error { margin-top: 10px; margin-bottom: 0; padding: 12px 14px; border-left: 0; border-radius: 6px; }
+/* Plugin errors keep the shared uniform border, with padding and top separation. */
+.plugin-settings .settings-error { margin-top: 10px; margin-bottom: 0; padding: 12px 14px; border-radius: 6px; }
 .plugin-settings .settings-error p { margin: 0; }
 .plugin-settings .settings-error p + p { margin-top: 6px; }
 .plugin-diagnostics ul { padding-left: 18px; }

@@ -41,8 +41,15 @@ export const Invalid: Story = { args: { state: "invalid" }, play: async ({ canva
   await expect(canvasElement.querySelector("dialog")).not.toBeVisible();
 } };
 export const ReplaceRefused: Story = { args: { state: "replace" }, play: async ({ canvasElement }) => {
-  const ui = within(canvasElement.querySelector("dialog")!); await expect(ui.getByRole("alert")).toHaveTextContent("Nothing will be replaced");
+  const dialog = canvasElement.querySelector("dialog")!; const ui = within(dialog);
+  const alert = ui.getByRole("alert"); await expect(alert).toHaveTextContent("Nothing will be replaced");
   await expect(ui.getByRole("button", { name: "Install disabled" })).toBeDisabled();
+  // A missing left border reads as a clipped edge; keep all four sides equal and inside the dialog.
+  const alertEl = canvasElement.querySelector("[role=alert]")!; const s = getComputedStyle(alertEl);
+  await expect([s.borderLeftWidth, s.borderLeftStyle, s.borderLeftColor]).toEqual([s.borderRightWidth, s.borderRightStyle, s.borderRightColor]);
+  const box = alertEl.getBoundingClientRect(); const frame = dialog.getBoundingClientRect();
+  await expect(box.left).toBeGreaterThanOrEqual(frame.left);
+  await expect(box.right).toBeLessThanOrEqual(frame.right);
 } };
 export const Busy: Story = { args: { state: "busy" }, play: async ({ canvasElement }) => {
   const dialog = canvasElement.querySelector<HTMLDialogElement>("dialog")!; const ui = within(dialog);
