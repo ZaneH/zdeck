@@ -31,6 +31,9 @@ interface ControlTileProps {
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
   semantics?: "preview" | "remote" | "live";
   onRename?: () => void;
+  onDuplicate?: () => void;
+  /** Present when the page cannot accept another control; the menu row stays visible and disabled. */
+  duplicateReason?: string;
   onDelete?: () => void;
   onPrimary?: () => void;
   onRefresh?: () => Promise<void>;
@@ -41,7 +44,7 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh, onRename, onDelete,
+  transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh, onRename, onDuplicate, duplicateReason, onDelete,
 }: ControlTileProps) {
   const tileRef = useRef<HTMLElement>(null);
   const [reading, setReading] = useState(false);
@@ -280,9 +283,17 @@ export function ControlTile({
           <span className="volume-readout" aria-hidden="true">{currentValue}{control.action === "volume" ? <span className="value-unit">%</span> : null}</span>
         </div>
       ) : null}
-      {onRename && onDelete ? <Dropdown label={`Options for ${control.label}`} value="" actionMenu contextTarget={tileRef}
-        disabled={disabled} options={[{ value: "rename", label: "Rename" }, { value: "delete", label: "Delete" }]}
-        onChange={(action) => { if (action === "rename") onRename(); else onDelete(); }} /> : null}
+      {onRename || onDuplicate || onDelete ? <Dropdown label={`Options for ${control.label}`} value="" actionMenu contextTarget={tileRef}
+        disabled={disabled} options={[
+          ...(onRename ? [{ value: "rename", label: "Rename" }] : []),
+          ...(onDuplicate ? [{ value: "duplicate", label: "Duplicate", ...(duplicateReason ? { description: duplicateReason, disabled: true } : {}) }] : []),
+          ...(onDelete ? [{ value: "delete", label: "Delete" }] : []),
+        ]}
+        onChange={(action) => {
+          if (action === "rename") onRename?.();
+          else if (action === "duplicate") onDuplicate?.();
+          else onDelete?.();
+        }} /> : null}
     </article>
   );
 }

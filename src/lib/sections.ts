@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 import { ACCENTS, THEMES } from "./types";
 import type { Accent, Deck, Section, Theme } from "./types";
-import { newId } from "./actions";
+import { freshId, newId } from "./actions";
+import { MAX_CONTROLS_PER_PAGE } from "./deck";
 
 /** Matches the schema's byte bound for section ids and names. */
 export const MAX_SECTION_NAME_BYTES = 128;
@@ -72,6 +73,53 @@ export function addSection(
     deck: mapSections(deck, pageId, () => sections),
     section,
   };
+}
+
+function truncateUtf8(value: string, maximum: number): string {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const size = utf8Length(character);
+    if (bytes + size > maximum) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+function copySectionName(name: string, sections: Section[]): string {
+  const used = new Set(sections.map((section) => section.name));
+  for (let index = 1; ; index += 1) {
+    const suffix = index === 1 ? " copy" : ` copy ${index}`;
+    const candidate = truncateUtf8(name.trimEnd(), MAX_SECTION_NAME_BYTES - utf8Length(suffix)) + suffix;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
+/** Inserts a deep copy after the original; null when controls would exceed the page limit. */
+export function duplicateSection(
+  deck: Deck,
+  pageId: string,
+  sectionId: string,
+): { deck: Deck; section: Section } | null {
+  const page = deck.pages.find((item) => item.id === pageId);
+  const index = page?.sections.findIndex((section) => section.id === sectionId) ?? -1;
+  if (!page || index < 0) return null;
+  const original = page.sections[index];
+  const total = page.sections.reduce((count, section) => count + section.controls.length, 0);
+  if (total + original.controls.length > MAX_CONTROLS_PER_PAGE) return null;
+
+  const usedSections = new Set(deck.pages.flatMap((item) => item.sections.map((section) => section.id)));
+  const usedControls = new Set(deck.pages.flatMap((item) => item.sections.flatMap((section) => section.controls.map((control) => control.id))));
+  const section: Section = {
+    ...structuredClone(original),
+    id: freshId("section", usedSections),
+    name: copySectionName(original.name, page.sections),
+    controls: original.controls.map((control) => ({ ...structuredClone(control), id: freshId("ctl", usedControls) })),
+  };
+  const sections = [...page.sections];
+  sections.splice(index + 1, 0, section);
+  return { deck: mapSections(deck, pageId, () => sections), section };
 }
 
 export function renameSection(

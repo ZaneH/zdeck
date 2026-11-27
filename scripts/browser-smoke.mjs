@@ -2117,6 +2117,55 @@ try {
   check("update reload was user-triggered", (await update.eval("window.__deckSmokeMarker")) === undefined);
   await update.screenshot("/tmp/deck-smoke-after-update.png");
 
+  // ------------------------------------------------------------ duplicate + compact history tooltips
+  const duplicateContext = (await cdp.send("Target.createBrowserContext")).browserContextId;
+  const duplicatePage = await openPage("duplicate", `${BASE}/`, { width: 960, height: 680 }, duplicateContext);
+  livePages.push(duplicatePage);
+  await duplicatePage.waitFor("!!document.querySelector('.setup-shell')");
+  await duplicatePage.eval(clickText('.setup-header .button', 'Skip setup'));
+  await duplicatePage.waitFor("!!document.querySelector('.app-shell') && !document.querySelector('.setup-shell')");
+  await duplicatePage.eval(`(() => { const tile = document.querySelector('.control-tile'); tile.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); return true; })()`);
+  await duplicatePage.waitFor("!!document.querySelector('.dropdown-context .dropdown-menu')");
+  await duplicatePage.eval(clickText('.dropdown-context [role="menuitem"]', 'Duplicate'));
+  check("control context menu duplicates in place and selects the copy", await duplicatePage.waitFor("[...document.querySelectorAll('.control-tile .tile-label')].slice(0, 2).map((node) => node.textContent).join('|') === 'Starting soon|Starting soon copy' && document.querySelector('.control-tile.is-selected .tile-label')?.textContent === 'Starting soon copy' && !document.querySelector('.preview-feedback')"), await duplicatePage.eval("[...document.querySelectorAll('.control-tile .tile-label')].map((node) => node.textContent).join('|')"));
+
+  const tooltip = async (label) => duplicatePage.eval(`(async () => {
+    const trigger = document.querySelector('[aria-label=${JSON.stringify(label)}]');
+    trigger.focus();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const tip = trigger.closest('.setting-help').querySelector('.setting-tooltip');
+    const style = getComputedStyle(tip);
+    const rect = tip.getBoundingClientRect();
+    const target = trigger.getBoundingClientRect();
+    return {
+      text: tip.textContent,
+      hidden: tip.getAttribute('aria-hidden'),
+      width: rect.width,
+      padding: style.padding,
+      fontSize: style.fontSize,
+      centered: Math.abs((rect.left + rect.right) / 2 - (target.left + target.right) / 2) <= 1,
+      below: rect.top >= target.bottom,
+      inViewport: rect.left >= 0 && rect.right <= innerWidth,
+    };
+  })()`);
+  const undoHelp = await tooltip("Undo");
+  check("Undo help is a compact content-sized tooltip under its icon", undoHelp.hidden === "false" && undoHelp.text === "Undo change" && undoHelp.width < 200 && undoHelp.padding === "6px 9px" && undoHelp.fontSize === "12px" && undoHelp.centered && undoHelp.below && undoHelp.inViewport, JSON.stringify(undoHelp));
+  await duplicatePage.screenshot("/tmp/zdeck-compact-history-tooltips.png");
+  await duplicatePage.eval(click('[aria-label="Undo"]'));
+  check("undo removes the duplicate control as one step", await duplicatePage.waitFor("[...document.querySelectorAll('.control-tile .tile-label')].slice(0, 2).map((node) => node.textContent).join('|') === 'Starting soon|Go live'"));
+  const redoHelp = await tooltip("Redo");
+  check("Redo help is compact with the exact action text", redoHelp.hidden === "false" && redoHelp.text === "Redo change" && redoHelp.width < 200 && redoHelp.padding === "6px 9px" && redoHelp.fontSize === "12px" && redoHelp.centered && redoHelp.below && redoHelp.inViewport, JSON.stringify(redoHelp));
+  await duplicatePage.eval(click('[aria-label="Redo"]'));
+  check("redo restores exactly one duplicate control", await duplicatePage.waitFor("[...document.querySelectorAll('.control-tile .tile-label')].filter((node) => node.textContent === 'Starting soon copy').length === 1"));
+  const trashHelp = await tooltip("Trash");
+  check("Trash help is compact with the exact action text", trashHelp.hidden === "false" && trashHelp.text === "Trash" && trashHelp.width < 200 && trashHelp.padding === "6px 9px" && trashHelp.fontSize === "12px" && trashHelp.centered && trashHelp.below && trashHelp.inViewport, JSON.stringify(trashHelp));
+
+  await duplicatePage.eval(click('.section-settings-trigger'));
+  await duplicatePage.waitFor("!!document.querySelector('.section-settings-menu')");
+  await duplicatePage.eval(clickText('.section-settings-menu [role="menuitem"]', 'Duplicate section'));
+  check("section settings menu duplicates the section with its controls", await duplicatePage.waitFor("[...document.querySelectorAll('.section-name-input')].map((input) => input.value).join('|') === 'Stream|Stream copy' && document.querySelector('.deck-section.is-selected .section-name-input')?.value === 'Stream copy' && document.querySelectorAll('.deck-section')[1].querySelectorAll('.control-tile').length === 5 && !document.querySelector('.preview-feedback')"), await duplicatePage.eval("[...document.querySelectorAll('.section-name-input')].map((input) => input.value).join('|')"));
+  await duplicatePage.captureArtifacts("duplicate-editor");
+
   // ------------------------------------------------------------ console errors
   for (const page of livePages) {
     const errors = page.errors.filter((e) => !/favicon/i.test(e));
@@ -2149,6 +2198,7 @@ try {
     "deck-smoke-offline-shell.png",
     "deck-smoke-update-banner.png",
     "deck-smoke-after-update.png",
+    "zdeck-compact-history-tooltips.png",
   ]) {
     const path = `/tmp/${name}`;
     if (existsSync(path)) console.log(`  ${path}`);

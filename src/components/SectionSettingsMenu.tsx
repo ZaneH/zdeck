@@ -12,7 +12,7 @@ const THEMES: { value: "" | Theme; label: string }[] = [
 
 export function SectionSettingsMenu({
   sectionName, controlCount, theme, accent, inheritedTheme, inheritedAccentName, disabled = false,
-  onTheme, onAccent,
+  onDuplicate, duplicateReason, onTheme, onAccent,
 }: {
   sectionName: string;
   controlCount: number;
@@ -21,6 +21,9 @@ export function SectionSettingsMenu({
   inheritedTheme: Theme;
   inheritedAccentName: string;
   disabled?: boolean;
+  onDuplicate: () => void;
+  /** Present when copying this section would exceed the page control limit. */
+  duplicateReason?: string | null;
   onTheme: (theme: Theme | null) => void;
   onAccent: (accent: Accent | null) => void;
 }) {
@@ -93,6 +96,14 @@ export function SectionSettingsMenu({
           <p className="section-settings-count" role="presentation">
             {controlCount} {controlCount === 1 ? "control" : "controls"}
           </p>
+          <button
+            type="button" role="menuitem" tabIndex={-1} className="section-settings-duplicate"
+            disabled={disabled || !!duplicateReason}
+            onClick={(event) => { event.stopPropagation(); choose(onDuplicate); }}
+          >
+            <span>Duplicate section</span>
+            {duplicateReason ? <span className="section-settings-reason">{duplicateReason}</span> : null}
+          </button>
           <div className="section-settings-group" role="group" aria-label="Theme">
             <p className="section-settings-label" role="presentation">Theme</p>
             {THEMES.map((option) => (

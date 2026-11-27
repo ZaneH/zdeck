@@ -64,6 +64,14 @@ export function newId(prefix: string): string {
   return `${prefix}_${random}`;
 }
 
+/** Adds a generated ID to `used`; repeats until it is unique in that set. */
+export function freshId(prefix: string, used: Set<string>): string {
+  let id = newId(prefix);
+  while (used.has(id)) id = newId(prefix);
+  used.add(id);
+  return id;
+}
+
 export function createControl(
   kind: ActionKind,
   options: ControlOptions = {},

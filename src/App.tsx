@@ -16,6 +16,7 @@ import {
   activePage,
   addControl,
   addPage,
+  duplicateControl,
   findControl,
   findPage,
   moveControl,
@@ -99,6 +100,7 @@ import type { FooterPreferences } from "./lib/footerPreferences";
 import { useServiceStatus } from "./lib/useServiceStatus";
 import {
   addSection,
+  duplicateSection,
   moveSection,
   pageArrowDelta,
   removeSection,
@@ -469,6 +471,20 @@ export default function App() {
     setPreviewNotice("Control moved to Trash. Local preview only.");
   };
 
+  const handleDuplicateControl = (controlId: string) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    const section = page.sections.find((item) => item.controls.some((control) => control.id === controlId));
+    const result = duplicateControl(deck, page.id, controlId);
+    if (!result) {
+      setPreviewNotice(`“${page.name}” already has ${MAX_CONTROLS_PER_PAGE} controls. Remove one before duplicating.`);
+      return;
+    }
+    commitDeck(result.deck);
+    setSelectedSectionId(section?.id ?? selectedSectionId);
+    setSelectedControlId(result.control.id);
+    setPreviewNotice(null);
+  };
+
   const handleRestoreTrash = (entry: TrashEntry): string | null => {
     if (desktop.live || desktop.inflight || desktop.pending) {
       return "Finish the current action before restoring.";
@@ -543,6 +559,22 @@ export default function App() {
     }
     commitDeck(result.deck);
     setSelectedSectionId(result.section.id);
+  };
+
+  const handleDuplicateSection = (sectionId: string) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    const source = page.sections.find((section) => section.id === sectionId);
+    const result = duplicateSection(deck, page.id, sectionId);
+    if (!result) {
+      setPreviewNotice(source
+        ? `“${page.name}” does not have room for ${source.controls.length} more controls (${MAX_CONTROLS_PER_PAGE} max). Remove some first.`
+        : "Could not duplicate this section.");
+      return;
+    }
+    commitDeck(result.deck);
+    setSelectedSectionId(result.section.id);
+    setSelectedControlId(null);
+    setPreviewNotice(null);
   };
 
   const handleRenameSection = (sectionId: string, name: string) => {
@@ -849,7 +881,8 @@ export default function App() {
               deck={deck} page={page} selectedSectionId={selectedSectionId}
               disabled={desktop.live || desktop.inflight || !!desktop.pending}
               onSelect={setSelectedSectionId} onAdd={handleAddSection}
-              onRename={handleRenameSection} onRemove={handleRemoveSection}
+              onRename={handleRenameSection} onDuplicate={handleDuplicateSection}
+              onRemove={handleRemoveSection}
               onMove={handleMoveSection} onTheme={handleSectionTheme}
               onAccent={handleSectionAccent}
               renderControls={(section) => (
@@ -872,6 +905,8 @@ export default function App() {
                           commitDeck(removeControl(deck, page.id, control.id));
                           if (selectedControlId === control.id) setSelectedControlId(null);
                         } : undefined}
+                        onDuplicate={!desktop.live && !desktop.inflight && !desktop.pending ? () => handleDuplicateControl(control.id) : undefined}
+                        duplicateReason={pageControls(page).length >= MAX_CONTROLS_PER_PAGE ? `Page has ${MAX_CONTROLS_PER_PAGE} controls. Remove one first.` : undefined}
                         onRefresh={control.action === "plugin" && control.presentation === "value" && plugin.native ? () => plugin.readState(control.pluginId) : undefined}
                         variant="editor"
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}

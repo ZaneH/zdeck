@@ -12,7 +12,7 @@ import type {
   Section,
   Theme,
 } from "./types";
-import { actionDefinition, clampVolume, createControl, newId } from "./actions";
+import { actionDefinition, clampVolume, createControl, freshId, newId } from "./actions";
 import { isPluginArgs, pluginIdentifier } from "./plugin";
 
 export const MAX_PAGES = 12;
@@ -224,6 +224,40 @@ export function removeControl(deck: Deck, pageId: string, controlId: string): De
     ...section,
     controls: section.controls.filter((control) => control.id !== controlId),
   }));
+}
+
+function copyLabel(label: string, used: Set<string>): string {
+  let candidate = `${label} copy`;
+  for (let index = 2; used.has(candidate); index += 1) candidate = `${label} copy ${index}`;
+  return candidate;
+}
+
+/** Inserts a deep copy after the original; null when the page is full or the source is gone. */
+export function duplicateControl(
+  deck: Deck,
+  pageId: string,
+  controlId: string,
+): { deck: Deck; control: Control } | null {
+  const page = findPage(deck, pageId);
+  if (!page || pageControls(page).length >= MAX_CONTROLS_PER_PAGE) return null;
+  const section = page.sections.find((item) => item.controls.some((control) => control.id === controlId));
+  const index = section?.controls.findIndex((control) => control.id === controlId) ?? -1;
+  if (!section || index < 0) return null;
+
+  const used = new Set(deck.pages.flatMap((item) => item.sections.flatMap((entry) => entry.controls.map((control) => control.id))));
+  const original = section.controls[index];
+  const control: Control = {
+    ...structuredClone(original),
+    id: freshId("ctl", used),
+    label: copyLabel(original.label, new Set(pageControls(page).map((item) => item.label))),
+  };
+  const next = mapPage(deck, pageId, (current) => ({
+    ...current,
+    sections: current.sections.map((item) => item.id === section.id
+      ? { ...item, controls: [...item.controls.slice(0, index + 1), control, ...item.controls.slice(index + 1)] }
+      : item),
+  }));
+  return { deck: next, control };
 }
 
 export function moveControl(

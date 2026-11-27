@@ -4,6 +4,7 @@ import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { ACCENTS } from "../lib/types";
 import type { Accent, Deck, Page, Section, Theme } from "../lib/types";
 import { sectionNameError, sectionStyle } from "../lib/sections";
+import { MAX_CONTROLS_PER_PAGE, pageControls } from "../lib/deck";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import { SectionSettingsMenu } from "./SectionSettingsMenu";
 
@@ -16,6 +17,7 @@ interface SectionListProps {
   onSelect: (sectionId: string) => void;
   onAdd: (afterSectionId: string | null) => void;
   onRename: (sectionId: string, name: string) => void;
+  onDuplicate: (sectionId: string) => void;
   onRemove: (sectionId: string) => void;
   onMove: (sectionId: string, delta: number) => void;
   onTheme: (sectionId: string, theme: Theme | null) => void;
@@ -26,7 +28,7 @@ interface SectionListProps {
 
 export function SectionList({
   deck, page, selectedSectionId, disabled = false,
-  onSelect, onAdd, onRename, onRemove, onMove, onTheme, onAccent, renderControls,
+  onSelect, onAdd, onRename, onDuplicate, onRemove, onMove, onTheme, onAccent, renderControls,
 }: SectionListProps) {
   const confirmRef = useRef<HTMLDialogElement>(null);
   const cancelRemoveRef = useRef<HTMLButtonElement>(null);
@@ -46,6 +48,7 @@ export function SectionList({
     ? page.sections.find((section) => section.id === confirmingId) ?? null
     : null;
   const accentName = ACCENTS.find((accent) => accent.value === deck.accent)?.name ?? deck.accent;
+  const pageControlCount = pageControls(page).length;
 
   useEffect(() => {
     setEditingId(null);
@@ -205,6 +208,10 @@ export function SectionList({
                     theme={section.theme ?? null} accent={section.accent ?? null}
                     inheritedTheme={deck.theme} inheritedAccentName={accentName}
                     disabled={disabled}
+                    onDuplicate={() => onDuplicate(section.id)}
+                    duplicateReason={pageControlCount + section.controls.length > MAX_CONTROLS_PER_PAGE
+                      ? `Page has ${MAX_CONTROLS_PER_PAGE} controls; a copy needs ${section.controls.length} more.`
+                      : null}
                     onTheme={(theme) => onTheme(section.id, theme)}
                     onAccent={(accent) => onAccent(section.id, accent)}
                   />

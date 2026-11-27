@@ -166,6 +166,9 @@ body:has(.deck-section.is-dragging), body:has(.deck-section.is-dragging) * { cur
 .section-settings-menu [role^="menuitem"]:hover:not(:disabled), .section-settings-menu [role^="menuitem"]:focus-visible { background: var(--surface-2); }
 .section-settings-menu [role^="menuitem"][aria-checked="true"] { background: var(--surface-2); color: var(--text); }
 .section-settings-menu [role^="menuitem"][aria-checked="true"]::after { content: "✓"; margin-left: auto; color: var(--focus); }
+.section-settings-menu .section-settings-duplicate { display: grid; gap: 2px; }
+.section-settings-menu [role^="menuitem"]:disabled { opacity: .45; cursor: not-allowed; }
+.section-settings-reason { color: var(--text-faint); font-size: 11px; line-height: 1.35; }
 @media (prefers-reduced-motion: reduce) { .section-settings-menu { animation: none; } }
 .section-error { margin: 0 0 8px; color: var(--danger); font-size: 12px; line-height: 1.5; }
 .canvas-panel { min-width: 0; }
@@ -482,7 +485,12 @@ input[type="checkbox"]:disabled, label:has(input[type="checkbox"]:disabled) { cu
 .setting-help > button { display: grid; place-items: center; width: 28px; height: 1.7em; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
 .setting-tooltip { position: absolute; z-index: 30; top: 100%; right: 0; width: min(280px, 75vw); padding: 12px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); box-shadow: 0 3px 8px #0004; opacity: 1; visibility: visible; transform: translateY(0); transition: opacity 120ms ease-out, transform 120ms ease-out; }
 .setting-tooltip[aria-hidden="true"] { opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; }
+.history-actions .setting-tooltip { top: calc(100% + 6px); left: 50%; right: auto; width: max-content; max-width: min(220px, calc(100vw - 24px)); padding: 6px 9px; font-size: 12px; line-height: 1.4; text-align: center; transform: translateX(-50%); }
+.history-actions .setting-tooltip[aria-hidden="true"] { transform: translateX(-50%) translateY(-3px); }
 @media (prefers-reduced-motion: reduce) { .setting-tooltip { transition: none; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .history-actions .setting-tooltip, .history-actions .setting-tooltip[aria-hidden="true"] { transform: translateX(-50%); }
+}
 .plugin-settings dd, .plugin-settings li { overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
 .plugin-settings dt { color: var(--text-muted); font-size: 12px; }
 .plugin-settings dd { min-width: 0; margin: 0; }
