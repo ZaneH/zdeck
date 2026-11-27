@@ -15,18 +15,19 @@ function SectionExample({ deckTheme, sectionTheme, accent }: { deckTheme: Theme;
   useEffect(() => { applyTheme(deckTheme, ACCENTS[0].value); }, [deckTheme]);
   // Production sectionStyle only sets --accent inline; without data-theme the section inherits the deck theme.
   const style = accent ? ({ "--accent": accent } as CSSProperties) : undefined;
+  const appearance = sectionTheme ?? deckTheme;
   return <div style={{ display: "grid", gap: 16, maxWidth: 520 }}>
-    <section className="deck-section" data-theme={sectionTheme ?? undefined} style={style}>
+    <section className="deck-section" data-theme={sectionTheme ?? undefined} data-appearance={appearance} style={style}>
       <h2 className="section-heading">Editor section</h2>
       <p>Inherited label text</p>
       <span className="sr-only" data-probe="muted" style={{ color: "var(--text-muted)" }} />
-      <div className="control-grid"><ControlTile control={tile} variant="editor" volume={50} /></div>
+      <div className="control-grid"><ControlTile control={tile} variant="editor" appearance={appearance} volume={50} /></div>
     </section>
-    <section className="phone-section" data-theme={sectionTheme ?? undefined} style={style}>
+    <section className="phone-section" data-theme={sectionTheme ?? undefined} data-appearance={appearance} style={style}>
       <h2 className="section-heading">Phone section</h2>
       <p>Inherited label text</p>
       <span className="sr-only" data-probe="muted" style={{ color: "var(--text-muted)" }} />
-      <div className="phone-grid"><ControlTile control={tile} variant="phone" volume={50} /></div>
+      <div className="phone-grid"><ControlTile control={tile} variant="phone" appearance={appearance} volume={50} /></div>
     </section>
   </div>;
 }
@@ -113,27 +114,54 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
   const supportsBackdrop = CSS.supports("backdrop-filter", "blur(1px)") || CSS.supports("-webkit-backdrop-filter", "blur(1px)");
   for (const section of sections) {
     const style = getComputedStyle(section);
+    const sectionTheme = section.dataset.theme ?? deckTheme;
+    const appearance = section.dataset.appearance ?? sectionTheme;
     // A phone section without its own data-theme has no backdrop; its text sits on the deck.
     const background = lightest(backdrops.map(backdrop => compositedSection(style.backgroundColor, backdrop)));
-    const sectionTheme = section.dataset.theme ?? deckTheme;
-    // The section text token follows the section's own theme, not the deck's.
-    expect(contrast(style.color, background)).toBeGreaterThanOrEqual(4.5);
-    const inherited = Array.from(section.querySelectorAll<HTMLElement>("p"));
-    expect(inherited.length).toBeGreaterThan(0);
-    for (const label of inherited) {
-      expect(getComputedStyle(label).color).toBe(style.color);
-      expect(contrast(getComputedStyle(label).color, background)).toBeGreaterThanOrEqual(4.5);
+    // Glass headings sit directly on the deck backdrop, including a flat Light deck.
+    if (appearance === "glass") {
+      const heading = section.querySelector<HTMLElement>(".section-heading")!;
+      for (const backdrop of backdrops) {
+        expect(contrast(getComputedStyle(heading).color, backdrop)).toBeGreaterThanOrEqual(4.5);
+      }
     }
-    // Explicit control colors stay scoped to their own element and stay readable.
-    const muted = section.querySelector<HTMLElement>("[data-probe=muted]")!;
-    for (const label of section.querySelectorAll<HTMLElement>(".section-heading, .tile-icon, .tile-label")) {
-      const color = getComputedStyle(label).color;
-      expect(color).toBe(getComputedStyle(muted).color);
-      expect(color).not.toBe(style.color);
-      expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
+    // Glass sections are transparent: their labels sit on the wallpaper, controls carry the material.
+    if (appearance !== "glass") {
+      // The section text token follows the section's own theme, not the deck's.
+      expect(contrast(style.color, background)).toBeGreaterThanOrEqual(4.5);
+      const inherited = Array.from(section.querySelectorAll<HTMLElement>("p"));
+      expect(inherited.length).toBeGreaterThan(0);
+      for (const label of inherited) {
+        expect(getComputedStyle(label).color).toBe(style.color);
+        expect(contrast(getComputedStyle(label).color, background)).toBeGreaterThanOrEqual(4.5);
+      }
+      // Explicit control colors stay scoped to their own element and stay readable.
+      const muted = section.querySelector<HTMLElement>("[data-probe=muted]")!;
+      for (const label of section.querySelectorAll<HTMLElement>(".section-heading, .tile-icon, .tile-label")) {
+        const color = getComputedStyle(label).color;
+        expect(color).toBe(getComputedStyle(muted).color);
+        expect(color).not.toBe(style.color);
+        expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
+      }
     }
     const tileElement = section.querySelector<HTMLElement>(".control-tile")!;
     const tileStyle = getComputedStyle(tileElement);
+    // Presentation belongs to the nearest appearance only: Glass hides the slider label and
+    // stretches the native range over the whole pill; Dark/Light keep their labelled horizontal fader.
+    const tileLabel = tileElement.querySelector<HTMLElement>(".tile-label")!;
+    const tileInput = tileElement.querySelector<HTMLInputElement>(".tile-volume input")!;
+    const inputBox = tileInput.getBoundingClientRect();
+    const tileBox = tileElement.getBoundingClientRect();
+    if (appearance === "glass") {
+      expect(getComputedStyle(tileLabel).display).toBe("none");
+      expect(inputBox.height).toBeGreaterThan(inputBox.width);
+      expect(Math.abs(inputBox.height - tileBox.height)).toBeLessThanOrEqual(2);
+      expect(Math.abs(inputBox.width - tileBox.width)).toBeLessThanOrEqual(2);
+    } else {
+      expect(getComputedStyle(tileLabel).display).not.toBe("none");
+      expect(getComputedStyle(tileInput).writingMode).not.toBe("vertical-lr");
+      expect(inputBox.height).toBeLessThan(tileBox.height);
+    }
     // Labels sit on the tile gradient; check both endpoints over the lightest group backdrop.
     const tileBackgrounds = paintedBackgrounds(tileStyle, background);
     const tileBackground = lightest(tileBackgrounds);
@@ -147,27 +175,32 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
       section.appendChild(probe);
       const color = getComputedStyle(probe).color;
       probe.remove();
-      expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
+      if (appearance !== "glass") expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(color, tileBackground)).toBeGreaterThanOrEqual(4.5);
     }
     // Glass must stay translucent after composition rather than pretending an opaque surface.
-    if (sectionTheme === "glass") {
+    if (appearance === "glass") {
       expect(alphaOf(style.backgroundColor)).toBeLessThan(1);
       const tileTokens = colorsIn(tileStyle.backgroundImage);
       expect(tileTokens.length).toBeGreaterThan(0);
       for (const token of tileTokens) expect(alphaOf(token)).toBeLessThan(1);
     }
-    // Blur belongs to the group boundary only; a per-tile filter multiplies the cost.
+    // Glass controls own the material; Dark/Light keep flat tiles.
     const tileFilter = tileStyle.getPropertyValue("backdrop-filter") || tileStyle.getPropertyValue("-webkit-backdrop-filter");
-    expect(tileFilter === "none" || tileFilter === "").toBe(true);
-    const sectionFilter = style.getPropertyValue("backdrop-filter") || style.getPropertyValue("-webkit-backdrop-filter");
-    if (sectionTheme === "glass" && supportsBackdrop) expect(sectionFilter).toContain("blur(18px)");
-    else expect(sectionFilter === "none" || sectionFilter === "").toBe(true);
-    // Preserve the old geometry: phone groups were 8px in Dark/Light; Glass groups are 22px.
-    if (section.classList.contains("phone-section")) {
-      if (section.dataset.theme) expect(style.borderRadius).toBe(sectionTheme === "glass" ? "22px" : "8px");
+    if (appearance === "glass") {
+      if (supportsBackdrop) expect(tileFilter).toContain("blur");
     } else {
-      expect(style.borderRadius).toBe(sectionTheme === "glass" ? "22px" : "10px");
+      expect(tileFilter === "none" || tileFilter === "").toBe(true);
+    }
+    const sectionFilter = style.getPropertyValue("backdrop-filter") || style.getPropertyValue("-webkit-backdrop-filter");
+    expect(sectionFilter === "none" || sectionFilter === "").toBe(true);
+    // Preserve Dark/Light geometry; Glass intentionally removes the group container.
+    if (appearance === "glass") {
+      expect(style.borderRadius).toBe("0px");
+    } else if (section.classList.contains("phone-section")) {
+      if (section.dataset.theme) expect(style.borderRadius).toBe("8px");
+    } else {
+      expect(style.borderRadius).toBe("10px");
     }
     // Assert the tile's resolved accent, not the serialized custom-property text.
     const probe = document.createElement("span");

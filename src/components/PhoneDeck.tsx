@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { clampVolume, controlVolume } from "../lib/actions";
 import { activePage, findPage, pageControls } from "../lib/deck";
-import { sectionStyle } from "../lib/sections";
+import { sectionAppearance, sectionStyle } from "../lib/sections";
 import { getStorage, loadDeck, STORAGE_KEY } from "../lib/persistence";
 import type { LoadStatus } from "../lib/persistence";
 import { applyTheme } from "../lib/theme";
@@ -134,7 +134,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
         {page.sections.map((section) => (
           <section
             key={section.id} className="phone-section" data-phone-section={section.id}
-            data-theme={section.theme} style={sectionStyle(section)}
+            data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
             aria-labelledby={`phone-section-${section.id}`}
           >
             <h2 id={`phone-section-${section.id}`} className="section-heading">{section.name}</h2>
@@ -145,6 +145,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
                   control={control}
                   plugins={plugins}
                   variant="phone"
+                  appearance={sectionAppearance(deck, section).theme}
                   volume={previewVolumes[control.id] ?? controlVolume(control)}
                   pressed={pressedId === control.id}
                   onPrimary={() => press(control)}

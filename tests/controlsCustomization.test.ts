@@ -15,7 +15,8 @@ describe("control layout and ordering", () => {
     for (const control of createDefaultDeck().pages.flatMap((page) => page.sections.flatMap((section) => section.controls))) {
       for (const variant of ["editor", "phone"] as const) {
         const html = renderToStaticMarkup(createElement(ControlTile, { control, variant, volume: 50 }));
-        expect(html).toContain('--column-span:1;grid-row:span 1');
+        expect(html).not.toContain('--column-span');
+        expect(html).not.toContain('data-column-span');
       }
     }
   });
@@ -30,7 +31,9 @@ describe("control layout and ordering", () => {
     const control = deck.pages[0].sections[0].controls[2];
     for (const variant of ["editor", "phone"] as const) {
       expect(renderToStaticMarkup(createElement(ControlTile, { control, variant, semantics: "remote", volume: 50 })))
-        .toContain('--column-span:4;grid-row:span 24');
+        .toContain('--column-span:4;--row-span:24');
+      expect(renderToStaticMarkup(createElement(ControlTile, { control, variant, semantics: "remote", volume: 50 })))
+        .toContain('data-column-span="4" data-row-span="24"');
     }
   });
 

@@ -105,6 +105,7 @@ import {
   pageArrowDelta,
   removeSection,
   renameSection,
+  sectionAppearance,
   sectionNameError,
   setSectionAccent,
   setSectionTheme,
@@ -909,6 +910,7 @@ export default function App() {
                         duplicateReason={pageControls(page).length >= MAX_CONTROLS_PER_PAGE ? `Page has ${MAX_CONTROLS_PER_PAGE} controls. Remove one first.` : undefined}
                         onRefresh={control.action === "plugin" && control.presentation === "value" && plugin.native ? () => plugin.readState(control.pluginId) : undefined}
                         variant="editor"
+                        appearance={sectionAppearance(deck, section).theme}
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
                         semantics={desktop.live ? "live" : "preview"}
                         disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}

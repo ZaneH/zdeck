@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
 import { activePage, findControl, findPage, pageControls } from "../lib/deck";
-import { sectionStyle } from "../lib/sections";
+import { sectionAppearance, sectionStyle } from "../lib/sections";
 import { applyTheme } from "../lib/theme";
 import { useRemotePhone } from "../lib/useRemotePhone";
 import type { RemotePhase } from "../lib/remotePhone";
@@ -296,7 +296,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
         {page.sections.map((section) => (
           <section
             key={section.id} className="phone-section" data-phone-section={section.id}
-            data-theme={section.theme} style={sectionStyle(section)}
+            data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
             aria-labelledby={`remote-section-${section.id}`}
           >
             <h2 id={`remote-section-${section.id}`} className="section-heading">{section.name}</h2>
@@ -308,6 +308,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
                   plugins={remote.plugins}
                   onRefresh={control.presentation === "value" ? () => remote.refreshValue(control.id) : undefined}
                   variant="phone"
+                  appearance={sectionAppearance(deck, section).theme}
                   semantics="remote"
                   disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
                   transientDisabled={transientSlider && remote.busyControlId !== control.id}

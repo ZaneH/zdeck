@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { ACCENTS } from "../lib/types";
 import type { Accent, Deck, Page, Section, Theme } from "../lib/types";
-import { sectionNameError, sectionStyle } from "../lib/sections";
+import { sectionAppearance, sectionNameError, sectionStyle } from "../lib/sections";
 import { MAX_CONTROLS_PER_PAGE, pageControls } from "../lib/deck";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import { SectionSettingsMenu } from "./SectionSettingsMenu";
@@ -131,7 +131,7 @@ export function SectionList({
             <section
               key={section.id} id={`section-card-${section.id}`} data-section-id={section.id}
               className={`deck-section${section.id === selected?.id ? " is-selected" : ""}${section.id === draggingId ? " is-dragging" : ""}${section.id === dropId ? " is-drop-target" : ""}`}
-              data-theme={section.theme} style={sectionStyle(section)}
+              data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
               aria-labelledby={`section-${section.id}`}
             >
               <h2 id={`section-${section.id}`} className="sr-only">{section.name}</h2>

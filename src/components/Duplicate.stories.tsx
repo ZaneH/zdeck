@@ -9,7 +9,7 @@ import {
   duplicateControl,
   pageControls,
 } from "../lib/deck";
-import { duplicateSection } from "../lib/sections";
+import { duplicateSection, sectionAppearance } from "../lib/sections";
 import type { Deck } from "../lib/types";
 import { ControlTile } from "./ControlTile";
 import { SectionList } from "./SectionList";
@@ -33,7 +33,7 @@ function DuplicateHarness({ deck: initialDeck }: { deck: Deck }) {
     }} onRemove={() => {}} onMove={() => {}} onTheme={() => {}} onAccent={() => {}}
     renderControls={(section) => <div className="control-grid">
       {section.controls.map((control) => <ControlTile
-        key={control.id} control={control} variant="editor" volume={controlVolume(control)}
+        key={control.id} control={control} variant="editor" appearance={sectionAppearance(deck, section).theme} volume={controlVolume(control)}
         selected={selectedControlId === control.id}
         onRename={() => {}} onDelete={() => {}}
         onDuplicate={() => {

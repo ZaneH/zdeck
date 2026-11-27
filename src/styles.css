@@ -9,7 +9,7 @@
   font-size: 13px;
   --accent: #4cc9f0;
 }
-:root, [data-theme="dark"] {
+:root, [data-theme="dark"], [data-appearance="dark"] {
   --bg: #18191b;
   --bg-soft: #1c1e21;
   --surface: #212326;
@@ -52,9 +52,10 @@
   --phone-inherited-border: none;
   --phone-inherited-radius: 0;
   --material-filter: none;
+  --tile-backdrop-filter: none;
   color-scheme: dark;
 }
-[data-theme="light"] {
+[data-theme="light"], [data-appearance="light"] {
   --bg: #f4f5f6;
   --bg-soft: #ebeef0;
   --surface: #ffffff;
@@ -94,58 +95,58 @@
   --phone-inherited-border: none;
   --phone-inherited-radius: 0;
   --material-filter: none;
+  --tile-backdrop-filter: none;
   color-scheme: light;
 }
-[data-theme="glass"] {
-  --bg: #302844;
-  --bg-soft: rgba(48, 40, 68, 0.88);
-  --surface: rgba(48, 40, 68, 0.88);
-  --surface-2: rgba(81, 68, 111, 0.88);
-  --surface-3: rgba(81, 68, 111, 0.96);
-  --border: rgba(255, 255, 255, 0.22);
-  --border-strong: rgba(255, 255, 255, 0.4);
+[data-theme="glass"], [data-appearance="glass"] {
+  --bg: #c8b4f2;
+  --bg-soft: rgba(255, 255, 255, 0.2);
+  --surface: rgba(32, 28, 44, 0.72);
+  --surface-2: rgba(255, 255, 255, 0.16);
+  --surface-3: rgba(255, 255, 255, 0.24);
+  --border: rgba(255, 255, 255, 0.28);
+  --border-strong: rgba(255, 255, 255, 0.46);
   --text: #ffffff;
-  --text-muted: #ece7f9;
-  --text-faint: #d9d1ef;
-  --danger: #ffc9d1;
-  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
-  --warning: #ffe3a8;
-  --focus: color-mix(in srgb, var(--accent) 45%, #ffffff);
-  --key-bottom: rgba(20, 12, 36, 0.35);
-  --key-light: rgba(255, 255, 255, 0.22);
+  --text-muted: #ffffff;
+  --text-faint: rgba(255, 255, 255, 0.86);
+  --danger: #ffe0e5;
+  --danger-soft: rgba(60, 20, 36, 0.3);
+  --warning: #fff0c4;
+  --focus: #ffffff;
+  --key-bottom: rgba(22, 18, 32, 0.4);
+  --key-light: rgba(255, 255, 255, 0.3);
   --control-accent: var(--accent);
   --control-accent-weight: 100%;
   --app-bg-image:
-    radial-gradient(120% 100% at 82% 0%, rgba(182, 154, 250, 0.42), transparent 62%),
-    radial-gradient(90% 80% at 8% 92%, rgba(255, 138, 195, 0.24), transparent 60%),
-    radial-gradient(70% 70% at 96% 82%, rgba(112, 235, 255, 0.18), transparent 65%),
-    linear-gradient(155deg, #4a3d6b 0%, #302844 55%, #241d38 100%);
-  --section-bg: rgba(48, 40, 68, 0.82);
-  --section-border: rgba(255, 255, 255, 0.22);
-  --section-radius: 22px;
-  --phone-section-radius: 22px;
-  --section-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 18px 40px rgba(28, 18, 48, 0.35);
-  --tile-border: rgba(255, 255, 255, 0.24);
-  --tile-surface: linear-gradient(160deg, rgba(91, 77, 126, 0.92), rgba(59, 49, 84, 0.9));
-  --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 10px 24px rgba(30, 20, 50, 0.28);
-  --tile-press-shadow: inset 0 1px 3px rgba(20, 12, 36, 0.4), 0 1px 2px rgba(30, 20, 50, 0.24);
+    radial-gradient(80% 70% at 88% 4%, rgba(255, 164, 214, 0.66), transparent 64%),
+    radial-gradient(70% 64% at 4% 96%, rgba(108, 232, 255, 0.58), transparent 66%),
+    radial-gradient(90% 80% at 16% 8%, rgba(255, 255, 255, 0.42), transparent 60%),
+    linear-gradient(155deg, #d9c8ff 0%, #c8b4f2 42%, #b59ae9 100%);
+  --section-bg: transparent;
+  --section-border: transparent;
+  --section-radius: 0;
+  --phone-section-radius: 0;
+  --section-shadow: none;
+  --tile-border: rgba(255, 255, 255, 0.18);
+  --tile-surface: linear-gradient(160deg, rgba(42, 38, 54, 0.72), rgba(28, 25, 38, 0.82));
+  --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26), 0 8px 22px rgba(40, 24, 70, 0.2);
+  --tile-press-shadow: inset 0 2px 8px rgba(18, 12, 30, 0.42), 0 1px 2px rgba(40, 24, 70, 0.18);
   --tile-press-lift: 1px;
-  --tile-radius: 20px;
+  --tile-radius: 22px;
   --icon-radius: 50%;
   --slider-thumb-radius: 999px;
-  --card-bg: rgba(48, 40, 68, 0.78);
+  --card-bg: transparent;
   --card-border: transparent;
-  --card-padding: 16px 18px;
-  --card-radius: 20px;
-  --phone-inherited-bg: rgba(48, 40, 68, 0.82);
-  --phone-inherited-padding: 12px;
-  --phone-inherited-border: 1px solid rgba(255, 255, 255, 0.22);
-  --phone-inherited-radius: 22px;
+  --card-padding: 0;
+  --card-radius: 0;
+  --phone-inherited-bg: transparent;
+  --phone-inherited-padding: 0;
+  --phone-inherited-border: none;
+  --phone-inherited-radius: 0;
   --material-filter: none;
+  --tile-backdrop-filter: blur(18px) saturate(145%);
+  --on-wallpaper: #ffffff;
   color-scheme: dark;
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  [data-theme="glass"] { --material-filter: blur(18px) saturate(140%); }
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { min-height: 100%; overscroll-behavior: none; }
@@ -275,7 +276,7 @@ body:has(.deck-section.is-dragging), body:has(.deck-section.is-dragging) * { cur
 .control-grid:has(.empty-key) { grid-template-columns: minmax(0, 1fr); }
 .control-tile, .setup-demo-key, .setup-choice { position: relative; min-width: 0; border: 1px solid var(--tile-border); border-radius: var(--tile-radius); background: var(--tile-surface); box-shadow: var(--tile-shadow); transition: transform .13s, box-shadow .13s, border-color .15s; }
 /* Recompute at the tile so a section's local --accent (no data-theme) also tints its controls. */
-.control-tile { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; --control-accent: color-mix(in srgb, var(--accent) var(--control-accent-weight), var(--text)); }
+.control-tile { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; --control-accent: color-mix(in srgb, var(--accent) var(--control-accent-weight), var(--text)); --column-span: 1; --row-span: 1; -webkit-backdrop-filter: var(--tile-backdrop-filter); backdrop-filter: var(--tile-backdrop-filter); }
 .control-tile[data-variant="phone"] { animation: key-arrive .34s cubic-bezier(.2,.7,.2,1) backwards; }
 .control-tile:not(.is-disabled):hover, .setup-demo-key:hover { border-color: var(--text-muted); }
 .control-tile.is-selected { border-color: var(--focus); outline: 1px solid var(--focus); outline-offset: 2px; }
@@ -284,7 +285,7 @@ body:has(.deck-section.is-dragging), body:has(.deck-section.is-dragging) * { cur
 .tile-primary:focus-visible { outline-offset: -4px; }
 .tile-icon { color: var(--text-muted); }
 .tile-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 100%; font-size: 13px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; -webkit-user-select: none; user-select: none; }
-.control-tile { grid-column: span min(var(--column-span, 1), var(--grid-columns, 4)); }
+.control-tile { grid-column: span min(var(--column-span, 1), var(--grid-columns, 4)); grid-row: span var(--row-span, 1); }
 .control-tile:not([data-presentation="button"]) .tile-primary { flex: none; flex-direction: row; justify-content: flex-start; gap: 7px; min-height: 34px; padding: 10px 12px 0; text-align: left; }
 .control-tile:not([data-presentation="button"]) .tile-icon { display: flex; flex: none; }
 .control-tile:not([data-presentation="button"]) .tile-icon svg { width: 15px; height: 15px; }
@@ -759,11 +760,182 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .control-tile.is-transient-disabled { opacity: 1; }
 .control-tile.is-busy { opacity: 1; border-color: var(--focus); }
 
+/* Glass: the wallpaper shows through; individual controls carry the material. */
+.phone-section[data-appearance="glass"],
+.deck-section[data-appearance="glass"] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.phone-section[data-appearance="glass"] .section-heading,
+.deck-section[data-appearance="glass"] .section-heading { color: var(--on-wallpaper); text-shadow: 0 1px 2px rgba(20, 12, 40, .7), 0 0 12px rgba(20, 12, 40, .3); }
+.deck-section[data-appearance="glass"].is-selected { outline: 2px solid var(--focus); outline-offset: 6px; }
+.deck-section[data-appearance="glass"].is-drop-target { border: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); }
+[data-theme="glass"] .phone-page-heading h1,
+[data-theme="glass"] .phone-status,
+[data-theme="glass"] .phone-notice,
+[data-theme="glass"] .phone-section[data-appearance="glass"] .section-heading,
+[data-theme="glass"] .deck-section[data-appearance="glass"] .section-heading,
+:root[data-theme="light"] .phone-section[data-appearance="glass"] .section-heading,
+:root[data-theme="light"] .deck-section[data-appearance="glass"] .section-heading { color: #2a1f3d; text-shadow: 0 1px 0 rgba(255, 255, 255, .42); }
+[data-theme="glass"] .phone-header .icon-button { color: #2a1f3d; }
+
+/* Four compact columns on Glass phones; Dark/Light keep their existing 2/4 rhythm. */
+.phone-section[data-appearance="glass"] .phone-grid {
+  --grid-columns: 4;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 76px;
+  gap: 12px;
+}
+@media (max-width: 360px) {
+  .phone-section[data-appearance="glass"] .phone-grid { grid-auto-rows: 68px; gap: 8px; }
+}
+
+/* Theme-only default spans; explicit saved spans remain authoritative. */
+[data-appearance="glass"] .control-tile[data-action="obs-scene"]:not([data-column-span]) { --column-span: 2; }
+[data-appearance="glass"] .control-tile[data-action="obs-scene"]:not([data-row-span]) { --row-span: 2; }
+[data-appearance="glass"] .control-tile[data-action="media-play-pause"]:not([data-column-span]) { --column-span: 2; }
+[data-appearance="glass"] .control-tile[data-presentation="value"]:not([data-column-span]) { --column-span: 2; }
+[data-appearance="glass"] .control-tile[data-presentation="value"]:not([data-row-span]) { --row-span: 2; }
+[data-appearance="glass"] .control-tile[data-presentation="toggle-switch"]:not([data-column-span]),
+[data-appearance="glass"] .control-tile[data-presentation="toggle-button"]:not([data-column-span]) { --column-span: 2; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"]:not([data-row-span]) { --row-span: 2; }
+
+/*
+ * Presentation slot contract (theme stylesheet). A theme may own the visibility, size,
+ * position, order and shape of these existing slots. It must not change the action, accessible
+ * name, focus target, hit area, disabled/unknown/reading-failed semantics, or explicit spans.
+ *   .tile-primary  container (button or static) for .tile-icon and .tile-label
+ *   .tile-icon     action icon; .tile-label visual label (may be hidden when another name exists)
+ *   .tile-volume   numeric track host; its native input keeps the gesture and value semantics
+ *   .tile-reading  read-only value output; .tile-toggle  state control
+ * Dark and Light below keep this contract's default presentation unchanged.
+ */
+
+/* Heterogeneous Control Center shapes: circles, capsules, scene/value modules. */
+[data-appearance="glass"] .control-tile[data-action="mic-mute"],
+[data-appearance="glass"] .control-tile[data-action="plugin"][data-presentation="button"] { border-radius: 50%; }
+[data-appearance="glass"] .control-tile[data-action="media-play-pause"],
+[data-appearance="glass"] .control-tile[data-presentation="toggle-switch"],
+[data-appearance="glass"] .control-tile[data-presentation="toggle-button"] { border-radius: 999px; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] { border-radius: 999px; }
+[data-appearance="glass"] .control-tile .tile-icon { color: #fff; }
+[data-appearance="glass"] .control-tile .tile-label { text-shadow: 0 1px 2px rgba(12, 8, 22, .5); }
+
+/* Circular icon-only controls: bigger icon, no visual label; the button keeps its accessible name. */
+[data-appearance="glass"] .control-tile[data-action="mic-mute"] .tile-primary,
+[data-appearance="glass"] .control-tile[data-action="plugin"][data-presentation="button"] .tile-primary {
+  gap: 0;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+[data-appearance="glass"] .control-tile[data-action="mic-mute"] .tile-icon svg,
+[data-appearance="glass"] .control-tile[data-action="plugin"][data-presentation="button"] .tile-icon svg { width: 28px; height: 28px; }
+[data-appearance="glass"] .control-tile[data-action="mic-mute"] .tile-label,
+[data-appearance="glass"] .control-tile[data-action="plugin"][data-presentation="button"] .tile-label { display: none; }
+
+[data-appearance="glass"] .control-tile[data-action="media-play-pause"] .tile-primary {
+  flex-direction: row;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+}
+[data-appearance="glass"] .control-tile[data-action="media-play-pause"] .tile-label { font-size: 12px; }
+[data-appearance="glass"] .control-tile[data-action="obs-scene"] .tile-primary { gap: 8px; padding: 12px; }
+[data-appearance="glass"] .control-tile[data-action="obs-scene"] .tile-icon svg { width: 24px; height: 24px; }
+[data-appearance="glass"] .control-tile[data-action="obs-scene"] .tile-label { font-size: 13px; }
+
+/* The slider pill is the track: a full-bleed native input paints the white level over smoke. */
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-primary {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  pointer-events: none;
+}
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(24, 19, 38, .78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-icon svg { width: 16px; height: 16px; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-label { display: none; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  padding: 0;
+}
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  border-radius: 999px;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  background: linear-gradient(to top, rgba(255, 255, 255, .94) var(--control-fill), rgba(255, 255, 255, .14) var(--control-fill));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3);
+  cursor: pointer;
+}
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input:focus-visible { outline: none; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-primary:focus-visible { outline: none; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"]:has(input:focus-visible),
+[data-appearance="glass"] .control-tile[data-presentation="slider"]:has(.tile-primary:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input:disabled { cursor: not-allowed; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input::-webkit-slider-runnable-track { height: 100%; background: transparent; box-shadow: none; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input::-moz-range-track { height: 100%; background: transparent; box-shadow: none; }
+/* No conventional thumb: the whole pill is the hit target and the fill is the value. */
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input::-webkit-slider-thumb { width: 1px; height: 1px; margin: 0; border: 0; background: transparent; box-shadow: none; opacity: 0; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .tile-volume input::-moz-range-thumb { width: 1px; height: 1px; border: 0; background: transparent; box-shadow: none; opacity: 0; }
+[data-appearance="glass"] .control-tile[data-presentation="slider"] .volume-readout { display: none; }
+
+/* Active toggles turn luminous; inactive controls stay smoky. */
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]),
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) {
+  border-color: rgba(255, 255, 255, .7);
+  background: linear-gradient(180deg, #ffffff, #eee8ff);
+  box-shadow: inset 0 1px 0 #fff, 0 8px 22px rgba(40, 24, 70, .22);
+}
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-icon,
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .tile-icon,
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-label,
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .tile-label,
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-toggle,
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .tile-toggle { color: #241733; text-shadow: none; }
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-toggle,
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .tile-toggle { background: transparent; border-color: transparent; }
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .toggle-button::before { background: #241733; }
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .toggle-track { background: #241733; border-color: #241733; }
+[data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .toggle-track span { background: #fff; }
+[data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-toggle[aria-pressed="true"] { color: #241733; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 @media (forced-colors: active) {
-  [data-theme="glass"] {
+  .phone-section[data-appearance="glass"], .deck-section[data-appearance="glass"] { background: Canvas; border: 1px solid CanvasText; }
+  [data-theme="glass"], [data-appearance="glass"] {
     --section-bg: Canvas;
     --section-shadow: none;
     --tile-surface: Canvas;
@@ -777,6 +949,14 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
     --border: CanvasText;
     --border-strong: CanvasText;
     --material-filter: none;
+    --tile-backdrop-filter: none;
+  }
+  [data-theme="glass"] .phone-section[data-appearance="glass"],
+  [data-theme="glass"] .deck-section[data-appearance="glass"],
+  [data-appearance="glass"] .phone-section[data-appearance="glass"],
+  [data-appearance="glass"] .deck-section[data-appearance="glass"] {
+    background: Canvas;
+    border: 1px solid CanvasText;
   }
 }
 

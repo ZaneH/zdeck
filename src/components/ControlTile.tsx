@@ -5,7 +5,7 @@ import { controlContract, effectivePresentation, presentationCompatible } from "
 import { pluginValue, pluginEntry, EMPTY_PLUGIN } from "../lib/plugin";
 import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
-import type { Control } from "../lib/types";
+import type { Control, Theme } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
 import { Dropdown } from "./Dropdown";
 import { verticalReorderIndex } from "../lib/tileNavigation";
@@ -20,6 +20,8 @@ interface ControlTileProps {
   plugins?: PluginSnapshots;
   order?: { index: number; total: number; move: (sourceId: string, targetIndex: number) => void };
   variant: "editor" | "phone";
+  /** Resolved section appearance; drives Glass-only vertical slider semantics. */
+  appearance?: Theme;
   volume: number;
   selected?: boolean;
   pressed?: boolean;
@@ -43,7 +45,7 @@ interface ControlTileProps {
 }
 
 export function ControlTile({
-  control, variant, volume, selected = false, pressed = false, disabled = false,
+  control, variant, appearance = "dark", volume, selected = false, pressed = false, disabled = false,
   transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh, onRename, onDuplicate, duplicateReason, onDelete,
 }: ControlTileProps) {
   const tileRef = useRef<HTMLElement>(null);
@@ -111,10 +113,11 @@ export function ControlTile({
     <article ref={tileRef}
       onContextMenu={event => { if (variant === "editor") event.preventDefault(); }}
       className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${transientDisabled ? " is-transient-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
-      style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}`,
+      style={{ ...(control.columnSpan ? { "--column-span": control.columnSpan } : {}), ...(control.rowSpan ? { "--row-span": control.rowSpan } : {}),
         ...(numeric ? { "--control-fill": `${100 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}%` } : {}),
       } as CSSProperties}
       data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
+      data-column-span={control.columnSpan} data-row-span={control.rowSpan}
       data-order-index={order?.index}
       onPointerDownCapture={(event) => {
         if (!order || disabled || event.button !== 0 || (event.target as HTMLElement).closest(".tile-reading button, .dropdown")) return;
@@ -212,7 +215,7 @@ export function ControlTile({
           </label>
           <input
             id={`vol-${variant}-${control.id}`} type="range" min={numeric.minimum} max={numeric.maximum} step={numeric.step} value={currentValue}
-            disabled={disabled} hidden={presentation === "dial"}
+            disabled={disabled} hidden={presentation === "dial"} aria-orientation={appearance === "glass" && presentation === "slider" ? "vertical" : undefined}
             onChange={(event) => changeValue(Number(event.target.value))}
             onPointerDown={(event) => {
               volumeGesture.current = !disabled && event.button === 0 && event.isPrimary ? `pointer:${event.pointerId}` : null;

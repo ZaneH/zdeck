@@ -744,7 +744,7 @@ try {
   await editor.waitFor("!!document.querySelector('.settings-view')");
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
   await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Glass'));
-  check("Glass applies the opted-in backdrop and theme color", await editor.waitFor("document.documentElement.dataset.theme === 'glass' && getComputedStyle(document.body).backgroundColor === 'rgb(48, 40, 68)' && getComputedStyle(document.body).backgroundImage.includes('radial-gradient') && document.querySelector('meta[name=theme-color]').content === '#302844'"));
+  check("Glass applies the opted-in backdrop and theme color", await editor.waitFor("document.documentElement.dataset.theme === 'glass' && getComputedStyle(document.body).backgroundColor === 'rgb(200, 180, 242)' && getComputedStyle(document.body).backgroundImage.includes('radial-gradient') && document.querySelector('meta[name=theme-color]').content === '#c8b4f2'"));
   check("Appearance labels and the Glass value stay unclipped", await editor.eval("(() => { const labels = [...document.querySelectorAll('.appearance-fields .dropdown-label, .appearance-fields .dropdown-value')]; const field = document.querySelector('.appearance-fields'); return labels.length === 4 && labels.every((el) => el.scrollWidth <= el.clientWidth + 1) && field.scrollWidth <= field.clientWidth + 1 && [...document.querySelectorAll('.appearance-fields .dropdown-trigger')].every((el) => el.getBoundingClientRect().right <= innerWidth + 1); })()"));
   await editor.screenshot("/tmp/deck-design-glass-settings.png");
   await editor.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 680, deviceScaleFactor: 1, mobile: false });
@@ -753,9 +753,66 @@ try {
   await editor.send("Emulation.clearDeviceMetricsOverride");
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
-  check("Glass editor groups and tiles use the rounded material", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '22px' && getComputedStyle(document.querySelector('.control-tile')).borderRadius === '20px'"));
-  check("Glass blurs only the group boundary", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(tile).trim()) && (!supported || filter(section).includes('blur(18px)')); })()"));
+  check("Glass editor groups are transparent and controls carry the rounded material", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '0px' && getComputedStyle(document.querySelector('.deck-section')).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.control-tile')).borderRadius === '22px'"));
+  check("Glass controls own the blur while the section stays clear", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(section).trim()) && (!supported || filter(tile).includes('blur(18px)')); })()"));
   await editor.screenshot("/tmp/deck-design-glass.png");
+  const { browserContextId: glassCtx } = await cdp.send('Target.createBrowserContext');
+  const glassPhone = await openPage("glass-phone", `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, glassCtx);
+  livePages.push(glassPhone);
+  const glassDeck = {
+    version: 3, theme: 'glass', accent: '#4cc9f0', activePageId: 'p1',
+    pages: [{ id: 'p1', name: 'Studio', sections: [{ id: 's1', name: 'Control Center', controls: [
+      { id: 'c1', label: 'Camera', action: 'obs-scene', scene: 'Camera' },
+      { id: 'c2', label: 'Mic', action: 'mic-mute' },
+      { id: 'c3', label: 'Play', action: 'media-play-pause' },
+      { id: 'c4', label: 'Volume', action: 'volume', volume: 64 },
+    ] }] }],
+  };
+  await glassPhone.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(glassDeck))})`);
+  await glassPhone.reload();
+  await glassPhone.waitFor("!!document.querySelector('.phone-shell')");
+  check("Glass phone uses four compact columns", await glassPhone.eval("getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 4"));
+  check("Glass phone section is transparent without a card frame", await glassPhone.eval("(() => { const s = document.querySelector('.phone-section'); const cs = getComputedStyle(s); return cs.backgroundColor === 'rgba(0, 0, 0, 0)' && cs.borderTopWidth === '0px' && cs.boxShadow === 'none'; })()"));
+  check("Glass phone derives heterogeneous shapes", await glassPhone.eval("(() => { const scene = document.querySelector('.control-tile[data-action=\"obs-scene\"]'); const mic = document.querySelector('.control-tile[data-action=\"mic-mute\"]'); const media = document.querySelector('.control-tile[data-action=\"media-play-pause\"]'); return getComputedStyle(scene).gridRowStart === 'span 2' && getComputedStyle(scene).gridColumnStart === 'span 2' && getComputedStyle(mic).borderRadius === '50%' && getComputedStyle(media).gridColumnStart === 'span 2' && getComputedStyle(media).borderRadius === '999px'; })()"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-phone-redo.png");
+  check("Glass icon-only controls hide the visual label but keep the accessible name", await glassPhone.eval("(() => { const mic = document.querySelector('.control-tile[data-action=\"mic-mute\"]'); const button = mic.querySelector('.tile-primary'); return getComputedStyle(mic.querySelector('.tile-label')).display === 'none' && button.getAttribute('aria-label').includes('Mic') && mic.querySelector('.tile-icon svg').getBoundingClientRect().width >= 24; })()"));
+  check("Glass keeps labels on the scene and media modules", await glassPhone.eval("(() => { const shown = (sel) => getComputedStyle(document.querySelector(sel + ' .tile-label')).display !== 'none'; return shown('.control-tile[data-action=\"obs-scene\"]') && shown('.control-tile[data-action=\"media-play-pause\"]'); })()"));
+  await glassPhone.waitFor("!!document.querySelector('.tile-volume input')");
+  const glassSlider = await glassPhone.eval(rectOf('.tile-volume input'));
+  check("Glass volume is a tall vertical slider", await glassPhone.eval("(() => { const input = document.querySelector('.tile-volume input'); const r = input.getBoundingClientRect(); const cs = getComputedStyle(input); return r.height > r.width && cs.writingMode === 'vertical-lr' && cs.direction === 'rtl' && input.getAttribute('aria-orientation') === 'vertical' && input.min === '0' && input.max === '100'; })()"), JSON.stringify(glassSlider));
+  check("Glass volume pill is the whole native track", await glassPhone.eval("(() => { const input = document.querySelector('.tile-volume input'); const tile = document.querySelector('.control-tile[data-action=\"volume\"]'); const i = input.getBoundingClientRect(); const t = tile.getBoundingClientRect(); const cs = getComputedStyle(input); return Math.abs(i.width - t.width) <= 2 && Math.abs(i.height - t.height) <= 2 && getComputedStyle(tile.querySelector('.tile-label')).display === 'none' && cs.backgroundImage.includes('linear-gradient') && cs.borderRadius === '999px'; })()"));
+  await glassPhone.eval("document.querySelector('.tile-volume input').focus()");
+  const glassInitial = await glassPhone.eval("Number(document.querySelector('.tile-volume input').value)");
+  await pressKey(glassPhone, "ArrowUp", "ArrowUp", 38);
+  check("Glass vertical slider ArrowUp increases", await glassPhone.eval(`Number(document.querySelector('.tile-volume input').value) > ${glassInitial}`));
+  await pressKey(glassPhone, "ArrowDown", "ArrowDown", 40);
+  check("Glass vertical slider ArrowDown decreases", await glassPhone.eval(`Number(document.querySelector('.tile-volume input').value) === ${glassInitial}`));
+  await pressKey(glassPhone, "End", "End", 35);
+  check("Glass vertical slider End reaches maximum", await glassPhone.eval("Number(document.querySelector('.tile-volume input').value) === 100"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-volume-100.png");
+  await pressKey(glassPhone, "Home", "Home", 36);
+  check("Glass vertical slider Home reaches minimum", await glassPhone.eval("Number(document.querySelector('.tile-volume input').value) === 0"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-volume-0.png");
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: glassSlider.cx, y: glassSlider.cy }] });
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check("Glass vertical slider touch at the middle lands near 50", await glassPhone.eval("(() => { const value = Number(document.querySelector('.tile-volume input').value); return value >= 35 && value <= 65; })()"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-volume-50.png");
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: glassSlider.cx, y: glassSlider.bottom - 4 }] });
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check("Glass vertical slider touch at the bottom reaches the minimum", await glassPhone.eval("Number(document.querySelector('.tile-volume input').value) < 10"));
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: glassSlider.cx, y: glassSlider.top + 4 }] });
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check("Glass vertical slider touch at the top reaches the maximum", await glassPhone.eval("Number(document.querySelector('.tile-volume input').value) > 90"));
+  await glassPhone.send("Page.bringToFront");
+  await glassPhone.eval("document.activeElement?.blur?.()");
+  for (let i = 0; i < 10 && !await glassPhone.eval("document.activeElement === document.querySelector('.tile-volume input')"); i += 1) {
+    await pressKey(glassPhone, "Tab", "Tab", 9);
+  }
+  check("Glass volume keeps a visible keyboard focus ring on the pill", await glassPhone.eval("document.activeElement === document.querySelector('.tile-volume input') && getComputedStyle(document.querySelector('.control-tile[data-action=\"volume\"]')).outlineWidth === '2px'"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-volume-redo.png");
+  await glassPhone.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
+  check("Glass phone fits a 320px viewport", await glassPhone.eval("document.documentElement.scrollWidth <= innerWidth && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 4 && [...document.querySelectorAll('.control-tile')].every(el => { const r = el.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })"));
+  await glassPhone.screenshot("/tmp/deck-design-glass-phone-320.png");
   await editor.send("Emulation.setEmulatedMedia", { features: [{ name: "forced-colors", value: "active" }] });
   const forcedGlass = await editor.eval("(() => { const section = getComputedStyle(document.querySelector('.deck-section')); const tile = getComputedStyle(document.querySelector('.control-tile')); const root = getComputedStyle(document.documentElement); const button = document.querySelector('.control-tile .tile-primary'); button.focus(); const focus = getComputedStyle(button); return root.getPropertyValue('--card-border').trim() === 'CanvasText' && root.getPropertyValue('--focus').trim() !== '' && section.boxShadow === 'none' && tile.boxShadow === 'none' && section.backgroundColor === tile.backgroundColor && focus.outlineStyle === 'solid' && focus.outlineWidth !== '0px'; })()");
   check("forced colors flatten Glass surfaces and keep focus visible", forcedGlass);
@@ -1724,7 +1781,7 @@ try {
 
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Glass'));
-  check('a Glass section inside a dark deck keeps its local accent and material', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); const tile = s.querySelector('.control-tile'); return s.dataset.theme === 'glass' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7' && getComputedStyle(s).backgroundColor.startsWith('rgba(') && getComputedStyle(s).borderRadius === '22px' && getComputedStyle(tile).borderRadius === '20px'; })()"));
+  check('a Glass section inside a dark deck keeps its local accent and material', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); const tile = s.querySelector('.control-tile'); return s.dataset.theme === 'glass' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7' && getComputedStyle(s).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(s).borderRadius === '0px' && getComputedStyle(tile).backgroundImage.includes('gradient'); })()"));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
   await manage.waitFor("document.querySelector('.deck-section:nth-child(2)').dataset.theme === 'light'");
@@ -1907,8 +1964,10 @@ try {
   const tallLeft = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: Math.max(r.top + 10, 160) }; })()");
   await touchDrag(phoneNav, tallLeft, { x: tallLeft.x, y: tallLeft.y - 150 });
   check('an upward swipe in the middle of a tall section does not page', await phoneNav.eval("document.querySelector('.phone-page-heading h1')?.textContent === 'One'"));
+  check('tall-section scrolling settles before the boundary gesture', await phoneNav.eval("new Promise(resolve => { const main = document.querySelector('.phone-main'); let last = main.scrollTop, stable = 0, frames = 0; function tick() { const current = main.scrollTop; stable = Math.abs(current - last) < 0.1 ? stable + 1 : 0; last = current; if (stable >= 8) return resolve(true); if (++frames >= 180) return resolve(false); requestAnimationFrame(tick); } requestAnimationFrame(tick); })"));
   await phoneNav.eval("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s1\"]'); const pad = parseFloat(getComputedStyle(main).paddingBottom); main.scrollTop += section.getBoundingClientRect().bottom - (main.getBoundingClientRect().bottom - pad); return main.scrollTop; })()");
-  const tallBottom = await phoneNav.eval("(() => { const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: r.left + 6, y: Math.min(r.bottom - 10, 700) }; })()");
+  // Start in the main padding, not on a control that deliberately owns its gesture.
+  const tallBottom = await phoneNav.eval("(() => { const main = document.querySelector('.phone-main').getBoundingClientRect(); const r = document.querySelector('[data-phone-section=\"s1\"]').getBoundingClientRect(); return { x: main.left + 4, y: Math.min(r.bottom - 10, 700) }; })()");
   await touchDrag(phoneNav, tallBottom, { x: tallBottom.x, y: tallBottom.y - 150 });
   check('an upward swipe at the bottom of a tall section advances one section without a trap', await phoneNav.waitFor("(() => { const main = document.querySelector('.phone-main'); const section = document.querySelector('[data-phone-section=\"s2\"]'); return Math.abs(section.getBoundingClientRect().top - main.getBoundingClientRect().top - parseFloat(getComputedStyle(main).paddingTop)) <= 4 && document.querySelector('[aria-label=\"Next section\"]').disabled; })()"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: navCtx });
@@ -2216,6 +2275,12 @@ try {
     "deck-design-volume.png",
     "deck-design-light.png",
     "deck-design-glass.png",
+    "deck-design-glass-phone-redo.png",
+    "deck-design-glass-volume-redo.png",
+    "deck-design-glass-volume-0.png",
+    "deck-design-glass-volume-50.png",
+    "deck-design-glass-volume-100.png",
+    "deck-design-glass-phone-320.png",
     "deck-design-glass-settings.png",
     "deck-design-glass-settings-narrow.png",
     "deck-design-preview-landscape.png",
