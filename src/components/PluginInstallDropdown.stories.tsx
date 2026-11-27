@@ -43,6 +43,22 @@ export const Narrow: Story = { globals: { viewport: { value: "mobile1", isRotate
 export const Busy: Story = { args: { busy: true }, play: async ({ canvasElement }) => {
   await expect(within(canvasElement).getByRole("button", { name: "Install from…" })).toBeDisabled();
 } };
+export const MacPointerFocus: Story = { args: { configured: true }, play: async ({ canvasElement }) => {
+  const ui = within(canvasElement);
+  await userEvent.click(ui.getByRole("button", { name: "Install from…" }));
+  const local = ui.getByRole("menuitem", { name: "Local .zdx" });
+  const registry = ui.getByRole("menuitem", { name: "Open plugin registry" });
+  await expect(local).toHaveFocus();
+  // WebKit can blur the focused row without focusing the clicked button, removing it before click.
+  const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 });
+  registry.dispatchEvent(mouseDown);
+  await expect(mouseDown.defaultPrevented).toBe(true);
+  await expect(local).toHaveFocus();
+  await userEvent.click(registry);
+  await expect(ui.getByLabelText("Fixture selection")).toHaveTextContent("registry");
+  await expect(ui.queryByRole("menu")).not.toBeInTheDocument();
+  await expect(ui.getByRole("button", { name: "Install from…" })).toHaveFocus();
+} };
 export const Configured: Story = { args: { configured: true }, play: async ({ canvasElement }) => {
   const ui = within(canvasElement); await userEvent.click(ui.getByRole("button", { name: "Install from…" }));
   await userEvent.click(ui.getByRole("menuitem", { name: "Open plugin registry" }));
