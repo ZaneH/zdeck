@@ -25,10 +25,15 @@ export const ControlsToggle: Story = {
     await expect(toggle).not.toHaveAttribute("aria-haspopup");
     for (const trigger of canvasElement.querySelectorAll<HTMLElement>(".footer-trigger")) {
       await expect(trigger.getBoundingClientRect().height).toBe(trigger.closest(".footer-item")!.getBoundingClientRect().height);
-      await expect(getComputedStyle(trigger).borderRadius).toBe(trigger === toggle ? "5px" : "0px");
+      await expect(getComputedStyle(trigger).borderRadius).toBe("0px");
     }
+    // The power fill covers its whole slot: same box as the slot, no inset pill.
+    const slot = toggle.closest(".footer-mode")!.getBoundingClientRect();
+    const power = toggle.getBoundingClientRect();
+    await expect(power.width).toBe(slot.width);
+    await expect(power.height).toBe(slot.height);
     await expect(getComputedStyle(toggle).backgroundColor).toBe("rgb(180, 35, 50)");
-    await expect(toggle.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+    await expect(power.width).toBeGreaterThanOrEqual(44);
     await userEvent.hover(toggle);
     await expect(canvas.getByRole("tooltip")).toHaveTextContent("Turn on to run saved controls");
     await userEvent.unhover(toggle);

@@ -26,6 +26,8 @@
   --focus: color-mix(in srgb, var(--accent) 35%, var(--text));
   --key-bottom: #111214;
   --key-light: #ffffff0c;
+  --control-accent: var(--accent);
+  --control-accent-weight: 100%;
   --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
   color-scheme: dark;
 }
@@ -44,6 +46,8 @@
   --warning: #7b581d;
   --key-bottom: #bfc4ca;
   --key-light: #ffffff;
+  --control-accent: color-mix(in srgb, var(--accent) 65%, var(--text));
+  --control-accent-weight: 65%;
   color-scheme: light;
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -131,6 +135,7 @@ code { font-family: var(--mono); font-size: .9em; overflow-wrap: anywhere; }
 .phone-section + .phone-section { margin-top: 18px; }
 /* Recompute derived tokens inside a scoped theme/accent override. */
 .deck-section, .phone-section {
+  color: var(--text);
   --focus: color-mix(in srgb, var(--accent) 35%, var(--text));
   --danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
 }
@@ -165,7 +170,8 @@ body:has(.deck-section.is-dragging), body:has(.deck-section.is-dragging) * { cur
 .control-grid, .phone-grid { display: grid; --grid-columns: 4; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 96px; align-content: start; gap: 10px; }
 .control-grid:has(.empty-key) { grid-template-columns: minmax(0, 1fr); }
 .control-tile, .setup-demo-key, .setup-choice { position: relative; min-width: 0; border: 1px solid var(--border-strong); border-radius: 7px; background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 65%, var(--surface)), var(--surface)); box-shadow: inset 0 1px 0 var(--key-light), 0 3px 0 var(--key-bottom), 0 4px 5px #0003; transition: transform .13s, box-shadow .13s, border-color .15s; }
-.control-tile { --control-accent: var(--accent); display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+/* Recompute at the tile so a section's local --accent (no data-theme) also tints its controls. */
+.control-tile { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; --control-accent: color-mix(in srgb, var(--accent) var(--control-accent-weight), var(--text)); }
 .control-tile[data-variant="phone"] { animation: key-arrive .34s cubic-bezier(.2,.7,.2,1) backwards; }
 .control-tile:not(.is-disabled):hover, .setup-demo-key:hover { border-color: var(--text-muted); }
 .control-tile.is-selected { border-color: var(--focus); outline: 1px solid var(--focus); outline-offset: 2px; }
@@ -184,7 +190,6 @@ body:has(.deck-section.is-dragging), body:has(.deck-section.is-dragging) * { cur
 .volume-readout { flex: none; min-width: 30px; color: var(--text); font-size: 19px; font-weight: 550; letter-spacing: -.04em; text-align: right; font-variant-numeric: tabular-nums; }
 .value-unit { margin-left: 2px; color: var(--text-muted); font-size: 11px; font-weight: 450; letter-spacing: 0; }
 input[type="range"] { min-height: 44px; accent-color: var(--text-muted); cursor: pointer; }
-[data-theme="light"] .control-tile { --control-accent: color-mix(in srgb, var(--accent) 65%, var(--text)); }
 .tile-volume input::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: linear-gradient(to right, var(--control-accent) var(--control-fill), var(--border-strong) var(--control-fill)); box-shadow: inset 0 1px 2px #0003; }
 .tile-volume input::-moz-range-track { height: 5px; border-radius: 3px; background: linear-gradient(to right, var(--control-accent) var(--control-fill), var(--border-strong) var(--control-fill)); box-shadow: inset 0 1px 2px #0003; }
 .tile-volume input::-webkit-slider-thumb { appearance: none; width: 10px; height: 22px; margin-top: -8.5px; border: 1px solid var(--text-muted); border-radius: 3px; background: var(--text); box-shadow: 0 2px 4px #0005; }
@@ -460,7 +465,7 @@ input[type="checkbox"]:disabled, label:has(input[type="checkbox"]:disabled) { cu
 .desktop-close-choice { display: flex; align-items: flex-start; gap: 8px; }
 .desktop-close-choice input[type="checkbox"] { flex: none; margin: calc((1.7em - 16px) / 2) 0 0; }
 .setting-help { position: relative; flex: none; }
-.footer-mode > .setting-help > .footer-mode-toggle { width: 44px; min-height: 32px; height: 100%; color: #fff; background: #b42332; border-radius: 5px; }
+.footer-mode > .setting-help > .footer-mode-toggle { width: 44px; min-height: 0; height: 100%; color: #fff; background: #b42332; border-radius: 0; }
 .footer-mode > .setting-help > .footer-mode-toggle.is-armed { color: #fff; background: #167344; }
 .footer-mode > .setting-help > .footer-mode-toggle:hover:enabled { filter: brightness(1.15); }
 .setting-help > button { display: grid; place-items: center; width: 28px; height: 1.7em; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
