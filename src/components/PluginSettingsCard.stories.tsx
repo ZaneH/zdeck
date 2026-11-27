@@ -59,7 +59,18 @@ export const NothingInstalled: Story = { args: { initial: "nothing-installed" } 
 export const ReadyForTrust: Story = { args: { initial: "ready" } };
 export const TwoEnabled: Story = { args: { initial: "two-enabled" } };
 export const OneFailedOneHealthy: Story = { args: { initial: "one-failed" } };
-export const InvalidSdkDiagnostics: Story = { args: { initial: "invalid-sdk" } };
+export const InvalidSdkDiagnostics: Story = { args: { initial: "invalid-sdk" }, play: async ({ canvasElement }) => {
+  const row = within(canvasElement.querySelector<HTMLElement>('[data-plugin-id="spotify"]')!);
+  const diagnose = async () => {
+    await userEvent.click(row.getByRole("button", { name: "More options for Spotify" }));
+    await userEvent.click(row.getByRole("menuitem", { name: "Diagnostics" }));
+    await waitFor(() => expect(row.getByRole("status", { name: "Diagnostics for Spotify" })).toBeVisible());
+  };
+  await diagnose();
+  await userEvent.click(row.getByRole("button", { name: "Hide diagnostics" }));
+  expect(row.queryByText("Installation diagnostics")).toBeNull();
+  await diagnose();
+} };
 export const NarrowTrust: Story = { args: { initial: "ready", width: 320 } };
 const inspectState: Story["play"] = async ({ canvasElement }) => {
   canvasElement.querySelectorAll<HTMLDetailsElement>(".plugin-state").forEach((panel) => {

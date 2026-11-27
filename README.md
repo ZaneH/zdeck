@@ -34,6 +34,10 @@ npm run dev
 
 Open <http://localhost:1420>. Complete or skip setup, add a control, edit it in the Inspector, and use **Preview** to see the phone layout. The direct preview URL is <http://localhost:1420/#/phone>.
 
+Right-click an editor tile (or use Shift + F10 while it is focused) for **Rename** and **Delete**. The footer power button is red while controls are off and green while armed. Installation diagnostics can be hidden after running them and reopened by running Diagnostics again.
+
+System-volume slider targets are remembered locally across sessions, separately from exported decks. Restoring a target does not change system audio or arm controls; persistence failures remain visible.
+
 This browser build saves locally in that browser. It does **not** pair a phone or execute desktop controls. Opening the development server on another device is not the authenticated phone setup.
 
 ### 2. Run the desktop app — for real controls

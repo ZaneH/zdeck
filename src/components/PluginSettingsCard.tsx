@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { EMPTY_PLUGIN, pluginEntry, pluginIdentifier, runtimeForPlugin, spotifyState, pluginChoices, trustAndEnablePlugin } from "../lib/plugin";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
-import type { PluginCatalogEntry, PluginError } from "../lib/plugin";
+import type { PluginCatalogEntry, PluginDiagnostics, PluginError } from "../lib/plugin";
 import type { PluginConsole } from "../lib/usePluginConsole";
 import { ActionIcon } from "./ActionIcon";
 import { PluginConnectionSettings } from "./PluginConnectionSettings";
@@ -63,6 +63,7 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
         : null;
   const state = spotifyState(snapshot);
   const diagnostics = pluginEntry(plugin.diagnostics, id);
+  const [hiddenDiagnostics, setHiddenDiagnostics] = useState<PluginDiagnostics | null>(null);
   return <li className="plugin-row" data-plugin-id={id} aria-busy={busy || undefined}>
     <div className="plugin-row-header">
       <PluginThumbnail icon={entry.icon} />
@@ -150,7 +151,8 @@ function PluginRow({ entry, plugin }: { entry: PluginCatalogEntry; plugin: Plugi
       <div className="settings-actions"><button type="button" className="button danger" disabled={busy} onClick={() => { setConfirmation(null); void plugin.uninstall(id); }}>Confirm uninstall</button>
         <button type="button" className="button secondary" onClick={() => setConfirmation(null)}>Cancel</button></div>
     </div> : null}
-    {diagnostics ? <section className="plugin-diagnostics" aria-label={`Diagnostics for ${entry.name}`} role="status">
+    {diagnostics && diagnostics !== hiddenDiagnostics ? <section className="plugin-diagnostics" aria-label={`Diagnostics for ${entry.name}`} role="status">
+      <button type="button" className="button quiet small" onClick={() => setHiddenDiagnostics(diagnostics)}>Hide diagnostics</button>
       <h4>Installation diagnostics</h4><p className="field-note">Local checks only; no plugin code or media state was read.</p>
       <ul>{diagnostics.checks.map((check, index) => <li key={index}><strong>{check.name} · {check.status}</strong><p>{check.message}</p></li>)}</ul>
     </section> : null}

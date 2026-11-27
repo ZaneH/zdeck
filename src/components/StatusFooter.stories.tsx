@@ -25,8 +25,10 @@ export const ControlsToggle: Story = {
     await expect(toggle).not.toHaveAttribute("aria-haspopup");
     for (const trigger of canvasElement.querySelectorAll<HTMLElement>(".footer-trigger")) {
       await expect(trigger.getBoundingClientRect().height).toBe(trigger.closest(".footer-item")!.getBoundingClientRect().height);
-      await expect(getComputedStyle(trigger).borderRadius).toBe("0px");
+      await expect(getComputedStyle(trigger).borderRadius).toBe(trigger === toggle ? "5px" : "0px");
     }
+    await expect(getComputedStyle(toggle).backgroundColor).toBe("rgb(180, 35, 50)");
+    await expect(toggle.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
     await userEvent.hover(toggle);
     await expect(canvas.getByRole("tooltip")).toHaveTextContent("Turn on to run saved controls");
     await userEvent.unhover(toggle);
@@ -51,6 +53,7 @@ export const DisarmAlwaysAvailable: Story = {
     const toggle = within(canvasElement).getByRole("button", { name: "Run controls on this computer" });
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(getComputedStyle(toggle).backgroundColor).toBe("rgb(22, 115, 68)");
     await userEvent.click(toggle);
     await expect(args.onEdit).toHaveBeenCalledOnce();
   },

@@ -77,6 +77,7 @@ import { DesktopPreferencesCard } from "./components/DesktopPreferencesCard";
 
 import { SettingsSections } from "./components/SettingsSections";
 import { StatusFooter } from "./components/StatusFooter";
+import { loadVolumes, saveVolumes } from "./lib/volumePreferences";
 import { loadFooter, saveFooter } from "./lib/footerPreferences";
 import type { FooterPreferences } from "./lib/footerPreferences";
 import { useServiceStatus } from "./lib/useServiceStatus";
@@ -174,7 +175,9 @@ export default function App() {
   );
   const actionDialog = useRef<HTMLDialogElement>(null);
   const [setupOpen, setSetupOpen] = useState(!nativeMode && initial.status === "empty" && !setupDismissed(getStorage()));
-  const [previewVolumes, setPreviewVolumes] = useState<Record<string, number>>({});
+  const [initialVolumes] = useState(() => loadVolumes(getStorage()));
+  const [previewVolumes, setPreviewVolumes] = useState(initialVolumes.value);
+  const [volumeError, setVolumeError] = useState(initialVolumes.error);
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [pressedId, setPressedId] = useState<string | null>(null);
   const [nativeLoading, setNativeLoading] = useState(nativeMode);
@@ -318,9 +321,15 @@ export default function App() {
     pressTimer.current = window.setTimeout(() => setPressedId(null), 700);
   };
 
+  const rememberVolume = (control: Control, value: number) => {
+    const next = { ...previewVolumes, [control.id]: clampVolume(value) };
+    setPreviewVolumes(next);
+    setVolumeError(saveVolumes(getStorage(), next) ? null : "Volume preferences were not saved. This value may not survive a restart.");
+  };
+
   const previewVolume = (control: Control, value: number) => {
     const next = clampVolume(value);
-    setPreviewVolumes((current) => ({ ...current, [control.id]: next }));
+    rememberVolume(control, next);
     setPreviewNotice(`Preview only: volume ${next}%. No desktop action was sent.`);
   };
 
@@ -694,7 +703,6 @@ export default function App() {
             ) : null}
 
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
-            {!desktop.live ? <p className="reorder-note">Drag tiles or a section handle to reorder, or use Alt + arrow keys. Use Left / Right arrows to change pages.</p> : null}
             <SectionList
               deck={deck} page={page} selectedSectionId={selectedSectionId}
               disabled={desktop.live || desktop.inflight || !!desktop.pending}
@@ -709,6 +717,19 @@ export default function App() {
                         key={control.id}
                         control={control}
                         plugins={plugin.snapshots}
+                        onRename={!desktop.live && !desktop.inflight && !desktop.pending ? () => {
+                          setSelectedSectionId(section.id);
+                          setSelectedControlId(control.id);
+                          if (sidebar.collapsed) toggleSidebar();
+                          window.requestAnimationFrame(() => {
+                            const input = document.querySelector<HTMLInputElement>("#control-label");
+                            input?.focus(); input?.select();
+                          });
+                        } : undefined}
+                        onDelete={!desktop.live && !desktop.inflight && !desktop.pending ? () => {
+                          commitDeck(removeControl(deck, page.id, control.id));
+                          if (selectedControlId === control.id) setSelectedControlId(null);
+                        } : undefined}
                         onRefresh={control.action === "plugin" && control.presentation === "value" && plugin.native ? () => plugin.readState(control.pluginId) : undefined}
                         variant="editor"
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
@@ -729,7 +750,7 @@ export default function App() {
                         }}
                         onVolumeChange={(value) => {
                           if (control.action !== "volume") return;
-                          if (desktop.live) setPreviewVolumes((current) => ({ ...current, [control.id]: clampVolume(value) }));
+                          if (desktop.live) rememberVolume(control, value);
                           else previewVolume(control, value);
                         }}
                         onVolumeCommit={(value) => {
@@ -750,6 +771,7 @@ export default function App() {
                 </div>
               )}
             />
+            {!desktop.live ? <p className="reorder-note">Drag tiles or a section handle to reorder, or use Alt + arrow keys. Use Left / Right arrows to change pages.</p> : null}
 
           </section>
 
@@ -786,6 +808,7 @@ export default function App() {
         live={desktop.live} canRun={route === "editor" && desktop.ready && !desktop.inflight && !desktop.pending}
         onEdit={desktop.preview} onRun={() => { setPreviewNotice(null); desktop.enter(); }}
         feedback={<>
+          {volumeError ? <p className="footer-error" role="alert">{volumeError}</p> : null}
           {footer.error ? <p className="footer-error" role="alert">{footer.error}</p> : null}
           {route === "editor" ? <div className="workspace-feedback">
             {desktop.error || (desktop.result && desktop.result.state !== "confirmed" && desktop.result.code !== "media_key_sent") ? <p className={`native-feedback is-${desktop.result?.state ?? "failed"}`} role="alert">

@@ -5,7 +5,6 @@ import { ACCENTS } from "../lib/types";
 import type { Accent, Deck, Page, Section, Theme } from "../lib/types";
 import { sectionNameError, sectionStyle } from "../lib/sections";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
-import { Dropdown } from "./Dropdown";
 import { SectionSettingsMenu } from "./SectionSettingsMenu";
 
 interface SectionListProps {
@@ -112,11 +111,6 @@ export function SectionList({
   return (
     <>
       <div className="section-panel">
-        <Dropdown
-          label="Section" value={selected?.id ?? ""}
-          options={page.sections.map((section) => ({ value: section.id, label: section.name }))}
-          onChange={onSelect} disabled={disabled}
-        />
         <button
           type="button" className="button secondary small"
           aria-label="Add section" title="Add section after the selected one"

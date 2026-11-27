@@ -7,6 +7,7 @@ import type { PluginSnapshots } from "../lib/plugin";
 import { controlSummary } from "../lib/actions";
 import type { Control } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
+import { Dropdown } from "./Dropdown";
 import { verticalReorderIndex } from "../lib/tileNavigation";
 
 const VOLUME_COMMIT_KEYS = new Set([
@@ -29,6 +30,8 @@ interface ControlTileProps {
   busy?: boolean;
   /** "preview" keeps local-only wording; "remote" drops it for the real phone. */
   semantics?: "preview" | "remote" | "live";
+  onRename?: () => void;
+  onDelete?: () => void;
   onPrimary?: () => void;
   onRefresh?: () => Promise<void>;
   onVolumeChange?: (value: number) => void;
@@ -38,8 +41,9 @@ interface ControlTileProps {
 
 export function ControlTile({
   control, variant, volume, selected = false, pressed = false, disabled = false,
-  transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh,
+  transientDisabled = false, busy = false, semantics = "preview", onPrimary, onVolumeChange, onVolumeCommit, order, plugins = {}, onRefresh, onRename, onDelete,
 }: ControlTileProps) {
+  const tileRef = useRef<HTMLElement>(null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState(false);
   const readOnly = control.presentation === "value";
@@ -101,7 +105,8 @@ export function ControlTile({
         : `Press ${control.label} (local preview only)`;
 
   return (
-    <article
+    <article ref={tileRef}
+      onContextMenu={event => { if (variant === "editor") event.preventDefault(); }}
       className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${transientDisabled ? " is-transient-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
       style={{ "--column-span": control.columnSpan ?? 1, gridRow: `span ${control.rowSpan ?? 1}`,
         ...(numeric ? { "--control-fill": `${100 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}%` } : {}),
@@ -109,7 +114,7 @@ export function ControlTile({
       data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
       data-order-index={order?.index}
       onPointerDownCapture={(event) => {
-        if (!order || disabled || event.button !== 0 || (event.target as HTMLElement).closest(".tile-reading button")) return;
+        if (!order || disabled || event.button !== 0 || (event.target as HTMLElement).closest(".tile-reading button, .dropdown")) return;
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.querySelector<HTMLButtonElement>(".tile-primary")?.focus();
@@ -118,7 +123,7 @@ export function ControlTile({
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onClickCapture={(event) => {
-        if (!order || (event.target as HTMLElement).closest(".tile-reading button")) return;
+        if (!order || (event.target as HTMLElement).closest(".tile-reading button, .dropdown")) return;
         event.stopPropagation();
         if (!disabled && !suppressClick.current) onPrimary?.();
         suppressClick.current = false;
@@ -275,6 +280,9 @@ export function ControlTile({
           <span className="volume-readout" aria-hidden="true">{currentValue}{control.action === "volume" ? <span className="value-unit">%</span> : null}</span>
         </div>
       ) : null}
+      {onRename && onDelete ? <Dropdown label={`Options for ${control.label}`} value="" actionMenu contextTarget={tileRef}
+        disabled={disabled} options={[{ value: "rename", label: "Rename" }, { value: "delete", label: "Delete" }]}
+        onChange={(action) => { if (action === "rename") onRename(); else onDelete(); }} /> : null}
     </article>
   );
 }

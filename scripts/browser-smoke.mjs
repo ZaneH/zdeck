@@ -1227,7 +1227,7 @@ try {
   check('deliberate stop persists native desired off', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === false"));
   await admin.reload();
   check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice','plugin_registry_website_status'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   await admin.eval("location.hash = '#/settings/general'");
   await admin.waitFor("!document.querySelector('[aria-label=General][role=region]').hidden");
   check('close-to-tray defaults off', await admin.eval("!document.querySelector('[aria-describedby=close-to-tray-help]').checked"));
@@ -1245,7 +1245,7 @@ try {
   await admin.waitFor("!document.querySelector('[aria-label=Integrations][role=region]').hidden");
   // ------------------------------------------------------------ plugin UI (owned IPC fake, never osascript)
   await admin.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 680, deviceScaleFactor: 1, mobile: false });
-  check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshots','plugin_catalog'].includes(c))"));
+  check('plugin mount only requests catalog and cached metadata', await admin.eval("window.__adminCalls.filter(c => c.startsWith('plugin_')).every(c => ['plugin_snapshots','plugin_catalog','plugin_registry_website_status'].includes(c))"));
   check('plugin settings detects Node and explains empty installation without path inputs', await admin.waitFor("document.querySelector('.plugin-settings').textContent.includes('Detected Node 22.18.0') && document.querySelector('.plugin-settings').textContent.includes('Nothing installed yet')") && await admin.eval("!document.querySelector('.plugin-settings input[type=text]')"));
   await admin.eval(clickText('.plugin-settings button', 'Open plugin folder'));
   check('Open plugin folder invokes only the fixed native opener command', await admin.waitFor("window.__adminCalls.includes('plugin_open_directory')"));
@@ -1672,7 +1672,7 @@ try {
   // Keep the original selected control while choosing a different Add target.
   await manage.eval(click('.control-tile .tile-primary'));
   await manage.eval(click('[aria-label="Add section"]'));
-  check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('.section-panel .dropdown-trigger')?.getAttribute('aria-label') === 'Section: Section 2'"));
+  check('adding a section retains the new section as the control target', await manage.waitFor("document.querySelector('.deck-section.is-selected .section-name-input')?.value === 'Section 2' && !document.querySelector('.section-panel .dropdown')"));
   await manage.eval(click('.add-control'));
   await manage.eval(clickText('.action-library .action-row', 'Volume slider'));
   check('new controls are saved in the selected section', await manage.waitFor("(() => { const d = JSON.parse(localStorage.getItem('deck.local.v1')); const p = d.pages.find(p => p.id === d.activePageId); return p.sections.length === 2 && p.sections[1].controls.length === 1 && p.sections[1].controls[0].action === 'volume'; })()"));
@@ -1726,14 +1726,11 @@ try {
   check('populated section deletion focuses the safe Cancel action', await manage.waitFor(`document.querySelector('[aria-labelledby="remove-section-title"]')?.open && document.activeElement.textContent.trim() === 'Cancel'`));
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Cancel'));
   await manage.waitFor("!document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
-  await manage.eval(click('.section-panel .dropdown-trigger'));
-  check('cancelling section deletion retains its controls', await manage.waitFor("document.querySelectorAll('.section-panel .dropdown-menu [role=menuitemradio]').length === 2 && document.querySelectorAll('.deck-section').length === 2"));
-  await pressKey(manage, 'Escape', 'Escape', 27);
+  check('cancelling section deletion retains its controls', await manage.waitFor("document.querySelectorAll('.deck-section').length === 2 && document.querySelectorAll('.deck-section:nth-child(2) .control-tile').length === 1"));
   await manage.eval(click('.deck-section:nth-child(2) [title="Remove section"]'));
   await manage.waitFor("document.querySelector('[aria-labelledby=\"remove-section-title\"]').open");
   await manage.eval(clickText('[aria-labelledby="remove-section-title"] button', 'Remove section'));
-  await manage.eval(click('.section-panel .dropdown-trigger'));
-  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('.section-panel .dropdown-menu [role=menuitemradio]').length === 1 && document.querySelectorAll('.deck-section').length === 1 && document.querySelector('.deck-section [title=\"Remove section\"]').disabled"));
+  check('confirmed deletion removes only the selected section and protects the last', await manage.waitFor("document.querySelectorAll('.deck-section').length === 1 && document.querySelector('.deck-section [title=\"Remove section\"]').disabled"));
   await cdp.send('Target.disposeBrowserContext', { browserContextId: manageCtx });
 
   // ------------------------------------------------------------ cross-tab sync

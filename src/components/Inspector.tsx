@@ -202,6 +202,7 @@ export function Inspector({
             <label className="field">
               <span>{control.action === "obs-scene" ? "Custom label (optional)" : "Label"}</span>
               <input
+                id="control-label"
                 key={`${control.id}-${control.action}-${control.label}-label`}
                 type="text"
                 defaultValue={control.action === "obs-scene" && control.autoLabel ? "" : control.label}

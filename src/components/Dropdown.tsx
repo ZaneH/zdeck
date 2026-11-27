@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import { useExclusiveMenu } from "../lib/useExclusiveMenu";
 
@@ -13,13 +14,14 @@ export interface DropdownOption {
  * Shared text dropdown for choosing a value. Mirrors the inspector's icon
  * disclosure: a bordered trigger with a value and a menu of checked rows.
  */
-export function Dropdown({ label, value, options, onChange, disabled = false, actionMenu = false }: {
+export function Dropdown({ label, value, options, onChange, disabled = false, actionMenu = false, contextTarget }: {
   label: string;
   value: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
   actionMenu?: boolean;
+  contextTarget?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState({ above: false, maxHeight: 280 });
@@ -30,14 +32,31 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
   const current = options.find((option) => option.value === value) ?? options[0];
   const close = () => {
     setOpen(false);
-    trigger.current?.focus();
+    if (contextTarget) contextTarget.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+    else trigger.current?.focus();
   };
   useExclusiveMenu(open, () => setOpen(false));
+
+  useEffect(() => {
+    const target = contextTarget?.current;
+    if (!target) return;
+    const openMenu = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!disabled) setOpen(true);
+    };
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) openMenu(event);
+    };
+    target.addEventListener("contextmenu", openMenu);
+    target.addEventListener("keydown", keyboard);
+    return () => { target.removeEventListener("contextmenu", openMenu); target.removeEventListener("keydown", keyboard); };
+  }, [contextTarget, disabled]);
 
   useLayoutEffect(() => {
     if (!open || !root.current || !menu.current) return;
     const place = () => {
-      const rect = trigger.current!.getBoundingClientRect();
+      const rect = (contextTarget?.current ?? trigger.current!).getBoundingClientRect();
       let top = 4, bottom = window.innerHeight - 4;
       for (let parent = root.current!.parentElement; parent; parent = parent.parentElement) {
         if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
@@ -52,7 +71,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
-  }, [open]);
+  }, [open, contextTarget]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,7 +85,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
 
   return (
     <div
-      className={`dropdown${actionMenu ? " dropdown-actions" : ""}`} ref={root}
+      className={`dropdown${actionMenu ? " dropdown-actions" : ""}${contextTarget ? " dropdown-context" : ""}`} ref={root}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
@@ -83,7 +102,8 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
       }}
     >
       <button
-        ref={trigger} type="button" className="dropdown-trigger"
+        ref={trigger} type="button" className={contextTarget ? "dropdown-trigger sr-only" : "dropdown-trigger"}
+        tabIndex={contextTarget ? -1 : undefined}
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
         aria-label={actionMenu ? label : `${label}: ${current?.label ?? ""}`} aria-description={actionMenu ? undefined : current?.description} disabled={disabled}
         onClick={() => setOpen(!open)}
@@ -110,7 +130,7 @@ export function Dropdown({ label, value, options, onChange, disabled = false, ac
               key={option.value} type="button" role={actionMenu ? "menuitem" : "menuitemradio"} tabIndex={-1}
               aria-checked={actionMenu ? undefined : option.value === value} aria-label={option.label} aria-description={option.description}
               aria-disabled={option.disabled || undefined}
-              onClick={() => { if (!option.disabled) { onChange(option.value); close(); } }}
+              onClick={() => { if (!option.disabled) { close(); onChange(option.value); } }}
             >
               <span className="dropdown-option-copy"><span className="dropdown-option-label">{option.label}</span>{option.description ? <span className="dropdown-option-description">{option.description}</span> : null}</span>
               {!actionMenu ? <span className="dropdown-check" aria-hidden="true">{option.value === value ? "✓" : ""}</span> : null}
