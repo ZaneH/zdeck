@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 assert.equal(process.platform, "linux", "This native smoke currently targets Linux.");
 assert(process.env.WAYLAND_DISPLAY || process.env.DISPLAY, "A desktop display is required.");
 const root = mkdtempSync(join(tmpdir(), "zdeck-native-smoke-"));
-const child = spawn(resolve("src-tauri/target/debug/deck"), [], {
+const child = spawn(resolve("src-tauri/target/debug/zDeck"), [], {
   detached: true,
   env: {
     ...process.env,
@@ -43,7 +43,9 @@ try {
   assert(status.code === 0 || status.signal === "SIGTERM", `Unexpected native exit: ${JSON.stringify(status)}\n${output}`);
   assert(!/EGL_BAD_PARAMETER|GLIBC_\S+.*not found|MESA-LOADER: failed|Failed to create GBM device/.test(output), output);
   // An alive GTK parent is insufficient: a failed WebKit child leaves it blank.
-  const file = join(root, "data", "com.deck.local", "deck.v1.json");
+  const isolated = output.split("\n").find(line => line.startsWith("ZDECK_SMOKE_ROOT "))?.slice("ZDECK_SMOKE_ROOT ".length);
+  assert(isolated?.startsWith(join(tmpdir(), "zdeck-native-smoke-")), "Missing owned native smoke root");
+  const file = join(isolated, "data", "deck.v1.json");
   const document = JSON.parse(readFileSync(file, "utf8"));
   assert(document.revision > 0 && document.deck.pages.length > 0, "Frontend did not initialize its native deck.");
   const reports = output.split("\n").filter(line => line.startsWith("ZDECK_NATIVE_LAYOUT "))
@@ -84,4 +86,6 @@ try {
   process.removeListener("SIGTERM", interrupt);
   stop("SIGKILL");
   rmSync(root, { recursive: true, force: true });
+  const isolated = output.split("\n").find(line => line.startsWith("ZDECK_SMOKE_ROOT "))?.slice("ZDECK_SMOKE_ROOT ".length);
+  if (isolated?.startsWith(join(tmpdir(), "zdeck-native-smoke-"))) rmSync(isolated, { recursive: true, force: true });
 }

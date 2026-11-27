@@ -57,7 +57,13 @@ Coverage includes invitation/approval, fresh-context paste, authenticated GET/WS
 
 **Linux-only, opt-in, headful.** Builds with the `native-smoke` feature and briefly opens a real native window using temporary app-data/config/cache. Checks native deck initialization and WebKit geometry: positive pixel ratio, viewport/font size, setup widths, editor grid/Inspector, Settings alignment and horizontal overflow. Navigation advances/skips setup and opens Settings; it does not start OBS/audio/media or the phone service.
 
-The hook requires both the build feature and launcher-set environment flag and is absent from normal builds. Previous successful runs were on AMD/KDE Wayland with matching EGL/GBM libraries. This does not prove visual correctness, normal-user-data behavior, real actions, desktop admin lifecycle, bundled remote asset resolution or installer packaging.
+The hook requires both the build feature and launcher-set environment flag and is absent from normal builds.
+All `native-smoke` builds now **require** `--config src-tauri/tauri.smoke.conf.json`: a distinct
+identifier and `zdeck-smoke` scheme prevent collisions with the normal app. Native app data,
+plugins, devices and preferences use a new owned temporary root; credential access uses the
+in-memory mock backend and no plugin runtime/settings loader is attached. XDG/HOME alone is
+not sufficient isolation on macOS. The Linux launcher was updated for the new data layout;
+its current Linux rerun remains outstanding. Previous successful runs were on AMD/KDE Wayland with matching EGL/GBM libraries. This does not prove visual correctness, normal-user-data behavior, real actions, desktop admin lifecycle, bundled remote asset resolution or installer packaging.
 
 ### Storybook boundaries
 

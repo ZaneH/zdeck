@@ -14,7 +14,7 @@
     "storybook:test": "vitest run --project=storybook",
     "smoke": "node scripts/browser-smoke.mjs",
     "smoke:remote": "npm run build && nix develop --command cargo test --manifest-path src-tauri/Cargo.toml --test remote_service remote_browser_smoke -- --ignored --nocapture --test-threads=1",
-    "smoke:native": "nix develop --command bash -c 'npm run tauri:build -- --debug --no-bundle --features native-smoke && node scripts/native-smoke.mjs'",
+    "smoke:native": "nix develop --command bash -c 'npm run tauri:build -- --debug --no-bundle --features native-smoke --config src-tauri/tauri.smoke.conf.json && node scripts/native-smoke.mjs'",
     "typecheck": "tsc --noEmit",
     "storybook": "storybook dev -p 6006 --no-open --disable-telemetry",
     "storybook:build": "storybook build -o storybook-static --disable-telemetry",

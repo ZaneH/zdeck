@@ -219,7 +219,7 @@ fn macos_tray_icon() -> tauri::image::Image<'static> {
 
 pub fn setup(app: &tauri::AppHandle) {
     app.manage(TrayState::default());
-    *app.state::<TrayState>().preference_path.lock().unwrap() = app.path().app_data_dir().ok()
+    *app.state::<TrayState>().preference_path.lock().unwrap() = crate::app_data_directory(app).ok()
         .map(|directory| directory.join("desktop-preferences.json"));
     if let Err(error) = desktop_close_to_tray(app.state::<TrayState>()) { report(app, error); }
     let result = (|| -> tauri::Result<()> {

@@ -1,0 +1,5 @@
+{
+  "identifier": "com.zdeck.native-smoke",
+  "productName": "zDeck Smoke",
+  "plugins": { "deep-link": { "desktop": { "schemes": ["zdeck-smoke"] } } }
+}

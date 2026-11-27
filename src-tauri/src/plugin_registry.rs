@@ -50,6 +50,8 @@ pub struct WebsiteStatus { available: bool, explanation: Option<&'static str> }
 pub(crate) fn local_editor(label: &str, url: &Url) -> bool {
     let mut url = url.clone();
     url.set_fragment(None);
+    // WebKit reports the bundled custom-scheme root without a trailing slash on macOS.
+    if url.scheme() == "tauri" && url.path().is_empty() { url.set_path("/"); }
     label == "main" && (url.as_str() == "tauri://localhost/"
         || url.as_str() == "http://tauri.localhost/"
         || url.as_str() == "https://tauri.localhost/"
@@ -232,11 +234,11 @@ mod tests {
     }
     #[test]
     fn privileged_commands_are_local_only() {
-        for url in ["tauri://localhost/", "http://tauri.localhost/", "https://tauri.localhost/"] {
+        for url in ["tauri://localhost", "tauri://localhost/", "http://tauri.localhost/", "https://tauri.localhost/"] {
             assert!(local_editor("main", &Url::parse(url).unwrap()));
             assert!(!local_editor("phone", &Url::parse(url).unwrap()));
         }
-        for url in ["https://registry.example.test/", "https://tauri.localhost.evil.test/", "http://localhost:1430/", "tauri://localhost/remote", "tauri://localhost/?url=evil"] {
+        for url in ["https://registry.example.test/", "https://tauri.localhost.evil.test/", "http://localhost:1430/", "tauri://localhost/remote", "tauri://localhost/?url=evil", "tauri://localhost?url=evil", "tauri://user@localhost", "tauri://localhost:443"] {
             assert!(!local_editor("main", &Url::parse(url).unwrap()));
         }
         let capabilities: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();

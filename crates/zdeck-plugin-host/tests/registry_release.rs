@@ -93,6 +93,60 @@ async fn generated_artifact_signed_with_fixture_key_installs_without_execution()
     println!("fixture-key isolated archive: {} {} SHA-256 {}", review.id, review.version, review.archive_sha256);
 }
 #[test]
+fn macos_pilot_explicitly_rejects_other_operating_systems() {
+    let f = Fixture::new();
+    let mut payload = f.payload.clone();
+    payload["compatibility"]["platforms"] = json!(["macos"]);
+    let bytes = f.sign(&payload);
+    assert!(f.resolver.verify(&bytes, "fixture", "1.2.3", "macos").is_ok());
+    for platform in ["windows", "linux"] {
+        assert_eq!(f.resolver.verify(&bytes, "fixture", "1.2.3", platform).err(), Some("This release is not available for this operating system. Nothing was downloaded or installed."));
+    }
+}
+
+#[tokio::test]
+#[ignore = "Explicit production-key candidate check; set ZDECK_REVIEWED_RELEASE and ZDECK_ZDX_ARTIFACT, optionally ZDECK_PUBLIC_RELEASE=1 after hosting"]
+async fn reviewed_production_release_installs_disabled_without_execution() {
+    let bytes = std::fs::read(std::env::var_os("ZDECK_ZDX_ARTIFACT").expect("reviewed archive")).unwrap();
+    let envelope = std::fs::read(std::env::var_os("ZDECK_REVIEWED_RELEASE").expect("reviewed signed public envelope")).unwrap();
+    let resolver = Resolver::configured(Some("https://zreg.zaaane.com/"), Some(include_str!("../../../src-tauri/registry-public-keys.json"))).unwrap();
+    let verified = resolver.verify(&envelope, "home-assistant", "0.2.0", std::env::consts::OS).unwrap();
+    for platform in ["windows", "linux"] { assert!(resolver.verify(&envelope, "home-assistant", "0.2.0", platform).is_err()); }
+    let mut tampered: Value = serde_json::from_slice(&envelope).unwrap();
+    tampered["signature"] = json!(STANDARD.encode([0u8; 64]));
+    assert!(resolver.verify(&serde_json::to_vec(&tampered).unwrap(), "home-assistant", "0.2.0", std::env::consts::OS).is_err());
+    assert_eq!(verified.release().artifact.sha256, "2bc4fde8f462feabbf91b929a9b5213eee63183972f34435b53485de225e979d");
+    assert_eq!(verified.release().source.commit, "c688567f8359f6d20ff4a7ee30ba6c18e25cc963");
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("config/plugins");
+    let install = PluginInstall::new(directory.clone(), vec![]).unwrap();
+    let prepared = if std::env::var("ZDECK_PUBLIC_RELEASE").as_deref() == Ok("1") {
+        let remote = resolver.lookup("home-assistant", "0.2.0").await.unwrap();
+        assert_eq!(serde_json::to_value(remote.release()).unwrap(), serde_json::to_value(verified.release()).unwrap());
+        remote.download(&install).await.unwrap()
+    } else {
+        let http = Fake::new(vec![Ok(envelope), Ok(bytes.clone())]);
+        resolver.lookup_with(&http, "home-assistant", "0.2.0").await.unwrap().download_with(&http, &install).await.unwrap()
+    };
+    assert_eq!(format!("{:x}", Sha256::digest(&bytes)), prepared.review().archive_sha256);
+    let token = prepared.review().review_id.clone();
+    let registry = PluginRegistry::default();
+    install.install_archive(&registry, prepared, &token).await.unwrap();
+    assert!(registry.snapshots().await.is_empty());
+    let restarted = PluginInstall::new(directory, vec![]).unwrap();
+    restarted.restore(&registry).await.unwrap();
+    assert!(registry.snapshots().await.is_empty());
+    assert!(!restarted.catalog().await.unwrap().plugins[0].trusted);
+    let preferences: Value = serde_json::from_slice(&std::fs::read(temp.path().join("config/plugin-trust.v1.json")).unwrap()).unwrap();
+    assert_eq!(preferences["enabled"], json!({}));
+    let collision = verified.download_with(&Fake::new(vec![Ok(bytes)]), &restarted).await.unwrap();
+    assert!(collision.review().collision);
+    let token = collision.review().review_id.clone();
+    assert!(restarted.install_archive(&registry, collision, &token).await.is_err());
+    println!("production-key HA candidate verified; disabled/untrusted install, restart and collision refusal passed; public HTTP: {}", std::env::var("ZDECK_PUBLIC_RELEASE").as_deref() == Ok("1"));
+}
+
+#[test]
 fn node_signed_public_only_interop_fixture_verifies_in_rust() {
     let f: Value = serde_json::from_str(include_str!("fixtures/ed25519-public-fixture.json")).unwrap();
     let keys = f["trust"]["keys"].to_string();

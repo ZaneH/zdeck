@@ -1,5 +1,38 @@
 // Compiled only for the opt-in native-smoke build, never the normal app.
 use std::time::Duration;
+use tauri::Manager;
+
+pub struct IsolatedData(pub tempfile::TempDir);
+
+// Feature-only native delivery hook, never renderer IPC or an OS association rewrite.
+pub fn registry_delivery(app: &tauri::AppHandle) {
+    match std::env::var("ZDECK_REGISTRY_SMOKE").as_deref() {
+        Ok("local") => crate::plugin_archive::drop_paths(app, vec![std::env::var_os("ZDECK_SMOKE_ARCHIVE").expect("explicit smoke archive").into()]),
+        Ok("remote" | "missing") => crate::plugin_archive::request_link(app, "zdeck://plugins/install?id=home-assistant&version=0.2.0"),
+        Ok(_) => panic!("Use local, remote or missing registry smoke mode"),
+        Err(_) => (),
+    }
+}
+
+pub fn check_registry(webview: tauri::Webview) {
+    println!("ZDECK_SMOKE_ORIGIN {} {}", webview.label(), webview.url().expect("bundled origin"));
+    let missing = std::env::var("ZDECK_REGISTRY_SMOKE").as_deref() == Ok("missing");
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(2));
+        let script = include_str!("registry-smoke.js").replace("EXPECTED_MISSING", if missing { "true" } else { "false" });
+        webview.eval(script).expect("start registry smoke in bundled WebKit");
+        for _ in 0..90 {
+            std::thread::sleep(Duration::from_secs(1));
+            let handle = webview.app_handle().clone();
+            webview.eval_with_callback("window.__zdeckRegistrySmoke || null", move |result| {
+                if result != "null" && !result.is_empty() {
+                    println!("ZDECK_REGISTRY_SMOKE {result}");
+                    crate::tray::quit(&handle);
+                }
+            }).expect("poll registry smoke");
+        }
+    });
+}
 
 pub fn check_layout(webview: tauri::Webview) {
     std::thread::spawn(move || {

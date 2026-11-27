@@ -108,12 +108,15 @@ impl Resolver {
             || release.artifact.bytes == 0 || release.artifact.bytes > ARCHIVE_LIMIT || !hex(&release.artifact.sha256, 64)
             || !safe_url(&release.artifact.url)?.path().ends_with(".zdx") || c.protocol != 1
             || !matches!((c.runtime.as_str(), c.minimum.as_str()), ("node", "22.18.0") | ("python", "3.10.0"))
-            || c.platforms.is_empty() || c.platforms.len() > 3 || !c.platforms.iter().any(|p| p == platform)
+            || c.platforms.is_empty() || c.platforms.len() > 3
             || c.platforms.iter().any(|p| !["macos", "windows", "linux"].contains(&p.as_str()))
             || c.platforms.iter().collect::<std::collections::HashSet<_>>().len() != c.platforms.len()
             || !hex(&release.source.commit, 40) || release.source.license.is_empty() || release.source.license.len() > 40
             || release.source.license.chars().any(char::is_control) { return Err(INVALID); }
         safe_url(&release.source.repo)?;
+        if !c.platforms.iter().any(|p| p == platform) {
+            return Err("This release is not available for this operating system. Nothing was downloaded or installed.");
+        }
         Ok(VerifiedRelease { release, key_id: envelope.key_id })
     }
     pub async fn lookup(&self, id: &str, version: &str) -> Result<VerifiedRelease, &'static str> {

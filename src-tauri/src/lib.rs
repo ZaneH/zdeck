@@ -300,8 +300,20 @@ mod plugin_startup_tests {
     }
 }
 
+fn app_data_directory(app: &tauri::AppHandle) -> tauri::Result<std::path::PathBuf> {
+    use tauri::Manager;
+    #[cfg(feature = "native-smoke")]
+    { return Ok(app.state::<native_smoke::IsolatedData>().0.path().join("data")); }
+    #[cfg(not(feature = "native-smoke"))]
+    app.path().app_data_dir()
+}
+
 fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::PluginInstall, PluginError> {
     use tauri::Manager;
+    #[cfg(feature = "native-smoke")]
+    { return plugin_install::PluginInstall::new(app.state::<native_smoke::IsolatedData>().0.path().join("config/plugins"), vec![]); }
+    #[cfg(not(feature = "native-smoke"))]
+    {
     let home = app.path().home_dir().map_err(|_| PluginError {
         kind: plugin::ErrorKind::Unavailable,
         code: None,
@@ -311,6 +323,7 @@ fn local_plugin_install(app: &tauri::AppHandle) -> Result<plugin_install::Plugin
     })?;
     Ok(plugin_install::PluginInstall::for_home(home)?
         .with_settings_loader(Arc::new(plugin_preferences::load_settings)))
+    }
 }
 
 /// Discovery never runs plugin code; runtime detection executes only bounded --version probes.
@@ -458,8 +471,13 @@ async fn remote_revoke_device(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(feature = "native-smoke")]
+    keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
     #[cfg(target_os = "linux")]
     linux_display::initialize();
+    let context = tauri::generate_context!();
+    #[cfg(feature = "native-smoke")]
+    assert_eq!(context.config().identifier, "com.zdeck.native-smoke", "Build smoke with --config src-tauri/tauri.smoke.conf.json; never use normal app storage.");
     tauri::Builder::default()
         .manage(plugin_archive::ArchiveInbox::default())
         // Must be first: subsequent Windows/Linux launches forward URLs to the first process.
@@ -482,11 +500,23 @@ pub fn run() {
             {
                 native_smoke::check_layout(webview.clone());
             }
+            #[cfg(feature = "native-smoke")]
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && std::env::var_os("ZDECK_REGISTRY_SMOKE").is_some()
+            {
+                native_smoke::check_registry(webview.clone());
+            }
             let _ = (webview, payload);
         })
         .setup(|app| {
             use tauri::Manager;
-            let store = match app.path().app_data_dir() {
+            #[cfg(feature = "native-smoke")]
+            {
+                let root = tempfile::Builder::new().prefix("zdeck-native-smoke-").tempdir()?;
+                println!("ZDECK_SMOKE_ROOT {}", root.path().display());
+                app.manage(native_smoke::IsolatedData(root));
+            }
+            let store = match app_data_directory(app.handle()) {
                 Ok(directory) => Ok(Arc::new(DeckStore::new(directory.join(DECK_FILE_NAME)))),
                 Err(error) => Err(DeckError::unavailable(format!(
                     "Could not resolve the app data directory: {error}."
@@ -500,7 +530,7 @@ pub fn run() {
             let plugin = Arc::new(PluginRegistry::default());
             let actions = Arc::new(ActionDispatcher::new(obs.clone(), system.clone(), plugin.clone()));
             let desktop = DesktopActions::new(actions.clone());
-            let admin = RemoteAdmin::persistent(app.path().app_data_dir().ok());
+            let admin = RemoteAdmin::persistent(app_data_directory(app.handle()).ok());
             if let Ok(deck) = &store {
                 let config = ServiceConfig {
                     origin: String::new(), mode: ConnectionMode::default(), port: DEFAULT_PORT,
@@ -520,6 +550,8 @@ pub fn run() {
             app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
             tray::setup(app.handle());
             plugin_registry::setup_links(app.handle());
+            #[cfg(feature = "native-smoke")]
+            native_smoke::registry_delivery(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -582,7 +614,7 @@ pub fn run() {
             remote_deny_device,
             remote_revoke_device
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Deck")
         .run(|app, event| {
             use tauri::Manager;

@@ -50,11 +50,11 @@ The separate `zdeck-registry` repo now has external-key signing/verification too
 `releases/<id>/<version>.json` output, whole-catalogue/release checks and an explicit app-ready
 contract gate. A decorative signature field no longer enables anything. A published record needs
 a verified local envelope matching its source/compatibility facts, and the reviewed website gate
-must deliberately match the distributed app's endpoint/public keys. The preview Spotify and
-in-development Home Assistant entries remain un-installable with `ready:false`. Read-only live
-checks on 2026-11-27 confirmed the public page/health and release-path 404 policy, not a published
-artifact or OS handler. The first HA archive is an unsigned local candidate pending native QA and
-deliberate offline signing/publication; no private key was accessed.
+must deliberately match the distributed app's endpoint/public keys. Spotify remains a preview; HA 0.2.0 has a real signed **macOS-only pilot** record and locally
+retained archive. Both remain un-installable from the website with `ready:false`. Read-only live
+checks on 2026-11-27 confirmed the public page/health and release-path 404 policy, not public
+artifact delivery or an OS handler. The registry's operator-authorized existing CLI signed
+locally; no key bytes were exposed. See its `docs/home-assistant-candidate.md` for exact hashes.
 
 ## Native registration/release gates
 
@@ -63,19 +63,26 @@ the scheme, Windows an installer/association, Linux an installed desktop entry/M
 AppImage registration varies by desktop/launcher. No silent association rewrite is attempted.
 Install an appropriate packaged build if a browser has no handler; the website cannot repair it.
 
-Physically verify **Windows, macOS and Linux** before release: closed-app handler startup;
+Physically verify **every platform claimed by the release** before activating its website link:
+closed-app handler startup;
 running/tray-hidden delivery without a second active process; malformed/duplicate links; cancel
 then reopen; simultaneous local picker/drop/review; focus/browser return; native dialogs/drop;
 immutable HTTPS content types/TLS/DNS behavior; private-address/redirect refusal; no-replace
-publication and packaged-webview local-origin checks. Bundle targets remain `deb`/`appimage`;
-macOS/Windows packaging/associations are not proven by a macOS no-bundle build.
+publication and packaged-webview local-origin checks. Normal configured bundle targets remain `deb`/`appimage`; an explicit macOS `.app` pilot build
+is now checked. No browser/OS association is claimed. Unverified OSes must be excluded from a
+pilot's signed compatibility and explicitly rejected. All three OS implementations and native
+verification remain project requirements; a pilot does not assert parity.
 
 Automated checks use ephemeral signing keys, injected HTTP clients, synthetic HTTP bodies,
 private temporary plugin/config directories and Brave Storybook/fake IPC. The fixture demonstrates
 resolver → archive review → disabled/untrusted install/restart, not an actual published release.
 No user plugins/settings, credentials, integrations, OS associations or remote deployment are
-exercised. A native development binary is built but not launched against the user's live plugin
-directory. Browser evidence must never be reported as three-OS native parity.
+exercised. The opt-in smoke `.app` was launched only with a distinct identifier/scheme, fresh native data
+and plugin roots, no runtime candidates/settings loader and in-memory mock credentials. The
+actual bundled WebKit/IPC path reviewed and installed HA disabled/untrusted without execution;
+its production-endpoint 404 path also failed closed. It exposed and fixed macOS's slashless
+`tauri://localhost` root being rejected by the origin guard; only that exact local root is
+normalized. User plugin storage was not accessed. Browser evidence must never be reported as three-OS native parity.
 
 ## Historical verification of the resolver milestone
 

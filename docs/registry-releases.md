@@ -1,9 +1,10 @@
 # Signed registry releases v1 (unreleased)
 
 This checkout ships the public default `https://zreg.zaaane.com/` and reviewed public key
-`registry-2026-01` in `src-tauri/registry-public-keys.json`. No signed release is published by this
-change; the website remains `ready:false` and its seeds unavailable. The private key was not
-accessed. A configured resolver is not evidence of native release readiness. A signature is
+`registry-2026-01` in `src-tauri/registry-public-keys.json`. The registry has a genuine signed HA
+0.2.0 **macOS-only pilot**, locally retained and verified, awaiting CT deployment. The website
+remains `ready:false`. The operator authorized the registry's existing offline CLI to sign using
+an external private-key file; no private bytes were exposed or added to either repository. A configured resolver is not evidence of native release readiness. A signature is
 registry-key provenance/integrity, not a safety review, publisher identity, sandbox or execution
 permission. Local unsigned imports are unchanged. Updates/replacements are still out of scope.
 
@@ -151,6 +152,26 @@ push or deployment is authorized by these smoke commands.
 Automated fixture evidence is not proof of real publication, DNS/TLS hosting or OS URL handlers.
 Before enabling the website's reviewed `app-contract.json` gate: review real artifacts and keys,
 publish immutable JSON/ZIP with the exact content types, distribute a configured desktop build,
-and exercise installed macOS/Windows/Linux handlers (closed/running/hidden), local priority,
+and exercise installed handlers on **every platform claimed by each release** (closed/running/hidden), local priority,
 lookup/download cancellation, native dialogs/drop, certificate failures and no-replace filesystems.
 Do not launch a development binary against live user plugins merely to demonstrate the resolver.
+A verified single-platform pilot is allowed; other OSes must be excluded from signed compatibility
+and explicitly rejected (before archive download). All three implementations and eventual native
+verification remain required; pilot success never implies parity.
+
+## Real signed pilot check (operator opt-in)
+
+On macOS, set `ZDECK_REVIEWED_RELEASE` to the reviewed **public signed envelope** and
+`ZDECK_ZDX_ARTIFACT` to its exact archive, then run:
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml -p zdeck-plugin-host \
+  --test registry_release reviewed_production_release -- --ignored --nocapture
+```
+
+This uses the independently shipped production public key, verifies source/hash and macOS-only
+compatibility, rejects tampering/Windows/Linux, and checks actual ZIP install, restart with no
+execution, and collision refusal in a fresh temporary directory. Default transport is injected
+local bytes, explicitly **not public-host evidence**. Only after the exact bytes are hosted, set
+`ZDECK_PUBLIC_RELEASE=1` to use the real production HTTPS lookup and download with unchanged
+DNS/TLS/signature policy. No signing key, user settings, credentials or devices are accessed.

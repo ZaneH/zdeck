@@ -16,7 +16,7 @@ name = "deck_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-native-smoke = []
+native-smoke = ["dep:tempfile"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
@@ -51,6 +51,7 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time", "process", "io-util"] }
 tokio-websockets = { version = "0.13", features = ["server"] }
 url = "2"
+tempfile = { version = "3", optional = true }
 
 [dev-dependencies]
 http = "1"
