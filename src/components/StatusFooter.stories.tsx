@@ -63,6 +63,10 @@ export const DisarmAlwaysAvailable: Story = {
     await expect(args.onEdit).toHaveBeenCalledOnce();
   },
 };
+// Glass changes the material, never the red disarmed / green executing safety signal.
+export const GlassControlsToggle: Story = { ...ControlsToggle, globals: { theme: "glass" } };
+export const GlassDisarmAlwaysAvailable: Story = { ...DisarmAlwaysAvailable, globals: { theme: "glass" } };
+
 export const BrowserPreview: Story = {
   args: { native: false, service: null },
   play: async ({ canvasElement }) => {

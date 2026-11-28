@@ -22,6 +22,30 @@ toolbar item in `.storybook/preview.tsx`, and add it to the standard fixture and
 exist. Also update the Rust `Theme` enum in `crates/zdeck-schema/src/deck.rs`, global and per-section Appearance menus, theme-color mapping, and schema/persistence/remote tests. This is an app-source change, not a supported custom-theme installation workflow. Keep new effects within what the existing tests already check (contrast, focus, reduced motion, forced
 colors).
 
+## Glass material direction
+
+Glass uses a graphite `#15171B` canvas with broad, low-contrast neutral illumination. Only the functional
+control layer carries silver-gray material: a crisp upper specular rim, weaker opposing edge and short
+contact shadow. Editor chrome and reading surfaces stay quiet; labels are monochromatic, on toggles
+switch to dark ink on luminous silver, and the user's accent still owns focus/selection. System UI type
+is scoped to Glass; nested Dark/Light/Terminal sections retain their own type and controls. Geometry,
+input semantics and semantic warning/execution colors are unchanged.
+
+The base control paint is opaque. Translucency and blur are opt-in through `@supports backdrop-filter`;
+reduced transparency or increased contrast restores opaque paint and explicit boundaries. Forced colors
+uses system colors, visible focus and an explicitly preserved two-color slider value fill. No shaders,
+refraction engine, dependency, or new motion is involved. This is a CSS approximation, **not native
+optical parity**; browser checks do not verify macOS, Windows or Linux webview rendering.
+
+Design references: Apple's [Materials](https://developer.apple.com/design/human-interface-guidelines/materials),
+[Liquid Glass color](https://developer.apple.com/design/human-interface-guidelines/color#Liquid-Glass-color),
+and [WWDC25 material guidance](https://developer.apple.com/videos/play/wwdc2025/219/) distinguish the
+functional control/navigation layer from quieter content and do not prescribe an inherent glass color.
+Community implementations inspected for ideas only:
+[liquid-glass-recipes](https://github.com/wave2234/liquid-glass-recipes),
+[hyalite--liquid-glass](https://github.com/VII-Cae/hyalite--liquid-glass), and
+[nikdelvin/liquid-glass](https://github.com/nikdelvin/liquid-glass) (MIT). No source was copied.
+
 ## The standard fixture is the developer workspace
 
 `src/components/ThemePreview.stories.tsx` (`Themes/Theme preview`) renders one fixed sample deck for every

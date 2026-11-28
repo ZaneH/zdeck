@@ -81,6 +81,9 @@ export const SavedLayoutInDarkDeck: Story = {
     const shell = canvasElement.querySelector<HTMLElement>(".phone-shell")!;
     await expect(shell).toHaveAttribute("data-appearance", "glass");
     await expect(getComputedStyle(shell).backgroundImage).toContain("radial-gradient");
+    await expect(getComputedStyle(shell).backgroundColor).toBe("rgb(21, 23, 27)");
+    await expect(getComputedStyle(shell).fontFamily).toContain("Segoe UI");
+    await expect(getComputedStyle(canvasElement.querySelector<HTMLElement>(".phone-page-heading h1")!).color).toBe("rgb(245, 246, 247)");
     const play = canvas.getByRole("button", { name: /Press Play \/ pause/ });
     await expect(play).toHaveAccessibleName(/Play \/ pause/);
     await expect(play.closest("article")).toHaveAttribute("data-shape", "circle");

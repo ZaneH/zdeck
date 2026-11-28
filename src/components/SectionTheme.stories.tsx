@@ -4,10 +4,35 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { ACCENTS } from "../lib/types";
 import type { Control, Theme } from "../lib/types";
+import type { PluginSnapshots } from "../lib/plugin";
 import { applyTheme } from "../lib/theme";
 import { ControlTile } from "./ControlTile";
 
 const tile: Control = { id: "story-volume", action: "volume", label: "Speakers", volume: 50 };
+const stateControls: Control[] = [
+  { id: "button", action: "obs-scene", label: "Camera", scene: "Camera" },
+  ...["toggle-switch", "toggle-button"].flatMap(presentation => [true, false, null].map(value => ({
+    id: `${presentation}-${value}`, action: "plugin" as const, label: value === null ? "Unknown" : value ? "On" : "Off",
+    pluginId: "contrast", pluginAction: value === null ? "unknown" : value ? "on" : "off",
+    pluginArgs: { enabled: false }, presentation: presentation as "toggle-switch" | "toggle-button",
+  }))),
+  { id: "value", action: "plugin", label: "Input level", pluginId: "contrast", pluginAction: "level", pluginArgs: { level: 50 }, presentation: "value" },
+];
+const levelConfig = { level: { type: "integer" as const, minimum: 0, maximum: 100, choicesKey: "levels" } };
+const plugins: PluginSnapshots = {
+  contrast: {
+    status: "connected", lastError: null,
+    state: { on: true, off: false, levels: [{ value: 50, label: "Input", available: true, observation: { value: 50, unit: "%", observedAtMs: 1_700_000_000_000 } }] },
+    manifest: {
+      id: "contrast", version: "1.0.0", protocolVersion: 1,
+      actions: [
+        ...["on", "off", "unknown"].map(id => ({ id, title: id, config: { enabled: { type: "boolean" as const, control: { stateKey: id } } } })),
+        { id: "level", title: "Input level", config: levelConfig },
+      ],
+      values: [{ id: "level", title: "Input level", config: levelConfig, stateKey: "levels", entityKey: "level" }],
+    },
+  },
+};
 
 /** Fixture markup mirrors SectionList and PhoneDeck; the shared section classes carry the theme boundary. */
 function SectionExample({ deckTheme, sectionTheme, accent }: { deckTheme: Theme; sectionTheme: Theme | null; accent?: string }) {
@@ -16,18 +41,18 @@ function SectionExample({ deckTheme, sectionTheme, accent }: { deckTheme: Theme;
   // Production sectionStyle only sets --accent inline; without data-theme the section inherits the deck theme.
   const style = accent ? ({ "--accent": accent } as CSSProperties) : undefined;
   const appearance = sectionTheme ?? deckTheme;
-  return <div style={{ display: "grid", gap: 16, maxWidth: 520 }}>
+  return <div data-theme={deckTheme} data-appearance={deckTheme} style={{ display: "grid", gap: 16, maxWidth: 520 }}>
     <section className="deck-section" data-theme={sectionTheme ?? undefined} data-appearance={appearance} style={style}>
       <h2 className="section-heading">Editor section</h2>
       <p>Inherited label text</p>
       <span className="sr-only" data-probe="muted" style={{ color: "var(--text-muted)" }} />
-      <div className="control-grid"><ControlTile control={tile} variant="editor" appearance={appearance} volume={50} /></div>
+      <div className="control-grid">{[tile, ...stateControls].map(control => <ControlTile key={control.id} control={control} plugins={plugins} variant="editor" appearance={appearance} volume={50} />)}</div>
     </section>
     <section className="phone-section" data-theme={sectionTheme ?? undefined} data-appearance={appearance} style={style}>
       <h2 className="section-heading">Phone section</h2>
       <p>Inherited label text</p>
       <span className="sr-only" data-probe="muted" style={{ color: "var(--text-muted)" }} />
-      <div className="phone-grid"><ControlTile control={tile} variant="phone" appearance={appearance} volume={50} /></div>
+      <div className="phone-grid">{[tile, ...stateControls].map(control => <ControlTile key={control.id} control={control} plugins={plugins} variant="phone" appearance={appearance} volume={50} />)}</div>
     </section>
   </div>;
 }
@@ -81,8 +106,9 @@ function backdropCandidates(): number[][] {
   return candidates;
 }
 function paintedBackgrounds(style: CSSStyleDeclaration, background: number[]): number[][] {
-  const source = style.backgroundImage === "none" ? [style.backgroundColor] : colorsIn(style.backgroundImage);
-  return source.length ? source.map(color => blend(color, background)) : [background];
+  const base = blend(style.backgroundColor, background);
+  const stops = colorsIn(style.backgroundImage);
+  return stops.length ? stops.map(color => blend(color, base)) : [base];
 }
 function expectedMix(accent: string, text: string, weight: number): number[] {
   const accentChannels = channels(accent);
@@ -136,7 +162,7 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
       }
       // Explicit control colors stay scoped to their own element and stay readable.
       const muted = section.querySelector<HTMLElement>("[data-probe=muted]")!;
-      for (const label of section.querySelectorAll<HTMLElement>(".section-heading, .tile-icon, .tile-label")) {
+      for (const label of section.querySelectorAll<HTMLElement>('.section-heading, [data-presentation="slider"] .tile-icon, [data-presentation="slider"] .tile-label')) {
         const color = getComputedStyle(label).color;
         expect(color).toBe(getComputedStyle(muted).color);
         expect(color).not.toBe(style.color);
@@ -161,28 +187,36 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
       expect(getComputedStyle(tileInput).writingMode).not.toBe("vertical-lr");
       expect(inputBox.height).toBeLessThan(tileBox.height);
     }
-    // Labels sit on the tile gradient; check both endpoints over the lightest group backdrop.
-    const tileBackgrounds = paintedBackgrounds(tileStyle, background);
-    const tileBackground = lightest(tileBackgrounds);
-    for (const label of section.querySelectorAll<HTMLElement>(".tile-icon, .tile-label, .volume-readout, .value-unit")) {
-      expect(contrast(getComputedStyle(label).color, tileBackground)).toBeGreaterThanOrEqual(4.5);
+    // Check actual button, reading, on/off/unknown switch AND button paints, not just Glass tokens.
+    for (const tile of section.querySelectorAll<HTMLElement>(".control-tile")) {
+      const paints = sectionBackgrounds.flatMap(backdrop => paintedBackgrounds(getComputedStyle(tile), backdrop));
+      for (const label of tile.querySelectorAll<HTMLElement>(".tile-icon, .tile-label, .volume-readout, .tile-reading output, .reading-time, .value-unit, .toggle-state")) {
+        const labelStyle = getComputedStyle(label);
+        if (labelStyle.display === "none") continue;
+        for (const paint of paints) {
+          // The full-bleed slider's icon has its own opaque disk over the light value fill.
+          const labelPaint = blend(labelStyle.backgroundColor, paint);
+          expect(contrast(labelStyle.color, labelPaint), `${appearance} ${tile.id || tile.dataset.presentation} ${label.className}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      for (const token of ["--text", "--text-muted", "--text-faint"]) {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${token})`;
+        tile.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        for (const paint of paints) expect(contrast(color, paint), `${appearance} ${token}`).toBeGreaterThanOrEqual(4.5);
+      }
     }
-    // White primary, muted and faint text must clear normal-text contrast on both composite surfaces.
-    for (const token of ["--text", "--text-muted", "--text-faint"]) {
-      const probe = document.createElement("span");
-      probe.style.color = `var(${token})`;
-      section.appendChild(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      if (appearance !== "glass") expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(color, tileBackground)).toBeGreaterThanOrEqual(4.5);
-    }
-    // Glass must stay translucent after composition rather than pretending an opaque surface.
     if (appearance === "glass") {
-      expect(alphaOf(style.backgroundColor)).toBeLessThan(1);
+      // Editor sections own a graphite canvas; the phone shell owns it in the real phone.
+      expect(alphaOf(style.backgroundColor)).toBe(section.classList.contains("phone-section") ? 0 : 1);
       const tileTokens = colorsIn(tileStyle.backgroundImage);
       expect(tileTokens.length).toBeGreaterThan(0);
-      for (const token of tileTokens) expect(alphaOf(token)).toBeLessThan(1);
+      for (const token of tileTokens) {
+        if (supportsBackdrop) expect(alphaOf(token)).toBeLessThan(1);
+        else expect(alphaOf(token)).toBe(1);
+      }
     }
     // Glass controls own the material; Dark/Light keep flat tiles.
     const tileFilter = tileStyle.getPropertyValue("backdrop-filter") || tileStyle.getPropertyValue("-webkit-backdrop-filter");

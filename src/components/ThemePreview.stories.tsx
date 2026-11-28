@@ -66,7 +66,7 @@ const THEMES: Theme[] = ["dark", "light", "glass", "terminal"];
 const THEME_LABEL: Record<Theme, string> = { dark: "Dark", light: "Light", glass: "Glass", terminal: "Wasteland Terminal" };
 // Signatures the theme stylesheet promises; a preview that misses them is not that appearance.
 const TILE_RADIUS: Record<Theme, string> = { dark: "7px", light: "7px", glass: "30px", terminal: "2px" };
-const BACKGROUND: Record<Theme, string> = { dark: "#18191b", light: "#f4f5f6", glass: "#ac83f6", terminal: "#0b0f08" };
+const BACKGROUND: Record<Theme, string> = { dark: "#18191b", light: "#f4f5f6", glass: "#15171b", terminal: "#0b0f08" };
 
 type Viewport = "desktop" | "phone";
 
@@ -238,7 +238,14 @@ async function assertPreview(canvasElement: HTMLElement, theme: Theme, viewport:
   // Wasteland Terminal squares its instruments and switches to the mono face.
   if (theme === "glass") {
     expect(getComputedStyle(tiles[0]).borderTopLeftRadius).toBe("30px");
-    expect(getComputedStyle(tiles[0]).getPropertyValue("backdrop-filter")).toContain("blur");
+    const supported = CSS.supports("backdrop-filter", "blur(1px)") || CSS.supports("-webkit-backdrop-filter", "blur(1px)");
+    if (supported) expect(getComputedStyle(tiles[0]).getPropertyValue("backdrop-filter") || getComputedStyle(tiles[0]).getPropertyValue("-webkit-backdrop-filter")).toContain("blur");
+    expect(getComputedStyle(section).fontFamily).toContain("Segoe UI");
+    // The on surface needs dark ink in every slot, not only in the switch body.
+    for (const selector of [".tile-icon", ".tile-label", ".toggle-state"]) {
+      expect(getComputedStyle(tiles[3].querySelector<HTMLElement>(selector)!).color).toBe("rgb(32, 35, 40)");
+    }
+    expect(getComputedStyle(tiles[3]).backgroundImage).not.toBe(getComputedStyle(tiles[4]).backgroundImage);
   } else if (theme === "terminal") {
     expect(getComputedStyle(tiles[0]).borderTopLeftRadius).toBe("2px");
     expect(getComputedStyle(section).fontFamily).toContain("monospace");
