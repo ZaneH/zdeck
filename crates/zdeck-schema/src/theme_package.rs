@@ -1,7 +1,7 @@
 //! Data-only theme package format foundation. Nothing here installs or applies a theme.
 use crate::deck::Theme;
 use crate::plugin::identifier;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Exact UTF-8 byte budget for one theme package, including whitespace.
@@ -12,14 +12,14 @@ pub const THEME_COLOR_KEYS: [&str; 15] = [
     "text", "textMuted", "textFaint", "danger", "warning", "maze", "pellet", "tileSurface",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMotif {
     None,
     Maze,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ThemeColors {
     pub bg: String,
@@ -39,7 +39,7 @@ pub struct ThemeColors {
     pub tile_surface: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ThemePackageAppearance {
     pub base: Theme,
@@ -51,7 +51,7 @@ pub struct ThemePackageAppearance {
     pub section_radius: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemePackage {
     #[serde(deserialize_with = "json_integer")]
@@ -67,7 +67,7 @@ pub struct ThemePackage {
     pub appearance: ThemePackageAppearance,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CustomThemeReference {
     pub id: String,

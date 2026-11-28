@@ -13,6 +13,7 @@ mod plugin_archive;
 mod plugin_registry;
 pub mod remote;
 pub use zdeck_system as system;
+pub mod theme_store;
 mod tray;
 
 use std::sync::Arc;

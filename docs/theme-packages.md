@@ -1,9 +1,11 @@
 # Theme package format (foundation)
 
-Status: format parser and validation foundation only. Theme packages are **not installable** in
-zDeck yet. The app does not discover, download, preview, apply, persist, export or send these
-packages to the phone. This document describes the bounded data contract implemented in
-`src/lib/themePackage.ts` and `crates/zdeck-schema/src/theme_package.rs`.
+Status: format parser plus a native catalog storage foundation. Theme packages are **not
+installable through the app** yet: no picker, IPC command, preview, apply/remove flow or phone
+delivery exists, and the catalog is not opened at launch. This document describes the bounded data
+contract implemented in `src/lib/themePackage.ts` and
+`crates/zdeck-schema/src/theme_package.rs`, and the host-owned catalog primitive in
+`src-tauri/src/theme_store.rs`.
 
 ## Contract
 
@@ -72,14 +74,45 @@ validated separately from package bytes:
 package rules and `digest` is 64 lowercase hexadecimal characters. The reference is defined here,
 but deck integration does not exist yet. A package never supplies its own reference digest.
 
+## Native catalog storage (foundation)
+
+The host owns `<app-data>/themes.v1.json`. The renderer never supplies this path. The catalog
+retains each package's **exact source bytes as a UTF-8 string**, validates them with
+`parse_theme_package` on every read and import, and derives the reference digest as SHA-256 of
+those exact bytes. Stored metadata each look like `{ "source": "<exact package text>" }`.
+
+Limits:
+
+- one package: 16 KiB exact bytes (the shared package parser's bound);
+- at most 16 installed packages;
+- the whole catalog file: at most 256 KiB, including JSON keys, escaping and separators. Package
+  bytes and catalog overhead share this budget, so 16 maximal 16 KiB packages cannot all fit.
+- installing an exact duplicate (same id, version and digest) is idempotent and does not rewrite
+  the file; the same id and version with a different digest is a visible conflict; different
+  versions of one id may coexist.
+
+Reads are bounded before reading and accept only a regular file; a symlink or directory at the
+catalog path is rejected. A missing file is an empty catalog. A corrupt, oversized or invalid
+catalog (unknown fields, wrong schema, invalid package, duplicate id+version) fails visibly and
+its bytes are preserved; it is never treated as empty or overwritten. Writes are serialized, go to
+a same-directory `create_new` temporary file, are flushed and synced, then renamed over the
+destination. A failed write leaves the previous catalog intact. Construction performs no I/O, so a
+catalog or settings problem cannot prevent launch.
+
+`ThemeStore` exposes asynchronous `list()`, `install(bytes)` and
+`remove(reference, in_use_references)`. Errors are typed and serializable. Removal refuses any
+reference supplied by the trusted caller, including Trash; it never edits a deck. Wiring into
+launch, IPC, deck validation or migration is a later stage.
+
 ## Limitations and next stages
 
-- No installation, file picker, registry download, signature verification, digest computation,
-  catalog record, preview, apply/remove flow, persistence, migration, export or phone delivery.
+- No in-app installation, file picker, registry download, signature verification, preview,
+  apply/remove flow, migration, export or phone delivery. The native catalog primitive is not yet
+  wired to launch, IPC or the deck UI.
 - Built-in appearances remain the only selectable themes. Existing deck validation still rejects
   unknown theme values; adding custom IDs requires a deliberate schema migration.
-- Digest computation and authenticated release/catalog identity are future work. Do not treat a
-  parsed package as trusted provenance.
+- Authenticated release/catalog identity is future work. A SHA-256 digest proves byte identity,
+  not authorship. Do not treat a parsed or installed package as trusted provenance.
 - Accessibility, contrast, layout presets and cross-platform behavior still need review before a
   package can be offered to users.
 - Future work must keep installation atomic, preserve the current appearance on failure, and make
@@ -91,4 +124,5 @@ Checks used for this foundation:
 npm test -- tests/themePackage.test.ts
 npm run typecheck
 cargo test --locked --manifest-path src-tauri/Cargo.toml -p zdeck-schema
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib theme_store
 ```
