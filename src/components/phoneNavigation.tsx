@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   PointerEvent as ReactPointerEvent,
   RefObject,
@@ -94,7 +94,8 @@ export function usePhoneNavigation({
 }: PhoneNavigationOptions) {
   const [sectionIndex, setSectionIndex] = useState(0);
   const [announcement, setAnnouncement] = useState("");
-  const start = useRef<{ x: number; y: number } | null>(null);
+  const start = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const pendingSection = useRef<number | null>(null);
   const touchStart = useRef<{
     x: number;
     y: number;
@@ -108,6 +109,9 @@ export function usePhoneNavigation({
 
   // A page change resets the section position; deck snapshots on the same page do not.
   useEffect(() => {
+    start.current = null;
+    touchStart.current = null;
+    pendingSection.current = null;
     setSectionIndex(0);
     setAnnouncement("");
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
@@ -119,13 +123,14 @@ export function usePhoneNavigation({
     );
   }, [sectionKey]);
 
-  // Follow the section the user actually scrolled to, without scrolling anything.
+  // Follow native scrolling after the finger lifts, so appearance never changes mid-gesture.
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     let frame = 0;
     const sync = () => {
       frame = 0;
+      if (touchStart.current || pendingSection.current !== null) return;
       const top = scroller.getBoundingClientRect().top + parseFloat(getComputedStyle(scroller).paddingTop);
       let nearest = 0;
       scroller.querySelectorAll<HTMLElement>("[data-phone-section]").forEach((el, index) => {
@@ -137,30 +142,48 @@ export function usePhoneNavigation({
       if (!frame) frame = requestAnimationFrame(sync);
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("touchend", onScroll, { passive: true });
+    scroller.addEventListener("touchcancel", onScroll, { passive: true });
     return () => {
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("touchend", onScroll);
+      scroller.removeEventListener("touchcancel", onScroll);
       if (frame) cancelAnimationFrame(frame);
     };
   }, [sectionKey, scrollerRef]);
 
-  const goToSection = useCallback(
+  const alignSection = useCallback(
     (index: number) => {
       const scroller = scrollerRef.current;
-      const sections = scroller?.querySelectorAll<HTMLElement>("[data-phone-section]");
-      const target = sections?.[index];
+      const target = scroller?.querySelectorAll<HTMLElement>("[data-phone-section]")[index];
       if (!scroller || !target) return;
-      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       const padding = parseFloat(getComputedStyle(scroller).paddingTop);
-      scroller.scrollTo({ top: scroller.scrollTop, behavior: "auto" });
       scroller.scrollTo({
         top: scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - padding,
-        behavior: reduce ? "auto" : "smooth",
+        behavior: "instant",
       });
+    },
+    [scrollerRef],
+  );
+
+  // Section appearance can change layout; align after it commits, without intermediate scroll states.
+  useLayoutEffect(() => {
+    if (pendingSection.current === null) return;
+    alignSection(pendingSection.current);
+    pendingSection.current = null;
+  });
+
+  const goToSection = useCallback(
+    (index: number) => {
+      const target = scrollerRef.current?.querySelectorAll<HTMLElement>("[data-phone-section]")[index];
+      if (!target) return;
+      if (index === sectionIndex) alignSection(index);
+      else pendingSection.current = index;
       setSectionIndex(index);
       const name = target.querySelector<HTMLElement>(".section-heading")?.textContent?.trim();
       setAnnouncement(name ? `Showing ${name}` : "");
     },
-    [scrollerRef],
+    [alignSection, scrollerRef, sectionIndex],
   );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
@@ -170,13 +193,13 @@ export function usePhoneNavigation({
     }
     start.current = isPhoneControlTarget(event.target)
       ? null
-      : { x: event.clientX, y: event.clientY };
+      : { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
     const from = start.current;
     start.current = null;
-    if (!from || !event.isPrimary) return;
+    if (!from || !event.isPrimary || event.pointerId !== from.pointerId) return;
     const delta = classifyPhoneSwipe(event.clientX - from.x, event.clientY - from.y);
     if (!delta) return;
     const target = phonePageTarget(pageIds, pageId, delta);
@@ -193,7 +216,11 @@ export function usePhoneNavigation({
     if (!scroller) return;
     const onTouchMove = (event: TouchEvent) => {
       const from = touchStart.current;
-      if (!from || event.touches.length !== 1) return;
+      if (event.touches.length !== 1) {
+        touchStart.current = null;
+        return;
+      }
+      if (!from) return;
       const dx = event.touches[0].clientX - from.x;
       const dy = event.touches[0].clientY - from.y;
       if (Math.abs(dy) < 6 || Math.abs(dy) <= Math.abs(dx) * SWIPE_RATIO) return;
@@ -243,7 +270,7 @@ export function usePhoneNavigation({
   const onTouchEnd = (event: ReactTouchEvent<HTMLElement>) => {
     const from = touchStart.current;
     touchStart.current = null;
-    if (!from || event.changedTouches.length !== 1) return;
+    if (!from || event.touches.length !== 0 || event.changedTouches.length !== 1) return;
     const touch = event.changedTouches[0];
     const direction = classifyPhoneVerticalSwipe(touch.clientX - from.x, touch.clientY - from.y);
     if (!direction) return;
@@ -252,6 +279,7 @@ export function usePhoneNavigation({
   };
 
   const onTouchCancel = () => {
+    start.current = null;
     touchStart.current = null;
   };
 

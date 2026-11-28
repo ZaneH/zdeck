@@ -59,7 +59,7 @@ Motion uses short key entrances, a downward press, scene slides, and approximate
 
 ## Phone preview
 
-The phone retains touch-sized keys and bottom page navigation without editing tools. On desktop, an external **Landscape / Portrait** toggle changes the preview frame and grid; Landscape is the default. Long pages scroll inside the frame with page navigation reachable. On narrow/short real-phone viewports the desktop controls are hidden and the grid follows viewport orientation, without requesting orientation permissions. This setting is preview-only, not saved deck data.
+The phone retains touch-sized keys and bottom page navigation without editing tools. On desktop, an external **Landscape / Portrait** toggle changes the preview frame and grid; Landscape is the default. Long pages scroll inside the frame with page navigation reachable. On narrow/short real-phone viewports the desktop controls are hidden and the grid follows viewport orientation, without requesting orientation permissions. This setting is preview-only, not saved deck data. Vertical section steps settle immediately and align after the destination appearance renders, rather than smooth-scrolling through conflicting theme geometry. Native scrolling within tall sections remains available; scroll-driven appearance changes wait until the touch ends. Buttons, sliders and other controls keep their own gestures.
 
 ![Desktop landscape preview with a long test page](design/preview-landscape.png)
 

@@ -823,12 +823,26 @@ try {
   savedGlassDeck.pages[0].name = savedGlassDeck.pages[0].sections[0].name = 'Stream';
   savedGlassDeck.pages[0].sections[0].theme = 'glass';
   Object.assign(savedGlassDeck.pages[0].sections[0].controls[2], { columnSpan: 1, rowSpan: 1 });
+  savedGlassDeck.pages[0].sections.push({ id: 's2', name: 'Audio', theme: 'dark', controls: [{ id: 'c5', label: 'Output', action: 'volume', volume: 30 }] });
   await glassPhone.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(savedGlassDeck))})`);
   await glassPhone.reload();
   check("a saved Glass section owns the phone wallpaper even in a Dark deck", await glassPhone.waitFor("document.documentElement.dataset.theme === 'dark' && document.querySelector('.phone-shell')?.dataset.appearance === 'glass' && getComputedStyle(document.querySelector('.phone-shell')).backgroundImage.includes('radial-gradient')"));
   check("saved one-cell Play is an accessible circle without squeezed label text", await glassPhone.eval("(() => { const t = document.querySelector('.control-tile[data-action=\"media-play-pause\"]'); const r = t.getBoundingClientRect(); return t.dataset.shape === 'circle' && Math.abs(r.width - r.height) <= 2 && r.width >= 44 && getComputedStyle(t.querySelector('.tile-label')).display === 'none' && t.querySelector('button').getAttribute('aria-label').includes('Play'); })()"));
   await glassPhone.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await glassPhone.screenshot("/tmp/deck-design-glass-saved-layout.png");
+  await glassPhone.eval("window.__glassAppearances = []; new MutationObserver(records => { for (const record of records) window.__glassAppearances.push(record.target.dataset.appearance); }).observe(document.querySelector('.phone-shell'), { attributes: true, attributeFilter: ['data-appearance'] })");
+  await glassPhone.send("Page.bringToFront");
+  for (let step = 0; step < 6; step += 1) {
+    const next = step % 2 === 0;
+    const main = await glassPhone.eval(rectOf('.phone-main'));
+    const high = main.top + (main.bottom - main.top) * .45;
+    const low = main.top + (main.bottom - main.top) * .65;
+    await touchDrag(glassPhone, { x: main.left + 6, y: next ? low : high }, { x: main.left + 6, y: next ? high : low });
+    const appearance = next ? 'dark' : 'glass';
+    check(`mixed-theme section swipe ${step + 1} settles ${next ? 'forward' : 'backward'}`, await glassPhone.waitFor(`document.querySelector('.phone-shell').dataset.appearance === '${appearance}'`));
+    await glassPhone.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  }
+  check("repeated mixed-theme section swipes never flip through an intermediate appearance", await glassPhone.eval("JSON.stringify(window.__glassAppearances) === JSON.stringify(['dark', 'glass', 'dark', 'glass', 'dark', 'glass'])"));
   await editor.send("Emulation.setEmulatedMedia", { features: [{ name: "forced-colors", value: "active" }] });
   const forcedGlass = await editor.eval("(() => { const section = getComputedStyle(document.querySelector('.deck-section')); const tile = getComputedStyle(document.querySelector('.control-tile')); const root = getComputedStyle(document.documentElement); const button = document.querySelector('.control-tile .tile-primary'); button.focus(); const focus = getComputedStyle(button); return root.getPropertyValue('--card-border').trim() === 'CanvasText' && root.getPropertyValue('--focus').trim() !== '' && section.boxShadow === 'none' && tile.boxShadow === 'none' && section.backgroundColor === tile.backgroundColor && focus.outlineStyle === 'solid' && focus.outlineWidth !== '0px'; })()");
   check("forced colors flatten Glass surfaces and keep focus visible", forcedGlass);
