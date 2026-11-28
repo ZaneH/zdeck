@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { CSSProperties } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect } from "storybook/test";
+import { expect, userEvent } from "storybook/test";
 import { applyTheme } from "../lib/theme";
 import { ACCENTS, PRESENTATIONS } from "../lib/types";
 import type { Control, Theme } from "../lib/types";
@@ -62,11 +62,11 @@ const plugins: PluginSnapshots = {
   },
 };
 
-const THEMES: Theme[] = ["dark", "light", "glass", "terminal"];
-const THEME_LABEL: Record<Theme, string> = { dark: "Dark", light: "Light", glass: "Glass", terminal: "Wasteland Terminal" };
+const THEMES: Theme[] = ["dark", "light", "glass", "terminal", "macintosh"];
+const THEME_LABEL: Record<Theme, string> = { dark: "Dark", light: "Light", glass: "Glass", terminal: "Wasteland Terminal", macintosh: "Classic Macintosh" };
 // Signatures the theme stylesheet promises; a preview that misses them is not that appearance.
-const TILE_RADIUS: Record<Theme, string> = { dark: "7px", light: "7px", glass: "30px", terminal: "2px" };
-const BACKGROUND: Record<Theme, string> = { dark: "#18191b", light: "#f4f5f6", glass: "#15171b", terminal: "#0b0f08" };
+const TILE_RADIUS: Record<Theme, string> = { dark: "7px", light: "7px", glass: "30px", terminal: "2px", macintosh: "4px" };
+const BACKGROUND: Record<Theme, string> = { dark: "#18191b", light: "#f4f5f6", glass: "#15171b", terminal: "#0b0f08", macintosh: "#ffffff" };
 
 type Viewport = "desktop" | "phone";
 
@@ -80,7 +80,7 @@ function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport
   const caption = "Local preview only. No actions are sent.";
   if (viewport === "phone") return (
     <div data-theme={theme} data-appearance={theme} data-testid="theme-preview"
-      style={{ minHeight: "100dvh", display: "grid", placeItems: "start center", background: "var(--bg)", backgroundImage: "var(--app-bg-image)" }}>
+      style={{ minHeight: "100dvh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", placeItems: "start center", background: "var(--bg)", backgroundImage: "var(--app-bg-image)" }}>
       <div className="phone-shell" data-theme={theme} data-appearance={theme} style={{ width: 390, maxWidth: "100%" }}>
         {/* Outside the scroller: a phone section fills the page, so anything below it would scroll away. */}
         <p className="phone-status">{caption}</p>
@@ -123,7 +123,7 @@ const meta = {
   component: StandardFixture,
   args: { theme: "dark", viewport: "desktop" },
   argTypes: {
-    theme: { control: "inline-radio", options: THEMES, labels: { terminal: THEME_LABEL.terminal } },
+    theme: { control: "inline-radio", options: THEMES, labels: THEME_LABEL },
     viewport: { control: "inline-radio", options: ["desktop", "phone"] },
   },
   parameters: { layout: "fullscreen" },
@@ -245,6 +245,26 @@ async function assertPreview(canvasElement: HTMLElement, theme: Theme, viewport:
   } else if (theme === "terminal") {
     expect(getComputedStyle(tiles[0]).borderTopLeftRadius).toBe("2px");
     expect(getComputedStyle(section).fontFamily).toContain("monospace");
+  } else if (theme === "macintosh") {
+    expect(getComputedStyle(tiles[0]).borderTopLeftRadius).toBe("4px");
+    expect(getComputedStyle(section).fontFamily).toContain("ChicagoFLF");
+    expect(getComputedStyle(tiles[0]).getPropertyValue("--control-accent").trim()).toBe("#000");
+    expect(getComputedStyle(section.querySelector(".section-heading")!, "::before").backgroundImage).toContain("repeating-linear-gradient");
+    expect(getComputedStyle(tiles[2].querySelector(".dial-face")!).backgroundImage).toContain("repeating-conic-gradient");
+    expect(getComputedStyle(tiles[3].querySelector(".toggle-track")!).borderRadius).toBe("0px");
+    const dial = tiles[2].querySelector<HTMLElement>('[role="slider"]')!;
+    const before = Number(dial.getAttribute("aria-valuenow"));
+    dial.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(Number(dial.getAttribute("aria-valuenow"))).toBe(before + 1);
+    await userEvent.keyboard("{ArrowLeft}");
+    dial.blur();
+    if (viewport === "phone") {
+      fixture.style.width = "320px";
+      expect(fixture.querySelector(".phone-shell")!.getBoundingClientRect().width).toBeLessThanOrEqual(320);
+      for (const tile of tiles) expectInside(tile.getBoundingClientRect(), section.getBoundingClientRect());
+      fixture.style.width = "";
+    }
   } else {
     expect(getComputedStyle(tiles[0]).borderTopLeftRadius).toBe("7px");
   }
@@ -291,3 +311,5 @@ export const GlassDesktop: Story = { args: { theme: "glass", viewport: "desktop"
 export const GlassPhone: Story = { args: { theme: "glass", viewport: "phone" }, play: play("glass", "phone") };
 export const TerminalDesktop: Story = { args: { theme: "terminal", viewport: "desktop" }, play: play("terminal", "desktop") };
 export const TerminalPhone: Story = { args: { theme: "terminal", viewport: "phone" }, play: play("terminal", "phone") };
+export const MacintoshDesktop: Story = { args: { theme: "macintosh", viewport: "desktop" }, play: play("macintosh", "desktop") };
+export const MacintoshPhone: Story = { args: { theme: "macintosh", viewport: "phone" }, play: play("macintosh", "phone") };

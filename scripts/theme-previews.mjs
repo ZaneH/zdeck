@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 
-const BUILT_IN_THEMES = ["dark", "light", "glass", "terminal"];
+const BUILT_IN_THEMES = ["dark", "light", "glass", "terminal", "macintosh"];
 const PRESENTATIONS = ["button", "slider", "dial", "toggle-switch", "toggle-button", "value"];
 const VIEWPORTS = { desktop: { width: 1200, height: 800 }, phone: { width: 390, height: 844 } };
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);

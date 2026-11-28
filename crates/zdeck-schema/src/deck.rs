@@ -24,6 +24,7 @@ pub enum Theme {
     Light,
     Glass,
     Terminal,
+    Macintosh,
 }
 
 fn presentation_valid(action: &str, p: &str) -> bool {
@@ -715,7 +716,7 @@ mod tests {
     #[test]
     fn opt_in_themes_round_trip_globally_and_per_section_and_unknown_is_rejected() {
         use serde_json::json;
-        for theme in ["glass", "terminal"] {
+        for theme in ["glass", "terminal", "macintosh"] {
             let mut value = serde_json::to_value(default_deck()).unwrap();
             value["theme"] = json!(theme);
             value["pages"][0]["sections"][0]["theme"] = json!(theme);

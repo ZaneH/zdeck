@@ -123,7 +123,7 @@ describe("deck persistence", () => {
   });
 
   it("remembers opt-in themes globally and on a section across reloads", () => {
-    for (const theme of ["glass", "terminal"] as const) {
+    for (const theme of ["glass", "terminal", "macintosh"] as const) {
       const storage = new MemoryStorage();
       const pageId = createDefaultDeck().pages[0].id;
       const sectionId = createDefaultDeck().pages[0].sections[0].id;

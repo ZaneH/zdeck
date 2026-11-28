@@ -10,6 +10,7 @@ const THEMES: { value: "" | Theme; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "glass", label: "Glass" },
   { value: "terminal", label: "Wasteland Terminal" },
+  { value: "macintosh", label: "Classic Macintosh" },
 ];
 
 const themeLabel = (theme: Theme) => THEMES.find((option) => option.value === theme)?.label ?? theme;

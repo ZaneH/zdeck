@@ -252,6 +252,35 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
   }
 }
 
+function assertMacintoshBoundary(canvasElement: HTMLElement) {
+  for (const section of canvasElement.querySelectorAll<HTMLElement>(".deck-section, .phone-section")) {
+    const style = getComputedStyle(section);
+    expect(style.fontFamily).toContain("ChicagoFLF");
+    expect(style.getPropertyValue("--bg").trim()).toBe("#ffffff");
+    expect(style.borderRadius).toBe("0px");
+    const slider = section.querySelector<HTMLInputElement>('input[type="range"]')!;
+    expect(getComputedStyle(slider).writingMode).not.toBe("vertical-lr");
+    const button = section.querySelector<HTMLElement>('.toggle-button[aria-pressed="true"]')!;
+    expect(contrast(getComputedStyle(button).color, channels(getComputedStyle(button).backgroundColor))).toBeGreaterThanOrEqual(4.5);
+  }
+}
+
+export const MacintoshSectionInDarkDeck: Story = {
+  args: { deckTheme: "dark", sectionTheme: "macintosh", accent: ACCENTS[3].value },
+  play: async ({ canvasElement }) => assertMacintoshBoundary(canvasElement),
+};
+export const DarkSectionInMacintoshDeck: Story = {
+  args: { deckTheme: "macintosh", sectionTheme: "dark", accent: undefined },
+  play: async ({ canvasElement }) => {
+    // Dark toggles have transparent paint; their existing contrast test covers the tile backdrop.
+    for (const section of canvasElement.querySelectorAll<HTMLElement>(".deck-section, .phone-section")) {
+      expect(getComputedStyle(section).fontFamily).toContain("Geist");
+      expect(getComputedStyle(section).getPropertyValue("--bg").trim()).toBe("#18191b");
+      expect(getComputedStyle(section.querySelector(".control-tile")!).borderRadius).toBe("7px");
+    }
+  },
+};
+
 export const LightSectionInDarkDeck: Story = {
   args: { deckTheme: "dark", sectionTheme: "light", accent: undefined },
   play: async ({ canvasElement }) => assertSectionContrast(canvasElement, "dark"),

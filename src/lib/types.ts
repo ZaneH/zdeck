@@ -2,7 +2,7 @@ import type { ControlIcon } from "./icons";
 
 export const DECK_VERSION = 3 as const;
 
-export const THEMES = ["dark", "light", "glass", "terminal"] as const;
+export const THEMES = ["dark", "light", "glass", "terminal", "macintosh"] as const;
 export type Theme = (typeof THEMES)[number];
 
 export const ACCENTS = [

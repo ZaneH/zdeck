@@ -307,6 +307,8 @@ describe("page sections", () => {
     expect(isDeck(overrides)).toBe(true);
     overrides.pages[0].sections[1].theme = "terminal";
     expect(isDeck(overrides)).toBe(true);
+    overrides.pages[0].sections[1].theme = "macintosh";
+    expect(isDeck(overrides)).toBe(true);
     overrides.pages[0].sections[1].theme = "midnight" as never;
     expect(isDeck(overrides)).toBe(false);
     overrides.pages[0].sections[1].theme = "light";
@@ -318,6 +320,7 @@ describe("page sections", () => {
     const deck = createDefaultDeck();
     expect(isDeck({ ...deck, theme: "glass" })).toBe(true);
     expect(isDeck({ ...deck, theme: "terminal" })).toBe(true);
+    expect(isDeck({ ...deck, theme: "macintosh" })).toBe(true);
     expect(isDeck({ ...deck, theme: "midnight" as never })).toBe(false);
   });
 

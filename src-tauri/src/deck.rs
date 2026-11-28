@@ -405,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn opt_in_themes_round_trip_through_a_restart() {
-        for theme in [Theme::Glass, Theme::Terminal] {
+        for theme in [Theme::Glass, Theme::Terminal, Theme::Macintosh] {
             let dir = TempDir::new();
             let store = DeckStore::new(dir.file());
             let mut deck = default_deck();

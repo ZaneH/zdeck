@@ -1,6 +1,6 @@
 # Theme development
 
-Status: the four built-in appearances only — Dark, Light, Glass and Wasteland Terminal. There is no theme
+Status: the five built-in appearances only — Dark, Light, Glass, Wasteland Terminal and Classic Macintosh. There is no theme
 package format, download or install yet; see [theme store](theme-store.md) for that proposal. Nothing here
 adds one, and a screenshot is not an installable theme.
 
@@ -46,6 +46,20 @@ Community implementations inspected for ideas only:
 [hyalite--liquid-glass](https://github.com/VII-Cae/hyalite--liquid-glass), and
 [nikdelvin/liquid-glass](https://github.com/nikdelvin/liquid-glass) (MIT). No source was copied.
 
+## Classic Macintosh direction
+
+Classic Macintosh (`macintosh`) takes its visual cues from early monochrome Macintosh windows and
+[system.css](https://github.com/sakofchit/system.css): white panels, black outlines and hard offset shadows,
+a two-pixel desktop checker, and striped title bars. ChicagoFLF is bundled locally from that MIT-licensed
+project; its upstream notice is in `src/assets/system-css-LICENSE.txt`. The component CSS is original and
+scoped to the existing appearance boundaries; system.css is not installed or globally imported.
+
+Sliders retain native range behavior under dithered tracks and striped rectangular grips. Dials use ticked
+monochrome bezels, a value arc and a rotating needle. Switches use square thumbs; pressed toggle buttons
+invert their own face. Focus and instruments use black ink without overwriting the saved accent, so switching
+themes restores the user's color. Error and warning colors remain distinct. No new input handling or motion
+is introduced. Forced colors uses system surfaces, boundaries and dial/focus colors.
+
 ## The standard fixture is the developer workspace
 
 `src/components/ThemePreview.stories.tsx` (`Themes/Theme preview`) renders one fixed sample deck for every
@@ -88,7 +102,7 @@ npm run theme:previews -- --url http://127.0.0.1:6006 --out /tmp/zdeck-theme-pre
 ```
 
 - `--url` is required and must be a local Storybook (`localhost`, `127.0.0.1` or `::1`); other hosts are refused.
-  `--out` is required; `--themes` takes built-in ids and defaults to all four.
+  `--out` is required; `--themes` takes built-in ids and defaults to all five.
 - Playwright launches your installed Chromium-based browser through `CHROME_BIN`. On macOS the Brave path
   (`/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`) is the default; elsewhere `CHROME_BIN` is required.
 - Fixed viewports: desktop 1200×800, phone 390×844, device scale factor 1. The run asks for reduced motion, `en-US`
@@ -112,6 +126,6 @@ Tauri webview.
 - These stories and screenshots cover the browser at two sizes. They are not accessibility, performance or native
   parity evidence; check keyboard and screen-reader behaviour, forced colors, reduced motion, long labels, large
   decks and the desktop/phone shells separately.
-- Only the four built-in ids load in the app. There is no custom theme package, import or install. The registry's source-preview workflow documents source changes and screenshots for review; it does not make them installable. Do not present an exported PNG as an installable theme or infer package support from it.
+- Only the five built-in ids load in the app. There is no custom theme package, import or install. The registry's source-preview workflow documents source changes and screenshots for review; it does not make them installable. Do not present an exported PNG as an installable theme or infer package support from it.
 - A future appearance format still needs a validated, bounded data parser and the platform evidence described in
   [theme store](theme-store.md); a picture of a theme is not that evidence.

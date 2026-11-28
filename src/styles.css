@@ -4,6 +4,11 @@
   font-weight: 100 900;
   font-display: swap;
 }
+@font-face {
+  font-family: "ChicagoFLF";
+  src: url("./assets/ChicagoFLF.woff2") format("woff2");
+  font-display: swap;
+}
 :root {
   font-family: "Geist", system-ui, sans-serif;
   font-size: 13px;
@@ -200,6 +205,53 @@
   --material-filter: none;
   --tile-backdrop-filter: none;
   color-scheme: dark;
+}
+/* Classic Macintosh: paper, ink and static one-bit desktop stipple. */
+[data-theme="macintosh"], [data-appearance="macintosh"] {
+  --bg: #ffffff;
+  --bg-soft: #eeeeee;
+  --surface: #ffffff;
+  --surface-2: #eeeeee;
+  --surface-3: #dddddd;
+  --border: #000000;
+  --border-strong: #000000;
+  --text: #000000;
+  --text-muted: #333333;
+  --text-faint: #555555;
+  --danger: #a32020;
+  --danger-soft: #fff0f0;
+  --warning: #704600;
+  --focus: #000000;
+  --key-bottom: #000000;
+  --key-light: #ffffff;
+  --control-accent: #000000;
+  --control-accent-weight: 0%;
+  --mac-stipple: repeating-conic-gradient(#000 0% 25%, #fff 0% 50%) 0 0 / 2px 2px;
+  --app-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Cpath fill='%23fff' d='M0 0h2v2H0z'/%3E%3Cpath fill='%23000' d='M0 0h1v1H0zM1 1h1v1H1z'/%3E%3C/svg%3E");
+  --section-bg: #ffffff;
+  --section-border: #000000;
+  --section-radius: 0;
+  --phone-section-radius: 0;
+  --section-shadow: 2px 2px 0 #000000;
+  --tile-border: #000000;
+  --tile-surface: #ffffff;
+  --tile-shadow: 2px 2px 0 #000000;
+  --tile-press-shadow: none;
+  --tile-press-lift: 2px;
+  --tile-radius: 4px;
+  --icon-radius: 0;
+  --slider-thumb-radius: 0;
+  --card-bg: #ffffff;
+  --card-border: #000000;
+  --card-padding: 16px;
+  --card-radius: 0;
+  --phone-inherited-bg: #ffffff;
+  --phone-inherited-padding: 12px;
+  --phone-inherited-border: 1px solid #000000;
+  --phone-inherited-radius: 0;
+  --material-filter: none;
+  --tile-backdrop-filter: none;
+  color-scheme: light;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { min-height: 100%; overscroll-behavior: none; }
@@ -1280,6 +1332,50 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 @media (prefers-reduced-motion: no-preference) {
   .copy-command.is-copied svg { animation: copy-confirm .18s ease-out; }
   @keyframes copy-confirm { from { transform: scale(.8); opacity: .5; } to { transform: scale(1); opacity: 1; } }
+}
+/* Macintosh paint only: all targets and input semantics remain host-owned. */
+:root[data-theme="macintosh"], [data-appearance="macintosh"] { font-family: "ChicagoFLF", "Geneva", sans-serif; }
+:root[data-theme="macintosh"] :is(.topbar, .inspector-dock, .settings-view),
+[data-appearance="macintosh"] .field-note,
+:is(.phone-shell, .remote-app)[data-appearance="macintosh"] :is(.phone-header, .phone-page-heading, .phone-status, .phone-notice) { background: var(--bg); }
+:root[data-theme="macintosh"] .topbar { border-bottom: 2px solid var(--text); }
+:root[data-theme="macintosh"] .inspector-dock { padding: 16px 20px; }
+:root[data-theme="macintosh"] :is(.button, .dropdown-trigger, .dropdown-menu, .section-settings-menu) { border-radius: 3px; box-shadow: 1px 1px 0 var(--text); }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] { --focus: #000; padding: 10px 12px 12px; border: 1px solid var(--section-border); background: var(--section-bg); box-shadow: var(--section-shadow); }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .section-heading { display: flex; align-items: center; gap: 8px; color: var(--text); letter-spacing: 0; text-align: center; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .section-heading::before,
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .section-heading::after { content: ""; flex: 1; min-width: 8px; height: 13px; background: repeating-linear-gradient(#000 0 1px, #fff 1px 3px); }
+.deck-section[data-appearance="macintosh"] .deck-section-head { background: repeating-linear-gradient(#000 0 1px, #fff 1px 3px); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.deck-section[data-appearance="macintosh"] :is(.section-name-input, .section-actions, .section-drag) { background: var(--surface); }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .control-tile { --control-accent: #000; transition: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .control-tile[data-variant="phone"] { animation: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .tile-primary { border-radius: inherit; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .tile-volume input::-webkit-slider-runnable-track { height: 12px; border: 1px solid #000; border-radius: 0; background: var(--mac-stipple); box-shadow: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .tile-volume input::-moz-range-track { height: 12px; border: 1px solid #000; border-radius: 0; background: var(--mac-stipple); box-shadow: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .tile-volume input::-webkit-slider-thumb { width: 18px; height: 26px; margin-top: -8px; border: 1px solid #000; border-radius: 0; background: repeating-linear-gradient(90deg, #fff 0 3px, #000 3px 4px); box-shadow: inset 0 0 0 3px #fff, 1px 1px 0 #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .tile-volume input::-moz-range-thumb { width: 16px; height: 24px; border: 1px solid #000; border-radius: 0; background: repeating-linear-gradient(90deg, #fff 0 3px, #000 3px 4px); box-shadow: inset 0 0 0 3px #fff, 1px 1px 0 #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-face { background: repeating-conic-gradient(from 0deg, #000 0deg 2deg, transparent 2deg 30deg); box-shadow: 0 0 0 1px #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-face::before { inset: 6px; background: #fff; border: 1px solid #000; box-shadow: 1px 1px 0 #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-scale { stroke-linecap: butt; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-scale-track { stroke: #fff; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-indicator::before { width: 2px; height: 10px; border-radius: 0; background: #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-button { border: 1px solid #000; border-radius: 3px; background: #fff; color: #000; box-shadow: 1px 1px 0 #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-button::before { width: 10px; height: 10px; border: 1px solid #000; border-radius: 0; background: #fff; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .control-tile:has(.toggle-button[aria-pressed="true"]) { background: #fff; border-color: #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-button[aria-pressed="true"] { background: #000; color: #fff; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-button[aria-pressed="true"]::before { background: #fff; box-shadow: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-switch .toggle-track { border-radius: 0; border-color: #000; background: var(--mac-stipple); box-shadow: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-switch .toggle-track span { border: 1px solid #000; border-radius: 0; background: #fff; box-shadow: none; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-switch[aria-checked="true"] .toggle-track { background: #000; }
+:is(.deck-section, .phone-section)[data-appearance="macintosh"] .toggle-switch:not([aria-checked]) .toggle-track { border-style: dashed; background: #fff; }
+@media (forced-colors: active) {
+  [data-theme="macintosh"], [data-appearance="macintosh"] { --bg: Canvas; --surface: Canvas; --text: CanvasText; --border: CanvasText; --section-bg: Canvas; --section-border: CanvasText; --focus: Highlight; --tile-surface: Canvas; --tile-border: CanvasText; --tile-shadow: none; --section-shadow: none; --app-bg-image: none; }
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] { --focus: Highlight; }
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-face,
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-face::before { box-shadow: none; border: 1px solid CanvasText; }
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-scale-value { stroke: Highlight; }
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-scale-track { stroke: CanvasText; }
+  :is(.deck-section, .phone-section)[data-appearance="macintosh"] .dial-indicator::before { background: CanvasText; }
 }
 .reorder-note { margin: 20px 0 10px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
 .control-tile.is-reorderable, .control-tile.is-reorderable * { cursor: grab; touch-action: none; user-select: none; }

@@ -20,6 +20,17 @@ describe("theme application", () => {
     expect(setAttribute).toHaveBeenCalledWith("content", "#15171b");
   });
 
+  it("uses white browser chrome for Classic Macintosh and preserves the saved accent", () => {
+    const setProperty = vi.fn();
+    const setAttribute = vi.fn();
+    const root = { dataset: {}, style: { setProperty } };
+    vi.stubGlobal("document", { documentElement: root, querySelector: () => ({ setAttribute }) });
+    applyTheme("macintosh", "#6ee7b7");
+    expect(root.dataset).toEqual({ theme: "macintosh" });
+    expect(setProperty).toHaveBeenCalledWith("--accent", "#6ee7b7");
+    expect(setAttribute).toHaveBeenCalledWith("content", "#ffffff");
+  });
+
   it("still applies a theme when the optional theme-color meta is absent", () => {
     const root = { dataset: {}, style: { setProperty: vi.fn() } };
     vi.stubGlobal("document", { documentElement: root, querySelector: () => null });
@@ -90,7 +101,7 @@ describe("theme-owned control geometry", () => {
   });
 
   it("keeps classic geometry and saved spans for Dark, Light and Wasteland Terminal", () => {
-    for (const theme of ["dark", "light", "terminal"] as const) {
+    for (const theme of ["dark", "light", "terminal", "macintosh"] as const) {
       expect(controlGeometry(play, "button", theme)).toEqual({ columns: 1, rows: 1, shape: "tile" });
       expect(controlGeometry({ ...play, columnSpan: 3, rowSpan: 2 }, "button", theme))
         .toEqual({ columns: 3, rows: 2, shape: "tile" });
