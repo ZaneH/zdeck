@@ -148,6 +148,17 @@ describe("deck v4 custom theme references", () => {
     }
   });
 
+  it("rejects custom references in legacy Trash without rejecting current Trash", () => {
+    const deck = createDefaultDeck();
+    const section = { ...deck.pages[0].sections[0], theme: "dark", customTheme: REFERENCE };
+    const trash = [{ kind: "section", id: section.id, deletedAt: 1, section,
+      location: { pageId: PAGE, pageName: "Stream", index: 0 } }];
+    const document = { envelopeVersion: 1, deck: { ...deck, version: 3 }, trash };
+    expect(loadDeck(storage(JSON.stringify(document))).status).toBe("invalid");
+    document.deck.version = 4;
+    expect(loadDeck(storage(JSON.stringify(document))).status).toBe("loaded");
+  });
+
   it("keeps references through copy, undo and trash restore", () => {
     const added = addSection(createDefaultDeck(), PAGE, FIRST, "Audio")!;
     const sectionId = added.section.id;

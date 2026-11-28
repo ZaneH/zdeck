@@ -49,6 +49,25 @@ describe("theme package format foundation", () => {
     expect(parseThemePackageBytes(new TextEncoder().encode(JSON.stringify(clone()) + " x"))).toBeNull();
   });
 
+  it("rejects duplicate JSON keys, including escaped and nested keys", () => {
+    const raw = sample.toString("utf8");
+    for (const text of [
+      raw.replace('"name":', '"name":"Hidden", "name":'),
+      raw.replace('"name":', '"na\\u006de":"Hidden", "name":'),
+      raw.replace('"bg":', '"bg":"#ffffff", "bg":'),
+    ]) expect(parseThemePackageBytes(new TextEncoder().encode(text))).toBeNull();
+    const value = clone();
+    value.name = 'Braces { }, commas, and escaped "quotes"';
+    expect(parseThemePackageBytes(new TextEncoder().encode(JSON.stringify(value)))).not.toBeNull();
+  });
+
+  it("rejects unpaired surrogate escapes but allows non-BMP metadata", () => {
+    for (const name of ["\ud800", "\udfff", "a\ud800b"]) {
+      expect(invalid(value => { value.name = name; })).toBeNull();
+    }
+    expect(invalid(value => { value.name = "Maze 🎮"; })).not.toBeNull();
+  });
+
   it("rejects unknown fields at every object, including CSS and digest additions", () => {
     expect(invalid((value) => { value.digest = "a".repeat(64); })).toBeNull();
     expect(invalid((value) => { value.css = "body { display: none }"; })).toBeNull();

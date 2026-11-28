@@ -200,6 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_keys_and_unpaired_surrogates() {
+        let raw = std::str::from_utf8(VALID).unwrap();
+        for text in [
+            raw.replace("\"name\":", "\"name\":\"Hidden\", \"name\":"),
+            raw.replace("\"name\":", "\"na\\u006de\":\"Hidden\", \"name\":"),
+            raw.replace("\"bg\":", "\"bg\":\"#ffffff\", \"bg\":"),
+            raw.replace("\"Midnight Maze\"", "\"\\ud800\""),
+        ] {
+            assert!(parse_theme_package(text.as_bytes()).is_none());
+        }
+        assert!(parse(&with_name("Maze 🎮")).is_some());
+    }
+
+    #[test]
     fn enforces_raw_byte_budget_bom_utf8_and_json() {
         let mut capped = VALID.to_vec();
         capped.resize(MAX_THEME_PACKAGE_BYTES, b' ');

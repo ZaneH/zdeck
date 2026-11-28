@@ -44,7 +44,8 @@ const exact = (x: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(x).length === keys.length && keys.every((key) => Object.hasOwn(x, key));
 const bytes = (x: string) => encoder.encode(x).length;
 const metadata = (x: unknown, max: number): x is string =>
-  typeof x === "string" && x.length > 0 && x.trim() === x && bytes(x) <= max && !/\p{Cc}/u.test(x);
+  typeof x === "string" && x.length > 0 && x.trim() === x && bytes(x) <= max && !/\p{Cc}/u.test(x)
+  && !Array.from(x).some(char => { const point = char.codePointAt(0)!; return point >= 0xd800 && point <= 0xdfff; });
 const themeId = (x: unknown): x is string => typeof x === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(x);
 const versionString = (x: unknown): x is string => typeof x === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(x);
 const digest = (x: unknown): x is string => typeof x === "string" && /^[a-f0-9]{64}$/.test(x);
@@ -81,13 +82,37 @@ export function validateThemePackage(value: unknown): ThemePackage | null {
   };
 }
 
-/** Parses bounded raw package bytes. Rejects BOM, invalid UTF-8 and malformed JSON. */
+// JSON.parse drops duplicate keys; serde rejects them. Scan only keys after JSON syntax validation.
+function hasDuplicateKeys(text: string): boolean {
+  const stack: ({ keys: Set<string>; expectingKey: boolean } | null)[] = [];
+  for (const token of text.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\],:]/g)) {
+    const value = token[0];
+    const current = stack.at(-1);
+    if (value === "{") stack.push({ keys: new Set(), expectingKey: true });
+    else if (value === "[") stack.push(null);
+    else if (value === "}" || value === "]") stack.pop();
+    else if (current && value === ",") current.expectingKey = true;
+    else if (current && value === ":") current.expectingKey = false;
+    else if (current?.expectingKey && value.startsWith('"')) {
+      const key: string = JSON.parse(value);
+      if (current.keys.has(key)) return true;
+      current.keys.add(key);
+      current.expectingKey = false;
+    }
+  }
+  return false;
+}
+
+/** Parses bounded raw package bytes. Rejects BOM, invalid UTF-8 and malformed/duplicate-key JSON. */
 export function parseThemePackageBytes(input: Uint8Array): ThemePackage | null {
   if (!(input instanceof Uint8Array) || input.byteLength > MAX_THEME_PACKAGE_BYTES) return null;
   if (input.byteLength >= 3 && input[0] === 0xef && input[1] === 0xbb && input[2] === 0xbf) return null;
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(input); } catch { return null; }
-  try { return validateThemePackage(JSON.parse(text)); } catch { return null; }
+  try {
+    const value: unknown = JSON.parse(text);
+    return hasDuplicateKeys(text) ? null : validateThemePackage(value);
+  } catch { return null; }
 }
 
 export function validateCustomThemeReference(value: unknown): CustomThemeReference | null {

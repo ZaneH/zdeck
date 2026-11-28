@@ -1,7 +1,7 @@
 import { createDefaultDeck, isDeck, isRecord, normalizeDeck } from "./deck";
 import { isTrash } from "./trash";
 import type { TrashEntry } from "./trash";
-import type { Deck, StorageLike } from "./types";
+import { DECK_VERSION, type Deck, type StorageLike } from "./types";
 
 export const STORAGE_KEY = "deck.local.v1";
 /** One atomic local envelope holds the deck and its trash; trash is never inside a deck. */
@@ -57,6 +57,8 @@ function parseDocument(parsed: unknown): LocalDocument | null {
   if (isRecord(parsed) && Object.hasOwn(parsed, "envelopeVersion")) {
     if (parsed.envelopeVersion !== LOCAL_DOCUMENT_VERSION
       || Object.keys(parsed).length !== 3 || !isTrash(parsed.trash)) return null;
+    if (isRecord(parsed.deck) && parsed.deck.version !== DECK_VERSION
+      && parsed.trash.some(entry => entry.kind === "section" && Object.hasOwn(entry.section, "customTheme"))) return null;
     const deck = normalizeDeck(parsed.deck);
     return deck ? { envelopeVersion: LOCAL_DOCUMENT_VERSION, deck, trash: parsed.trash } : null;
   }

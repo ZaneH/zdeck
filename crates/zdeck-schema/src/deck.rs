@@ -656,6 +656,9 @@ fn promote_legacy_pages(value: &mut serde_json::Value) -> Result<(), DeckError> 
 
 fn contains_custom_theme(value: &serde_json::Value) -> bool {
     value.pointer("/deck/customTheme").is_some()
+        || value.get("trash").and_then(serde_json::Value::as_array).is_some_and(|trash| {
+            trash.iter().any(|entry| entry.pointer("/section/customTheme").is_some())
+        })
         || value
             .pointer("/deck/pages")
             .and_then(serde_json::Value::as_array)
@@ -1175,6 +1178,17 @@ mod tests {
         let mut deck_level = value.clone();
         deck_level["deck"]["customTheme"] = custom_reference();
         assert!(decode_document(&serde_json::to_vec(&deck_level).unwrap()).is_err());
+        let mut trash_level = value.clone();
+        let mut section = canonical["pages"][0]["sections"][0].clone();
+        section["theme"] = serde_json::json!("dark");
+        section["customTheme"] = custom_reference();
+        trash_level["trash"] = serde_json::json!([{
+            "kind": "section", "id": section["id"], "deletedAt": 1, "section": section,
+            "location": { "pageId": "page_stream", "pageName": "Stream", "index": 0 }
+        }]);
+        assert!(decode_document(&serde_json::to_vec(&trash_level).unwrap()).is_err());
+        trash_level["deck"]["version"] = DECK_VERSION.into();
+        assert!(decode_document(&serde_json::to_vec(&trash_level).unwrap()).is_ok());
         let mut section_level = value;
         section_level["deck"]["pages"][0]["sections"][0]["theme"] = serde_json::json!("glass");
         section_level["deck"]["pages"][0]["sections"][0]["customTheme"] = custom_reference();
