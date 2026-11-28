@@ -3,6 +3,8 @@ import type { CSSProperties } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent } from "storybook/test";
 import { applyTheme } from "../lib/theme";
+import { appearanceTokens } from "../lib/customThemes";
+import type { ThemePackageAppearance } from "../lib/themePackage";
 import { ACCENTS, PRESENTATIONS } from "../lib/types";
 import type { Control, Theme } from "../lib/types";
 import type { PluginSnapshots } from "../lib/plugin";
@@ -70,23 +72,29 @@ const BACKGROUND: Record<Theme, string> = { dark: "#18191b", light: "#f4f5f6", g
 
 type Viewport = "desktop" | "phone";
 
-function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport }) {
+export function StandardFixture({ theme, viewport, customAppearance }: { theme: Theme; viewport: Viewport; customAppearance?: ThemePackageAppearance }) {
   // The Storybook toolbar decorator applies its own theme after this story mounts; the args win.
-  useEffect(() => { applyTheme(theme, ACCENTS[0].value); }, [theme]);
+  useEffect(() => { applyTheme(theme, ACCENTS[0].value, customAppearance ?? null); }, [theme, customAppearance]);
+  const customStyle = customAppearance ? appearanceTokens(customAppearance) as CSSProperties : undefined;
+  const customAttributes = customAppearance ? { "data-custom-theme": "true", "data-custom-motif": customAppearance.motif } : {};
+  // Inherited sections stay opaque, as in the editor and phone renderers.
+  const customSectionAttributes = customAppearance ? { "data-custom-theme": "true" } : {};
+  const customBackground = customAppearance ? "var(--custom-motif-image), var(--app-bg-image)" : "var(--app-bg-image)";
+  const customBackgroundSize = customAppearance ? "320px 320px, auto" : undefined;
   const renderTiles = (controls: Control[]) => controls.map(control => (
     <ControlTile key={control.id} control={control} plugins={plugins}
       variant={viewport === "phone" ? "phone" : "editor"} appearance={theme} volume={62} />
   ));
   const caption = "Local preview only. No actions are sent.";
   if (viewport === "phone") return (
-    <div data-theme={theme} data-appearance={theme} data-testid="theme-preview"
-      style={{ minHeight: "100dvh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", placeItems: "start center", background: "var(--bg)", backgroundImage: "var(--app-bg-image)" }}>
-      <div className="phone-shell" data-theme={theme} data-appearance={theme} style={{ width: 390, maxWidth: "100%" }}>
+    <div data-theme={theme} data-appearance={theme} data-testid="theme-preview" {...customAttributes}
+      style={{ minHeight: "100dvh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", placeItems: "start center", background: "var(--bg)", backgroundImage: customBackground, backgroundSize: customBackgroundSize, ...customStyle }}>
+      <div className="phone-shell" data-theme={theme} data-appearance={theme} {...customAttributes} style={{ width: 390, maxWidth: "100%", ...customStyle }}>
         {/* Outside the scroller: a phone section fills the page, so anything below it would scroll away. */}
         <p className="phone-status">{caption}</p>
         <main className="phone-main">
           <div className="phone-page-heading"><h1>Theme preview</h1></div>
-          <section className="phone-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-heading">
+          <section className="phone-section" data-theme={theme} data-appearance={theme} {...customSectionAttributes} style={customStyle} aria-labelledby="theme-preview-heading">
             <h2 className="section-heading" id="theme-preview-heading">Standard controls</h2>
             <div className="phone-grid">{renderTiles(SAMPLE_CONTROLS)}</div>
           </section>
@@ -98,16 +106,16 @@ function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport
   // fill its frame without shrinking the controls. Glass keeps its own square grid geometry.
   const desktopGrid: CSSProperties = theme === "glass" ? {} : { gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gridAutoRows: 156 };
   return (
-    <div data-theme={theme} data-appearance={theme} data-testid="theme-preview"
-      style={{ minHeight: "100dvh", padding: 24, background: "var(--bg)", backgroundImage: "var(--app-bg-image)" }}>
+    <div data-theme={theme} data-appearance={theme} data-testid="theme-preview" {...customAttributes}
+      style={{ minHeight: "100dvh", padding: 24, background: "var(--bg)", backgroundImage: customBackground, backgroundSize: customBackgroundSize, ...customStyle }}>
       {/* The exporter fits and centers this group inside the fixed capture viewport. */}
       <div data-testid="theme-preview-content" style={{ width: "fit-content" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
-          <section className="deck-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-heading" style={{ width: 396 }}>
+          <section className="deck-section" data-theme={theme} data-appearance={theme} {...customSectionAttributes} aria-labelledby="theme-preview-heading" style={{ width: 396, ...customStyle }}>
             <h2 className="section-heading" id="theme-preview-heading">Standard controls</h2>
             <div className="control-grid" style={desktopGrid}>{renderTiles(NORMAL_CONTROLS)}</div>
           </section>
-          <section className="deck-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-states-heading" style={{ width: 396 }}>
+          <section className="deck-section" data-theme={theme} data-appearance={theme} {...customSectionAttributes} aria-labelledby="theme-preview-states-heading" style={{ width: 396, ...customStyle }}>
             <h2 className="section-heading" id="theme-preview-states-heading">Readings and states</h2>
             <div className="control-grid" style={desktopGrid}>{renderTiles(STATE_CONTROLS)}</div>
           </section>
@@ -120,6 +128,7 @@ function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport
 
 const meta = {
   title: "Themes/Theme preview",
+  excludeStories: ["StandardFixture"],
   component: StandardFixture,
   args: { theme: "dark", viewport: "desktop" },
   argTypes: {

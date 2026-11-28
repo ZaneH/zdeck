@@ -175,6 +175,23 @@ The authenticated `GET /api/v1/state`, reading refreshes and websocket snapshots
   cannot add motion or unrestricted styling. Native three-platform parity is not claimed by these
   browser/unit checks.
 
+## Registry previews
+
+`Themes / External theme preview` renders the validated Midnight Maze package on the same
+`zdeck-sample-deck-1` controls as the built-in themes. Inherited sections keep the app’s opaque
+panel treatment; only the outer background carries the package motif. Pixel icons are not injected.
+
+With `npm run storybook` running, capture the registry’s genuine fixed-size PNGs:
+
+```bash
+CHROME_BIN="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+  node scripts/external-theme-preview.mjs --url http://127.0.0.1:6006 --out /tmp
+```
+
+The desktop capture fits the shared fixture at 1200×800 using the built-in exporter’s framing;
+the phone renders naturally at 390×844. No image post-resize is applied. Recapture when the exact
+package or host rendering changes; screenshots are browser evidence, not native verification.
+
 Checks used for this foundation:
 
 ```bash
