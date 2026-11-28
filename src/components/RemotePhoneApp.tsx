@@ -11,6 +11,7 @@ import { ControlTile } from "./ControlTile";
 import { PhoneSectionNav, usePhoneNavigation } from "./phoneNavigation";
 
 const DEFAULT_NAME = "My phone";
+const ACTIVITY_PAGE_ID = "__zdeck_activity__";
 
 function terminalMessage(phase: RemotePhase): string | null {
   switch (phase) {
@@ -168,6 +169,11 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const [name, setName] = useState(DEFAULT_NAME);
   const [manualLink, setManualLink] = useState("");
   const [targets, setTargets] = useState<Record<string, number>>({});
+  const [showActivity, setShowActivity] = useState(false);
+  const selectPage = (id: string) => {
+    setShowActivity(id === ACTIVITY_PAGE_ID);
+    if (id !== ACTIVITY_PAGE_ID) remote.setPage(id);
+  };
   const scrollerRef = useRef<HTMLElement>(null);
   const deck = remote.deck;
   const page = deck
@@ -180,10 +186,10 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
     if (theme && accent) applyTheme(theme, accent);
   }, [theme, accent]);
   const navigation = usePhoneNavigation({
-    pageId: page?.id ?? "",
-    pageIds: deck?.pages.map((item) => item.id) ?? [],
-    sectionIds: page?.sections.map((section) => section.id) ?? [],
-    onPageChange: remote.setPage,
+    pageId: showActivity ? ACTIVITY_PAGE_ID : page?.id ?? "",
+    pageIds: [...(deck?.pages.map((item) => item.id) ?? []), ACTIVITY_PAGE_ID],
+    sectionIds: showActivity ? [] : page?.sections.map((section) => section.id) ?? [],
+    onPageChange: selectPage,
     scrollerRef,
   });
 
@@ -289,10 +295,10 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
 
       <main className="phone-main" id="main" ref={scrollerRef} {...navigation.pagerProps}>
         <div className="phone-page-heading">
-          <h1>{page.name}</h1>
+          <h1>{showActivity ? "Activity" : page.name}</h1>
         </div>
 
-        {page.sections.map((section) => (
+        {!showActivity && page.sections.map((section) => (
           <section
             key={section.id} className="phone-section" data-phone-section={section.id}
             data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
@@ -325,7 +331,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
           </section>
         ))}
 
-        {pageControls(page).length === 0 ? (
+        {!showActivity && pageControls(page).length === 0 ? (
           <p className="empty-note">This page has no controls yet.</p>
         ) : null}
 
@@ -347,9 +353,8 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
           </p>
         ) : null}
 
-        {remote.activity.length > 0 ? (
-          <details className="remote-activity">
-            <summary className="disclosure">Activity</summary>
+        {showActivity && remote.activity.length > 0 ? (
+          <section className="remote-activity" aria-label="Activity log">
             <ol className="remote-activity-list">
               {remote.activity.map((entry) => (
                 <li key={entry.id} data-state={entry.state}>
@@ -359,13 +364,13 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
                 </li>
               ))}
             </ol>
-          </details>
-        ) : null}
+          </section>
+        ) : showActivity ? <p className="empty-note">No activity yet.</p> : null}
       </main>
 
       <footer className="phone-footer">
         <PhoneSectionNav
-          count={page.sections.length}
+          count={showActivity ? 0 : page.sections.length}
           index={navigation.sectionIndex}
           onSelect={navigation.goToSection}
           announcement={navigation.announcement}
@@ -376,12 +381,20 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
               key={item.id}
               type="button"
               className="phone-page-tab"
-              onClick={() => remote.setPage(item.id)}
-              aria-current={item.id === page.id ? "page" : undefined}
+              onClick={() => selectPage(item.id)}
+              aria-current={!showActivity && item.id === page.id ? "page" : undefined}
             >
               {item.name}
             </button>
           ))}
+          <button
+            type="button"
+            className="phone-page-tab"
+            onClick={() => selectPage(ACTIVITY_PAGE_ID)}
+            aria-current={showActivity ? "page" : undefined}
+          >
+            Activity
+          </button>
         </nav>
       </footer>
     </div>

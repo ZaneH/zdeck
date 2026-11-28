@@ -97,11 +97,11 @@ These Settings screenshots use an owned fake native-IPC adapter in an isolated b
 
 Preview now has an explicit 44px **Close preview** X at the top right: outside the device frame on desktop, in the header at narrow sizes. Only one is visible at each breakpoint. Authenticated phones never gain an editor route/close button. Neither surface shows a redundant control count.
 
-Routine action outcomes live in a collapsed **Activity** disclosure with the last ten completed results, newest first, saved control labels and no persistence. Opening it exposes diagnostics without constant below-grid status noise. Connection status stays visible; pending marks the key. Unknown outcomes deliberately retain a visible check-the-desktop warning outside Activity, even after another action succeeds, until a new session/terminal cleanup. This avoids disguising an uncertain side effect as a failure that is safe to repeat.
+Routine action outcomes live on a dedicated **Activity** page after the deck pages, with the last ten completed results, newest first, saved control labels and no persistence. Swipe left from the final deck page to reach diagnostics at the top of their own scrollable page, rather than below the controls. Connection status stays visible; pending marks the key. Unknown outcomes deliberately retain a visible check-the-desktop warning outside Activity, even after another action succeeds, until a new session/terminal cleanup. This avoids disguising an uncertain side effect as a failure that is safe to repeat.
 
-![Optional Activity opened for diagnostics](design/remote-activity.png)
+![Activity diagnostics (earlier disclosure layout)](design/remote-activity.png)
 
-![Unknown warning remains visible with Activity collapsed](design/remote-unknown.png)
+![Unknown warning remains visible outside Activity (earlier disclosure layout)](design/remote-unknown.png)
 
 Both screenshots use the real service with fake action adapters. Settings navigation/grouping, Spotify-specific player targeting, and QR artwork are separate future work.
 

@@ -3,7 +3,24 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createDefaultDeck } from "../src/lib/deck";
 
-const fixture = vi.hoisted(() => ({ remote: {} as Record<string, unknown> }));
+const fixture = vi.hoisted(() => ({
+  remote: {} as Record<string, unknown>,
+  showActivity: false,
+  navigation: {} as { pageId: string; pageIds: string[]; sectionIds: string[]; onPageChange: (id: string) => void },
+}));
+vi.mock("react", async (original) => {
+  const react = await original<typeof import("react")>();
+  return { ...react, useState: (initial: unknown) => initial === false
+    ? [fixture.showActivity, (value: boolean) => { fixture.showActivity = value; }]
+    : react.useState(initial) };
+});
+vi.mock("../src/components/phoneNavigation", async (original) => {
+  const navigation = await original<typeof import("../src/components/phoneNavigation")>();
+  return { ...navigation, usePhoneNavigation: (options: Parameters<typeof navigation.usePhoneNavigation>[0]) => {
+    fixture.navigation = options;
+    return navigation.usePhoneNavigation(options);
+  } };
+});
 vi.mock("../src/lib/useRemotePhone", () => ({ useRemotePhone: () => fixture.remote }));
 import { RemotePhoneApp } from "../src/components/RemotePhoneApp";
 
@@ -21,9 +38,39 @@ const tileClass = (html: string, action: string) =>
 
 describe("remote phone command gating", () => {
   beforeEach(() => {
+    fixture.showActivity = false;
     vi.stubGlobal("window", { location: { protocol: "https:" } });
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("puts activity on the final swipe page, not below the controls, and returns to the deck", () => {
+    fixture.remote = makeRemote({ activity: [{ id: "entry", label: "Test action", state: "confirmed", message: "Delivered" }] });
+    const render = () => renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
+    const controls = render();
+    expect(controls).not.toContain('aria-label="Activity log"');
+    expect(controls).toContain("Activity</button>");
+    const activityId = fixture.navigation.pageIds.at(-1)!;
+    expect(fixture.navigation.pageIds.slice(0, -1)).toEqual(deck.pages.map((page) => page.id));
+    fixture.navigation.onPageChange(activityId);
+    const activity = render();
+    expect(activity).toContain("<h1>Activity</h1>");
+    expect(activity).toContain('aria-label="Activity log"');
+    expect(activity).toContain("Delivered");
+    expect(activity).not.toContain('class="control-tile');
+    expect(fixture.navigation.sectionIds).toEqual([]);
+    expect(fixture.remote.setPage).not.toHaveBeenCalled();
+    fixture.navigation.onPageChange(deck.pages[0].id);
+    expect(fixture.remote.setPage).toHaveBeenCalledWith(deck.pages[0].id);
+    expect(render()).not.toContain('aria-label="Activity log"');
+  });
+
+  it("offers an empty activity page before the first command", () => {
+    fixture.remote = makeRemote();
+    fixture.showActivity = true;
+    const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
+    expect(html).toContain("No activity yet.");
+    expect(html).not.toContain('class="control-tile');
+  });
 
   it("keeps other controls safely disabled without dimming while a volume slider is in flight", () => {
     fixture.remote = makeRemote({ busyControlId: "ctl_volume" });

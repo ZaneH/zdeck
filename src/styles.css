@@ -743,8 +743,6 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .remote-warning { color: var(--warning); font-size: 12px; line-height: 1.5; }
 .remote-status { min-height: 1.6em; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .remote-activity { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); }
-.remote-activity > .disclosure { padding: 10px 12px; }
-.remote-activity[open] > .disclosure { border-bottom: 1px solid var(--border); }
 .remote-activity-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px; }
 .remote-activity-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 11px; line-height: 1.5; }
 .remote-activity-label { color: var(--text); font-weight: 550; overflow-wrap: anywhere; }

@@ -307,6 +307,15 @@ const setValue = (selector, value) =>
 const rectOf = (selector) =>
   `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, cx: r.left + r.width / 2, cy: r.top + r.height / 2, width: r.width, height: r.height }; })()`;
 
+async function waitForActivity(page, expression, timeout = 12000) {
+  const previous = await page.eval("document.querySelector('.phone-page-tab[aria-current=page]').textContent");
+  await page.eval(clickText('.phone-page-tab', 'Activity'));
+  const found = await page.waitFor(expression, timeout);
+  await page.eval(clickText('.phone-page-tab', previous));
+  await page.waitFor("!!document.querySelector('.phone-grid')");
+  return found;
+}
+
 async function keyEvent(page, type, key, code, vk) {
   await page.send("Input.dispatchKeyEvent", {
     type,
@@ -601,7 +610,7 @@ async function main() {
     "(() => { const key = document.querySelector('[data-action=\"media-play-pause\"] .tile-primary'); key.click(); key.click(); })()",
   );
   const mediaCommand = await waitForRequest((e) => commandPath(e));
-  await phone.waitFor(
+  await waitForActivity(phone,
     "!!document.querySelector('.remote-activity-list li[data-state=\"confirmed\"]')",
   );
   const mediaResults = proxy.commands.filter((c) => c.controlId === "ctl_play_pause");
@@ -614,19 +623,19 @@ async function main() {
     JSON.stringify(mediaResults),
   );
   check(
-    "routine confirmed outcome moves into a collapsed Activity log, not a visible toast",
+    "routine confirmed outcome stays off the control page, not a visible toast",
     await phone.eval(
-      "(() => { const details = document.querySelector('.remote-activity'); const entry = document.querySelector('.remote-activity-list li[data-state=\"confirmed\"]'); return !!details && details.open === false && !document.querySelector('.remote-status') && entry?.querySelector('.remote-activity-label')?.textContent.includes('Fixture playback'); })()",
+      "!document.querySelector('.remote-activity, .remote-status')",
     ),
   );
-  await phone.eval("document.querySelector('.remote-activity > summary').click()");
+  await phone.eval(clickText('.phone-page-tab', 'Activity'));
   check(
-    "Activity opens to show the routine outcome message",
-    await phone.waitFor("document.querySelector('.remote-activity')?.open === true && (document.querySelector('.remote-activity-message')?.textContent.length ?? 0) > 0"),
+    "the final Activity page shows the routine outcome message without controls",
+    await phone.waitFor("document.querySelector('.phone-page-heading h1')?.textContent === 'Activity' && !document.querySelector('.phone-grid') && (document.querySelector('.remote-activity-message')?.textContent.length ?? 0) > 0"),
   );
   writeFileSync("/tmp/deck-remote-activity.png", Buffer.from(
     (await phone.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
-  await phone.eval("document.querySelector('.remote-activity > summary').click()");
+  await phone.eval(clickText('.phone-page-tab', 'Stream'));
   const afterMedia = (await rpc("runner_calls")).calls;
   check("media execution uses three fake adapter calls (read, mutate, read)", afterMedia - beforeMedia === 3, `${afterMedia - beforeMedia}`);
   void mediaCommand;
@@ -665,7 +674,7 @@ async function main() {
   );
   check(
     "volume commit logs a typed outcome in Activity",
-    await phone.waitFor("!!document.querySelector('.remote-activity-list li:first-child[data-state=\"confirmed\"]') && document.querySelector('.remote-activity-list li:first-child .remote-activity-label')?.textContent === document.querySelector('[data-action=\"volume\"] .tile-label')?.textContent"),
+    await waitForActivity(phone, "!!document.querySelector('.remote-activity-list li:first-child[data-state=\"confirmed\"]') && document.querySelector('.remote-activity-list li:first-child .remote-activity-label')?.textContent === 'Volume'"),
   );
 
   await settle(phone);
@@ -764,7 +773,7 @@ async function main() {
     sawUnknown &&
       droppedKind === "unknown" &&
       (await phone.eval("document.querySelector('.remote-warning')?.textContent.includes('Check the desktop before trying again')")) &&
-      (await phone.eval("document.querySelector('.remote-activity')?.open === false")),
+      (await phone.eval("!document.querySelector('.remote-activity')")),
     `sawUnknown=${sawUnknown} kind=${droppedKind}`,
   );
   check(
@@ -797,7 +806,7 @@ async function main() {
   );
   check(
     "stale revision shows a non-mutating resync notice in Activity",
-    await phone.waitFor(
+    await waitForActivity(phone,
       "document.querySelector('.remote-activity-list li[data-state=\"info\"] .remote-activity-message')?.textContent.includes('saved deck changed')",
       12000,
     ),
@@ -828,7 +837,7 @@ async function main() {
   await phone.eval(
     "document.querySelector('[data-action=\"media-play-pause\"] .tile-primary').click()",
   );
-  await phone.waitFor("!!document.querySelector('.remote-activity-list li:first-child[data-state=\"confirmed\"]')", 12000);
+  await waitForActivity(phone, "!!document.querySelector('.remote-activity-list li:first-child[data-state=\"confirmed\"]')", 12000);
   const afterResync = (await rpc("runner_calls")).calls;
   check("controls work after the conflict resync", afterResync - beforeResync === 3, `${afterResync - beforeResync}`);
 
@@ -895,7 +904,7 @@ async function main() {
   await pasted.eval(
     "document.querySelector('[data-action=\"mic-mute\"] .tile-primary').click()",
   );
-  await pasted.waitFor("!!document.querySelector('.remote-activity-list li[data-state=\"confirmed\"]')", 12000);
+  await waitForActivity(pasted, "!!document.querySelector('.remote-activity-list li[data-state=\"confirmed\"]')", 12000);
   const afterPastedCommand = (await rpc("runner_calls")).calls;
   check(
     "pasted phone runs one confirmed fixture action",
