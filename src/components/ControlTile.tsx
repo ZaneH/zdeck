@@ -94,7 +94,17 @@ export function ControlTile({
   const remote = semantics === "remote";
   const live = semantics === "live";
   const volumeGesture = useRef<string | null>(null);
-  useEffect(() => { volumeGesture.current = null; dialPointer.current = null; }, [disabled, control.id, semantics]);
+  const verticalSlider = appearance === "glass" && presentation === "slider";
+  function dragVerticalSlider(input: HTMLInputElement, clientY: number) {
+    if (!numeric) return;
+    const bounds = input.getBoundingClientRect();
+    if (bounds.height <= 0) return;
+    const steps = (numeric.maximum - numeric.minimum) / numeric.step;
+    const targetStep = Math.max(0, Math.min(Math.floor(steps), Math.round((bounds.bottom - clientY) / bounds.height * steps)));
+    const value = numeric.minimum + targetStep * numeric.step;
+    if (value !== valueRef.current) changeValue(value);
+  }
+  useEffect(() => { volumeGesture.current = null; dialPointer.current = null; }, [disabled, control.id, semantics, appearance, presentation]);
   const content = (
     <>
       <span className="tile-icon"><ActionIcon kind={control.action} icon={control.icon} size={22} /></span>
@@ -220,17 +230,30 @@ export function ControlTile({
             disabled={disabled} hidden={presentation === "dial"} aria-orientation={appearance === "glass" && presentation === "slider" ? "vertical" : undefined}
             onChange={(event) => changeValue(Number(event.target.value))}
             onPointerDown={(event) => {
-              volumeGesture.current = !disabled && event.button === 0 && event.isPrimary ? `pointer:${event.pointerId}` : null;
-              // Native ranges own thumb capture and release; do not replace it with input capture.
-              if (volumeGesture.current) sentValue.current = null;
+              if (disabled || event.button !== 0 || !event.isPrimary || volumeGesture.current?.startsWith("pointer:")) return;
+              volumeGesture.current = `pointer:${event.pointerId}`;
+              sentValue.current = null;
+              // The thumb is invisible in Glass; capture the whole pill so touch can drag anywhere.
+              if (verticalSlider) {
+                event.preventDefault();
+                event.currentTarget.focus();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                dragVerticalSlider(event.currentTarget, event.clientY);
+              }
+            }}
+            onPointerMove={(event) => {
+              if (verticalSlider && !disabled && volumeGesture.current === `pointer:${event.pointerId}`) {
+                dragVerticalSlider(event.currentTarget, event.clientY);
+              }
             }}
             onPointerUp={(event) => {
-              const commit = volumeGesture.current === `pointer:${event.pointerId}` && event.button === 0 && !disabled;
+              if (volumeGesture.current !== `pointer:${event.pointerId}` || event.button !== 0) return;
               volumeGesture.current = null;
-              if (commit) commitValue(Number(event.currentTarget.value));
+              if (!disabled) commitValue(verticalSlider ? valueRef.current : Number(event.currentTarget.value));
+              if (verticalSlider && event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
             }}
-            onPointerCancel={() => { volumeGesture.current = null; }}
-            onLostPointerCapture={() => { volumeGesture.current = null; }}
+            onPointerCancel={(event) => { if (volumeGesture.current === `pointer:${event.pointerId}`) volumeGesture.current = null; }}
+            onLostPointerCapture={(event) => { if (volumeGesture.current === `pointer:${event.pointerId}`) volumeGesture.current = null; }}
             onBlur={() => { volumeGesture.current = null; }}
             onKeyDown={(event) => {
               if (event.key === "Escape") volumeGesture.current = null;

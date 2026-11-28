@@ -755,6 +755,7 @@ try {
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
   check("Glass editor sections preview their own wallpaper and shaped controls", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '30px' && getComputedStyle(document.querySelector('.deck-section')).backgroundImage.includes('radial-gradient') && !!document.querySelector('.control-tile[data-shape]')"));
   check("Glass controls own the blur while the section stays clear", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(section).trim()) && (!supported || filter(tile).includes('blur(22px)')); })()"));
+  check("Glass editor caps the control grid instead of stretching it across the canvas", await editor.eval("(() => { const grid = document.querySelector('.deck-section[data-appearance=\"glass\"] .control-grid'); const style = getComputedStyle(grid); return grid.getBoundingClientRect().width <= 360 && parseFloat(style.gridAutoRows) <= 80; })()"));
   await editor.screenshot("/tmp/deck-design-glass.png");
   const { browserContextId: glassCtx } = await cdp.send('Target.createBrowserContext');
   const glassPhone = await openPage("glass-phone", `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, glassCtx);
@@ -794,6 +795,10 @@ try {
   check("Glass vertical slider Home reaches minimum", await glassPhone.eval("Number(document.querySelector('.tile-volume input').value) === 0"));
   await glassPhone.screenshot("/tmp/deck-design-glass-volume-0.png");
   await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: glassSlider.cx, y: glassSlider.cy }] });
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: glassSlider.cx, y: glassSlider.top + (glassSlider.bottom - glassSlider.top) / 4 }] });
+  check("Glass slider follows a continuous upward touch drag before release", await glassPhone.waitFor("(() => { const v = Number(document.querySelector('.tile-volume input').value); return v >= 70 && v <= 80; })()"));
+  await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: glassSlider.cx, y: glassSlider.cy }] });
+  check("Glass slider follows the same finger back down without another tap", await glassPhone.waitFor("(() => { const v = Number(document.querySelector('.tile-volume input').value); return v >= 45 && v <= 55; })()"));
   await glassPhone.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   check("Glass vertical slider touch at the middle lands near 50", await glassPhone.eval("(() => { const value = Number(document.querySelector('.tile-volume input').value); return value >= 35 && value <= 65; })()"));
   await glassPhone.screenshot("/tmp/deck-design-glass-volume-50.png");

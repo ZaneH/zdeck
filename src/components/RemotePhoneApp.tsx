@@ -274,7 +274,6 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const activeBusyControl = remote.busyControlId ? findControl(deck, page.id, remote.busyControlId) : null;
   const transientSlider = active && !!activeBusyControl
     && ["slider", "dial"].includes(effectivePresentation(activeBusyControl, remote.plugins));
-  const hasVolume = pageControls(page).some((control) => control.action === "volume");
   const latestActivity = remote.activity[0];
   const surfaceSection = page.sections[navigation.sectionIndex] ?? page.sections[0];
   const surface = sectionAppearance(deck, surfaceSection);
@@ -330,13 +329,6 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
 
         {pageControls(page).length === 0 ? (
           <p className="empty-note">This page has no controls yet.</p>
-        ) : null}
-
-        {hasVolume ? (
-          <p className="remote-target-note">
-            Volume sliders set a target level. They show the value about to be
-            sent, not a live device reading.
-          </p>
         ) : null}
 
         {latestActivity && (latestActivity.state === "failed" || latestActivity.state === "not_applied") ? (

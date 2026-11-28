@@ -36,8 +36,77 @@ describe("Native slider gestures", () => {
     const input = tile.props.children[3].props.children[1];
     const pointer = event({ pointerId: 1, button: 0, isPrimary: true, currentTarget: { value: "75" } });
     input.props.onPointerDown(pointer);
-    input.props.onPointerCancel();
+    input.props.onPointerCancel(pointer);
     input.props.onPointerUp(pointer);
+    expect(commit).not.toHaveBeenCalled();
+  });
+});
+
+describe("Glass whole-pill slider gestures", () => {
+  const target = () => ({ value: "50", focus: vi.fn(), setPointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true), releasePointerCapture: vi.fn(),
+    getBoundingClientRect: () => ({ top: 100, bottom: 300, height: 200 }) });
+  const pointer = (currentTarget: ReturnType<typeof target>, clientY: number, extra = {}) =>
+    event({ currentTarget, clientY, pointerId: 1, button: 0, isPrimary: true, ...extra });
+  const slider = (extra = {}) => ControlTile({ control: { ...control, presentation: "slider" },
+    variant: "phone", appearance: "glass", volume: 50, ...extra }).props.children[3].props.children[1];
+
+  it.each(["preview", "live", "remote"] as const)("drags from anywhere on the pill in %s without duplicate release commits", (semantics) => {
+    const commit = vi.fn(), change = vi.fn(), input = slider({ semantics, onVolumeCommit: commit, onVolumeChange: change });
+    const currentTarget = target(), down = pointer(currentTarget, 200);
+    input.props.onPointerDown(down);
+    expect(down.preventDefault).toHaveBeenCalledOnce();
+    expect(currentTarget.setPointerCapture).toHaveBeenCalledExactlyOnceWith(1);
+    input.props.onPointerMove(pointer(currentTarget, 250));
+    input.props.onPointerMove(pointer(currentTarget, 150));
+    input.props.onPointerMove(pointer(currentTarget, 150));
+    expect(change.mock.calls).toEqual([[25], [75]]);
+    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 0 : 2);
+    input.props.onPointerUp(pointer(currentTarget, 150));
+    input.props.onPointerUp(pointer(currentTarget, 150));
+    expect(commit).toHaveBeenLastCalledWith(75);
+    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 1 : 2);
+    expect(currentTarget.releasePointerCapture).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("clamps captured drags outside the pill and rounds to the volume step", () => {
+    const change = vi.fn(), input = slider({ onVolumeChange: change }), currentTarget = target();
+    input.props.onPointerDown(pointer(currentTarget, 20));
+    input.props.onPointerMove(pointer(currentTarget, 600));
+    input.props.onPointerMove(pointer(currentTarget, 225));
+    expect(change.mock.calls).toEqual([[100], [0], [38]]);
+  });
+
+  it.each([false, true])("ignores another pointer (primary=%s) without replacing the original gesture", (isPrimary) => {
+    const commit = vi.fn(), input = slider({ onVolumeCommit: commit }), currentTarget = target();
+    input.props.onPointerDown(pointer(currentTarget, 200));
+    input.props.onPointerDown(pointer(currentTarget, 100, { pointerId: 2, isPrimary }));
+    input.props.onPointerMove(pointer(currentTarget, 100, { pointerId: 2, isPrimary: false }));
+    input.props.onPointerUp(pointer(currentTarget, 100, { pointerId: 2, isPrimary: false }));
+    input.props.onPointerCancel(pointer(currentTarget, 100, { pointerId: 2, isPrimary: false }));
+    input.props.onLostPointerCapture(pointer(currentTarget, 100, { pointerId: 2, isPrimary: false }));
+    input.props.onPointerMove(pointer(currentTarget, 250));
+    input.props.onPointerUp(pointer(currentTarget, 250));
+    expect(commit).toHaveBeenCalledExactlyOnceWith(25);
+    expect(currentTarget.setPointerCapture).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it.each(["onPointerCancel", "onLostPointerCapture", "onBlur"])("does not commit after %s", (cancel) => {
+    const commit = vi.fn(), input = slider({ onVolumeCommit: commit }), currentTarget = target();
+    input.props.onPointerDown(pointer(currentTarget, 100));
+    input.props[cancel](pointer(currentTarget, 100));
+    input.props.onPointerMove(pointer(currentTarget, 300));
+    input.props.onPointerUp(pointer(currentTarget, 300));
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("never starts or commits a disabled gesture", () => {
+    const commit = vi.fn(), change = vi.fn(), input = slider({ disabled: true, onVolumeCommit: commit, onVolumeChange: change }), currentTarget = target();
+    input.props.onPointerDown(pointer(currentTarget, 100));
+    input.props.onPointerMove(pointer(currentTarget, 300));
+    input.props.onPointerUp(pointer(currentTarget, 300));
+    expect(currentTarget.setPointerCapture).not.toHaveBeenCalled();
+    expect(change).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
   });
 });

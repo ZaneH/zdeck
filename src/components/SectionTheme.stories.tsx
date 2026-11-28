@@ -196,6 +196,12 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
     // Preserve Dark/Light geometry; Glass intentionally removes the group container.
     if (appearance === "glass") {
       expect(style.borderRadius).toBe(section.classList.contains("phone-section") ? "0px" : "30px");
+      if (section.classList.contains("deck-section")) {
+        expect(section.querySelector(".control-grid")!.getBoundingClientRect().width).toBeLessThanOrEqual(360);
+        const bounds = tileElement.getBoundingClientRect();
+        expect(bounds.width).toBeLessThanOrEqual(80);
+        expect(Math.abs(bounds.height - (bounds.width * 2 + 14))).toBeLessThanOrEqual(1);
+      }
     } else if (section.classList.contains("phone-section")) {
       if (section.dataset.theme) expect(style.borderRadius).toBe("8px");
     } else {

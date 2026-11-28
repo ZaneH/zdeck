@@ -33,6 +33,14 @@ describe("remote phone transient volume gating", () => {
     expect(tileClass(html, "media-play-pause")).toContain("is-transient-disabled");
   });
 
+  it("does not append routine volume instructions to the section scroller", () => {
+    fixture.remote = makeRemote();
+    const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
+    expect(html).not.toContain("Volume sliders set a target level");
+    expect(html).not.toContain("remote-target-note");
+    expect(html).toContain("Target value for Volume");
+  });
+
   it("keeps controls visibly disabled during a button action", () => {
     fixture.remote = makeRemote({ busyControlId: "ctl_media_pause" });
     const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
