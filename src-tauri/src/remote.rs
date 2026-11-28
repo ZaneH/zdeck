@@ -1235,6 +1235,43 @@ pub(crate) async fn appearance_snapshot(
     }
 }
 
+#[cfg(test)]
+mod theme_payload_tests {
+    use super::*;
+    use crate::deck::{default_deck, Theme};
+
+    #[tokio::test]
+    async fn oversized_appearance_payload_is_visible_and_does_not_mutate_the_deck() {
+        let path = std::env::temp_dir().join(format!("zdeck-theme-payload-{}-{}.json",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let store = ThemeStore::new(path.clone());
+        let fixture: serde_json::Value = serde_json::from_slice(include_bytes!("../../tests/fixtures/theme-packages/midnight-maze.json")).unwrap();
+        let mut deck = default_deck();
+        let mut section = deck.pages[0].sections[0].clone();
+        section.controls.clear();
+        deck.pages[0].sections.clear();
+        for index in 0..9 {
+            let mut package = fixture.clone();
+            package["id"] = format!("maze-{index}").into();
+            let mut bytes = serde_json::to_vec(&package).unwrap();
+            bytes.resize(zdeck_schema::theme_package::MAX_THEME_PACKAGE_BYTES, b' ');
+            let installed = store.install(&bytes).await.unwrap();
+            let mut themed = section.clone();
+            themed.id = format!("themed-{index}");
+            themed.theme = Some(Theme::Dark);
+            themed.custom_theme = Some(installed.reference);
+            deck.pages[0].sections.push(themed);
+        }
+        deck.validate().unwrap();
+        let original = deck.clone();
+        let snapshot = appearance_snapshot(Some(&store), &deck).await;
+        assert!(snapshot.external_themes.is_empty());
+        assert_eq!(snapshot.theme_error, Some(THEME_TOO_LARGE));
+        assert_eq!(deck, original);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 async fn state(State(inner): State<Arc<Inner>>, headers: HeaderMap) -> Result<Response, ApiError> {
     inner.authenticate(&headers).await?;
     let snapshot = load_saved_deck(inner.as_ref()).await?;
