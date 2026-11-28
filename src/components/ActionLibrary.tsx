@@ -38,9 +38,9 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifests
   const categories = CATEGORIES.filter((item) => item !== "Plugins" || manifests.length > 0);
   const needle = query.trim().toLowerCase();
   const catalog = [
-    ...ACTION_CATALOG.map((action) => ({ ...action, options: undefined as ControlOptions | undefined })),
+    ...ACTION_CATALOG.map((action) => ({ ...action, icon: undefined, options: undefined as ControlOptions | undefined })),
     ...manifests.flatMap((manifest) => [...manifest.actions, ...(manifest.values ?? [])].map((action) => ({ kind: "plugin" as const, name: action.title, category: "Plugins" as const,
-      description: `${manifest.id} · ${action.id}`, note: "Trusted local plugin", defaultLabel: action.title,
+      description: `${manifest.id} · ${action.id}`, note: "Trusted local plugin", defaultLabel: action.title, icon: manifest.icon,
       options: { label: action.title, pluginId: manifest.id, pluginAction: action.id, pluginArgs: pluginDefaults(action),
         ...(manifest.values?.some((value) => value.id === action.id) ? { presentation: "value" as const }
           : pluginControlField(action)?.[1].type === "integer" ? { presentation: "slider" as const }
@@ -95,7 +95,7 @@ export function ActionLibrary({ pageName, disabled = false, dialogRef, manifests
                   aria-label={`Add ${action.name}${action.options?.pluginId ? ` (${action.options.pluginId})` : ""} to ${pageName}`}
                   onClick={() => { onAdd(action.kind, action.options); close(); }}
                 >
-                  <ActionIcon kind={action.kind} size={20} />
+                  <ActionIcon kind={action.kind} icon={action.icon ? { type: "image", src: action.icon } : undefined} size={20} />
                   <span className="action-row-copy">
                     <span className="action-row-name">{action.name}</span>
                     <span className="action-row-note">{action.description}{action.kind === "mic-mute" ? " Not an OBS input." : ""}</span>

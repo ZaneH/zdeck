@@ -34,6 +34,27 @@ describe("multiple plugin sessions and installation diagnostics", () => {
     const html = renderToStaticMarkup(createElement(ActionLibrary, { pageName: "Stream", dialogRef: { current: null }, manifests: [manifest, notes.manifest], onAdd: () => {} }));
     expect(html).toContain("spotify · play"); expect(html).toContain("notes · play");
   });
+  it("shows plugin identity icons in the action picker, falling back to the plug when absent", () => {
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    const html = renderToStaticMarkup(createElement(ActionLibrary, {
+      pageName: "Stream", dialogRef: { current: null },
+      manifests: [{ ...manifest, icon }, { ...manifest, id: "notes" }], onAdd: () => {},
+    }));
+    const rows = html.match(/<button[^>]*class="action-row"[\s\S]*?<\/button>/g) ?? [];
+    const spotify = rows.filter((row) => row.includes("(spotify)"));
+    const notes = rows.filter((row) => row.includes("(notes)"));
+    expect(spotify).toHaveLength(2);
+    expect(notes).toHaveLength(2);
+    for (const row of spotify) {
+      expect(row).toContain(`src="${icon}"`);
+      expect(row).toContain('alt="" aria-hidden="true"');
+      expect(row).not.toContain("lucide-plug");
+    }
+    for (const row of notes) {
+      expect(row).toContain("lucide-plug");
+      expect(row).not.toContain("<img");
+    }
+  });
   it("bounds diagnostics, correlates IDs and replaces raw messages with safe installation guidance", () => {
     const input = { pluginId: "spotify", checks: [{ name: "SDK dependency", status: "fail", message: "private secret path" }] };
     const result = parsePluginDiagnostics(input, "spotify");
