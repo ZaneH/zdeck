@@ -149,6 +149,57 @@
   --on-wallpaper: #ffffff;
   color-scheme: dark;
 }
+/* Wasteland Terminal: olive-black instrument panels, pale phosphor text and static
+   scanlines painted into surfaces, never over text. */
+[data-theme="terminal"], [data-appearance="terminal"] {
+  --bg: #0b0f08;
+  --bg-soft: #10160d;
+  --surface: #141b10;
+  --surface-2: #1a2415;
+  --surface-3: #22301b;
+  --border: #2e3d25;
+  --border-strong: #5c7a4b;
+  --text: #dcf3c8;
+  --text-muted: #b4cf9f;
+  --text-faint: #9cb886;
+  --danger: #ffb59a;
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, transparent);
+  --warning: #f0d48f;
+  --focus: color-mix(in srgb, var(--accent) 45%, var(--text));
+  --key-bottom: #050804;
+  --key-light: #dcf3c814;
+  --control-accent: var(--accent);
+  --control-accent-weight: 100%;
+  --app-bg-image: radial-gradient(ellipse 80% 45% at 50% 0%, rgba(141, 240, 122, .07), transparent 70%);
+  --section-bg:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .26) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #10170d, #0b0f08);
+  --section-border: #34462a;
+  --section-radius: 10px;
+  --phone-section-radius: 8px;
+  --section-shadow: inset 0 0 0 1px #00000073, 0 0 20px rgba(141, 240, 122, .05);
+  --tile-border: #5c7a4b;
+  --tile-surface:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #1b2617, #131a0f);
+  --tile-shadow: inset 0 0 0 1px rgba(220, 243, 200, .07), inset 0 1px 0 var(--key-light), 0 2px 0 var(--key-bottom), 0 0 14px rgba(141, 240, 122, .06);
+  --tile-press-shadow: inset 0 2px 4px #000000a6, 0 0 0 var(--key-bottom);
+  --tile-press-lift: 2px;
+  --tile-radius: 2px;
+  --icon-radius: 2px;
+  --slider-thumb-radius: 1px;
+  --card-bg: transparent;
+  --card-border: var(--border);
+  --card-padding: 20px 0 0;
+  --card-radius: 0;
+  --phone-inherited-bg: transparent;
+  --phone-inherited-padding: 0;
+  --phone-inherited-border: none;
+  --phone-inherited-radius: 0;
+  --material-filter: none;
+  --tile-backdrop-filter: none;
+  color-scheme: dark;
+}
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { min-height: 100%; overscroll-behavior: none; }
 body { margin: 0; background-color: var(--bg); background-image: var(--app-bg-image); color: var(--text); -webkit-font-smoothing: antialiased; }
@@ -964,6 +1015,91 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 [data-appearance="glass"] .control-tile:has(.toggle-switch[aria-checked="true"]) .toggle-track span { background: #fff; }
 [data-appearance="glass"] .control-tile:has(.toggle-button[aria-pressed="true"]) .tile-toggle[aria-pressed="true"] { color: #241733; }
 
+/* Wasteland Terminal presentation: system mono, angular frames, segmented meters
+   and static surface texture. Nothing animates, blurs or covers the labels. */
+:root[data-theme="terminal"], [data-appearance="terminal"] { font-family: var(--mono); }
+:is(.deck-section, .phone-section):is([data-appearance="dark"], [data-appearance="light"], [data-appearance="glass"]) { font-family: "Geist", system-ui, sans-serif; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .section-heading {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  text-shadow: 0 0 5px color-mix(in srgb, var(--text) 25%, transparent);
+}
+.deck-section[data-appearance="terminal"].is-selected { outline: 2px solid var(--focus); outline-offset: 2px; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-primary { border-radius: 1px; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] :is(.tile-label, .volume-readout, .tile-reading output, .toggle-state) { font-family: var(--mono); letter-spacing: .01em; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-label { text-shadow: 0 0 5px rgba(141, 240, 122, .12); }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-reading output { color: var(--text); text-shadow: 0 0 5px rgba(141, 240, 122, .14); }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .reading-time { color: var(--text-faint); }
+
+/* Segmented horizontal meter: the value still comes from the native range. */
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-webkit-slider-runnable-track {
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 6px, var(--bg) 6px 8px),
+    linear-gradient(to right, var(--control-accent) var(--control-fill), var(--surface-3) var(--control-fill));
+  box-shadow: inset 0 1px 2px #0009;
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-moz-range-track {
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 6px, var(--bg) 6px 8px),
+    linear-gradient(to right, var(--control-accent) var(--control-fill), var(--surface-3) var(--control-fill));
+  box-shadow: inset 0 1px 2px #0009;
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-webkit-slider-thumb {
+  width: 8px;
+  height: 18px;
+  margin-top: -5px;
+  border: 1px solid var(--bg);
+  border-radius: 1px;
+  background: var(--text);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--control-accent) 60%, transparent);
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-moz-range-thumb {
+  width: 8px;
+  height: 18px;
+  border: 1px solid var(--bg);
+  border-radius: 1px;
+  background: var(--text);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--control-accent) 60%, transparent);
+}
+/* Keep the dial a round gauge inside its angular tile; a square face reads as a box. */
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-face { border-radius: 50%; box-shadow: 0 0 0 1px var(--border-strong), 0 0 10px rgba(141, 240, 122, .06); }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-face::before {
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 32%, var(--surface-3), var(--surface) 72%);
+  box-shadow: inset 0 1px 0 var(--key-light), 0 0 0 1px #0009;
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-indicator::before { border-radius: 0; background: var(--control-accent); box-shadow: 0 0 5px color-mix(in srgb, var(--control-accent) 60%, transparent); }
+
+/* Active toggles stay unmistakably on without dimming their neighbours. */
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-button,
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch .toggle-track { border-radius: 2px; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-button::before { border-radius: 0; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch .toggle-track span { border-radius: 0; }
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .control-tile:has(.toggle-button[aria-pressed="true"]),
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .control-tile:has(.toggle-switch[aria-checked="true"]) {
+  border-color: var(--control-accent);
+  box-shadow: inset 0 0 0 1px var(--control-accent), var(--tile-shadow), 0 0 14px color-mix(in srgb, var(--control-accent) 20%, transparent);
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-button[aria-pressed="true"]::before {
+  background: var(--control-accent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--control-accent) 70%, transparent);
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch[aria-checked="true"] .toggle-track {
+  background: var(--control-accent);
+  border-color: var(--control-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--control-accent) 45%, transparent);
+}
+:is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch[aria-checked="true"] .toggle-track span { background: var(--bg); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
@@ -992,6 +1128,41 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
     background: Canvas;
     border: 1px solid CanvasText;
   }
+  [data-theme="terminal"], [data-appearance="terminal"] {
+    --section-bg: Canvas;
+    --section-shadow: none;
+    --tile-surface: Canvas;
+    --tile-shadow: none;
+    --tile-press-shadow: none;
+    --card-bg: Canvas;
+    --card-border: CanvasText;
+    --text: CanvasText;
+    --text-muted: CanvasText;
+    --text-faint: CanvasText;
+    --border: CanvasText;
+    --border-strong: CanvasText;
+    --material-filter: none;
+    --tile-backdrop-filter: none;
+  }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .control-tile,
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .control-tile:has(.toggle-button[aria-pressed="true"]),
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .control-tile:has(.toggle-switch[aria-checked="true"]) {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] :is(.section-heading, .tile-label, .tile-reading output) { text-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-webkit-slider-runnable-track { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-moz-range-track { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-webkit-slider-thumb { background: CanvasText; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .tile-volume input::-moz-range-thumb { background: CanvasText; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-face { box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-face::before { background: Canvas; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .dial-indicator::before { background: Highlight; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-button[aria-pressed="true"]::before { background: Highlight; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch .toggle-track { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch[aria-checked="true"] .toggle-track { background: Highlight; border-color: Highlight; box-shadow: none; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch .toggle-track span { background: CanvasText; }
+  :is(.deck-section, .phone-section)[data-appearance="terminal"] .toggle-switch[aria-checked="true"] .toggle-track span { background: HighlightText; }
 }
 
 /* Match the existing icon disclosure rather than introducing a second picker style. */

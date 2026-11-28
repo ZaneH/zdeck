@@ -122,16 +122,18 @@ describe("deck persistence", () => {
     expect(inherited).not.toHaveProperty("accent");
   });
 
-  it("remembers Glass globally and on a section across reloads", () => {
-    const storage = new MemoryStorage();
-    const pageId = createDefaultDeck().pages[0].id;
-    const sectionId = createDefaultDeck().pages[0].sections[0].id;
-    const deck = setSectionTheme({ ...createDefaultDeck(), theme: "glass" }, pageId, sectionId, "glass");
-    expect(saveDeck(storage, deck)).toBe(true);
-    const restored = loadDeck(storage);
-    expect(restored.status).toBe("loaded");
-    expect(restored.deck.theme).toBe("glass");
-    expect(restored.deck.pages[0].sections[0].theme).toBe("glass");
+  it("remembers opt-in themes globally and on a section across reloads", () => {
+    for (const theme of ["glass", "terminal"] as const) {
+      const storage = new MemoryStorage();
+      const pageId = createDefaultDeck().pages[0].id;
+      const sectionId = createDefaultDeck().pages[0].sections[0].id;
+      const deck = setSectionTheme({ ...createDefaultDeck(), theme }, pageId, sectionId, theme);
+      expect(saveDeck(storage, deck)).toBe(true);
+      const restored = loadDeck(storage);
+      expect(restored.status).toBe("loaded");
+      expect(restored.deck.theme).toBe(theme);
+      expect(restored.deck.pages[0].sections[0].theme).toBe(theme);
+    }
   });
 
   it("remembers automatic and explicit OBS labels across reloads", () => {

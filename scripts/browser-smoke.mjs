@@ -723,15 +723,21 @@ try {
   await editor.waitFor("document.querySelector('.settings-nav [aria-current=page]')?.textContent === 'General'");
   check("settings theme and accent reuse the shared text dropdowns", await editor.eval("(() => { const triggers = [...document.querySelectorAll('.appearance-fields .dropdown-trigger')]; return triggers.length === 2 && triggers.every((trigger) => trigger.querySelectorAll('svg').length === 1 && !trigger.querySelector('.lucide-moon, .lucide-sun, .accent-swatch')); })()"));
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
-  check("theme dropdown offers all three themes", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 3"));
+  check("theme dropdown offers all four themes", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]').length === 4"));
   await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
   check("theme dropdown switches to light", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
   await pressKey(editor, 'ArrowDown', 'ArrowDown', 40);
   check("text dropdown opens from the keyboard and focuses its menu", await editor.waitFor("document.activeElement?.getAttribute('role') === 'menuitemradio'"));
   await pressKey(editor, 'End', 'End', 35);
-  check("text dropdown keyboard navigation reaches the last choice", await editor.eval("document.activeElement?.getAttribute('aria-label') === 'Glass'"));
+  check("text dropdown keyboard navigation reaches the last choice", await editor.eval("document.activeElement?.getAttribute('aria-label') === 'Wasteland Terminal'"));
   await pressKey(editor, 'Escape', 'Escape', 27);
   check("text dropdown Escape closes its menu and returns focus", await editor.waitFor("!document.querySelector('.appearance-fields .dropdown-menu') && document.activeElement === document.querySelector('.appearance-fields .dropdown-trigger')"));
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Wasteland Terminal'));
+  check("Wasteland Terminal applies its theme color and system mono", await editor.waitFor("document.documentElement.dataset.theme === 'terminal' && getComputedStyle(document.body).backgroundColor === 'rgb(11, 15, 8)' && document.querySelector('meta[name=theme-color]').content === '#0b0f08' && getComputedStyle(document.body).fontFamily.includes('monospace')"));
+  await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
+  await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Light'));
+  check("theme returns to light after the terminal check", await editor.waitFor("document.documentElement.dataset.theme === 'light'"));
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(2) .dropdown-trigger'));
   check("accent dropdown lists every accent", await editor.waitFor("document.querySelectorAll('.appearance-fields .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]').length === 5"));
   await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(2) .dropdown-menu [role=menuitemradio]', 'Mint'));
@@ -1811,7 +1817,7 @@ try {
 
   check('section appearance uses one cogwheel settings menu', await manage.eval("(() => { const trigger = document.querySelector('.deck-section:nth-child(2) .section-actions .section-settings-trigger'); return !!trigger && trigger.querySelectorAll('svg').length === 1 && !document.querySelector('.deck-section:nth-child(2) .section-actions .dropdown'); })()"));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
-  check('section settings menu shows the control count and theme choices', await manage.waitFor("document.querySelector('.section-settings-menu')?.textContent.includes('1 control') && document.querySelectorAll('.section-settings-menu [role=menuitemradio]').length === 10"));
+  check('section settings menu shows the control count and theme choices', await manage.waitFor("document.querySelector('.section-settings-menu')?.textContent.includes('1 control') && document.querySelectorAll('.section-settings-menu [role=menuitemradio]').length === 11"));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Mint'));

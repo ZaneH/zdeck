@@ -61,6 +61,8 @@ describe("native v3 snapshot boundary", () => {
     expect(parseDeckSnapshot(snapshot)).toEqual(snapshot);
     const glass = { ...snapshot, deck: { ...createDefaultDeck(), theme: "glass" as const } };
     expect(parseDeckSnapshot(glass)).toEqual(glass);
+    const terminal = { ...snapshot, deck: { ...createDefaultDeck(), theme: "terminal" as const } };
+    expect(parseDeckSnapshot(terminal)).toEqual(terminal);
     expect(() => parseDeckSnapshot({ ...snapshot, deck: { ...snapshot.deck, theme: "midnight" } })).toThrow();
     for (const bad of [null, { ...snapshot, revision: -1 }, { ...snapshot, exists: "true" },
       { ...snapshot, deck: { ...snapshot.deck, version: 1 } }, { ...snapshot, deck: { ...snapshot.deck, extra: true } }]) {

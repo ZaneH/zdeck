@@ -214,7 +214,7 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
     const actual = getComputedStyle(probe).color;
     probe.remove();
     const accent = getComputedStyle(section).getPropertyValue("--accent").trim() || ACCENTS[0].value;
-    expectColor(actual, expectedMix(accent, style.color, sectionTheme === "dark" || sectionTheme === "glass" ? 1 : 0.65));
+    expectColor(actual, expectedMix(accent, style.color, sectionTheme === "light" ? 0.65 : 1));
   }
 }
 
@@ -266,4 +266,19 @@ export const LightSectionInGlassDeck: Story = {
 export const GlassSectionWithLocalAccentInGlassDeck: Story = {
   args: { deckTheme: "glass", sectionTheme: "glass", accent: ACCENTS[4].value },
   play: async ({ canvasElement }) => assertSectionContrast(canvasElement, "glass"),
+};
+
+export const TerminalDeckInheritedWithLocalAccent: Story = {
+  args: { deckTheme: "terminal", sectionTheme: null, accent: ACCENTS[1].value },
+  play: async ({ canvasElement }) => assertSectionContrast(canvasElement, "terminal"),
+};
+
+export const TerminalSectionInDarkDeck: Story = {
+  args: { deckTheme: "dark", sectionTheme: "terminal", accent: undefined },
+  play: async ({ canvasElement }) => assertSectionContrast(canvasElement, "dark"),
+};
+
+export const DarkSectionInTerminalDeck: Story = {
+  args: { deckTheme: "terminal", sectionTheme: "dark", accent: undefined },
+  play: async ({ canvasElement }) => assertSectionContrast(canvasElement, "terminal"),
 };

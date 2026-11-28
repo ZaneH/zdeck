@@ -20,8 +20,8 @@ describe("theme-owned control geometry", () => {
     expect(controlGeometry(mic, "button", "glass").shape).toBe("module");
   });
 
-  it("doesn't reinterpret Dark/Light defaults or change saved spans", () => {
-    for (const theme of ["dark", "light"] as const) {
+  it("keeps classic geometry and saved spans for Dark, Light and Wasteland Terminal", () => {
+    for (const theme of ["dark", "light", "terminal"] as const) {
       expect(controlGeometry(play, "button", theme)).toEqual({ columns: 1, rows: 1, shape: "tile" });
       expect(controlGeometry({ ...play, columnSpan: 3, rowSpan: 2 }, "button", theme))
         .toEqual({ columns: 3, rows: 2, shape: "tile" });

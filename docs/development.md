@@ -45,7 +45,7 @@ These scripts are opt-in, not part of `npm test`. Do not quote historical check 
 
 Builds two frontend versions and drives installed `google-chrome` headlessly using raw CDP and a throwaway browser profile, not your personal browser. `CHROME_BIN` can select a different executable. No browser dependency is installed by the script.
 
-Coverage includes setup rehearsals, validation/save/skip/replay, page/control editing, modal focus/search/keyboard behavior, persistence and cross-tab sync, phone-preview page/slider input, themes and constrained layouts, offline shell behavior and the two-build service-worker update lifecycle. Fake desktop IPC checks Settings/QR/link lifecycle and plugin flows without native execution. Screenshots and a summary go under `/tmp`; the final `dist/` is an unmarked build.
+Coverage includes setup rehearsals, validation/save/skip/replay, page/control editing, modal focus/search/keyboard behavior, persistence and cross-tab sync, phone-preview page/slider input, Dark/Light/Glass/Wasteland Terminal themes and constrained layouts, offline shell behavior and the two-build service-worker update lifecycle. Fake desktop IPC checks Settings/QR/link lifecycle and plugin flows without native execution. Screenshots and a summary go under `/tmp`; the final `dist/` is an unmarked build.
 
 #### `npm run smoke:remote`
 

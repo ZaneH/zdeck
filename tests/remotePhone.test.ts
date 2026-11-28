@@ -334,6 +334,8 @@ describe("protocol validation", () => {
     expect(parseSnapshot("nope")).toBeNull();
     const glass = { ...sampleDeck, theme: "glass" as const };
     expect(parseSnapshot(snapshotBody(3, glass))).toEqual({ revision: 3, deck: glass });
+    const terminal = { ...sampleDeck, theme: "terminal" as const };
+    expect(parseSnapshot(snapshotBody(3, terminal))).toEqual({ revision: 3, deck: terminal });
     expect(parseSnapshot(snapshotBody(3, { ...sampleDeck, theme: "midnight" as never }))).toBeNull();
   });
 

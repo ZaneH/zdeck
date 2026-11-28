@@ -9,7 +9,10 @@ const THEMES: { value: "" | Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
   { value: "glass", label: "Glass" },
+  { value: "terminal", label: "Wasteland Terminal" },
 ];
+
+const themeLabel = (theme: Theme) => THEMES.find((option) => option.value === theme)?.label ?? theme;
 
 export function SectionSettingsMenu({
   sectionName, controlCount, theme, accent, inheritedTheme, inheritedAccentName, disabled = false,
@@ -113,7 +116,7 @@ export function SectionSettingsMenu({
                 aria-checked={(theme ?? "") === option.value}
                 onClick={() => choose(() => onTheme(option.value ? option.value as Theme : null))}
               >
-                {option.value ? option.label : `Inherit (${inheritedTheme})`}
+                {option.value ? option.label : `Inherit (${themeLabel(inheritedTheme)})`}
               </button>
             ))}
           </div>

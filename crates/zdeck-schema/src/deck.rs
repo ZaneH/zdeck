@@ -23,6 +23,7 @@ pub enum Theme {
     Dark,
     Light,
     Glass,
+    Terminal,
 }
 
 fn presentation_valid(action: &str, p: &str) -> bool {
@@ -712,16 +713,18 @@ mod tests {
     }
 
     #[test]
-    fn glass_theme_round_trips_globally_and_per_section_and_unknown_is_rejected() {
+    fn opt_in_themes_round_trip_globally_and_per_section_and_unknown_is_rejected() {
         use serde_json::json;
-        let mut value = serde_json::to_value(default_deck()).unwrap();
-        value["theme"] = json!("glass");
-        value["pages"][0]["sections"][0]["theme"] = json!("glass");
-        let deck: Deck = serde_json::from_value(value.clone()).unwrap();
-        deck.validate().unwrap();
-        assert_eq!(serde_json::to_value(deck).unwrap(), value);
-        value["theme"] = json!("midnight");
-        assert!(serde_json::from_value::<Deck>(value).is_err());
+        for theme in ["glass", "terminal"] {
+            let mut value = serde_json::to_value(default_deck()).unwrap();
+            value["theme"] = json!(theme);
+            value["pages"][0]["sections"][0]["theme"] = json!(theme);
+            let deck: Deck = serde_json::from_value(value.clone()).unwrap();
+            deck.validate().unwrap();
+            assert_eq!(serde_json::to_value(deck).unwrap(), value);
+            value["theme"] = json!("midnight");
+            assert!(serde_json::from_value::<Deck>(value).is_err());
+        }
     }
 
     fn fixture_deck() -> Deck {

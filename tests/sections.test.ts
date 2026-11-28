@@ -170,6 +170,9 @@ describe("section appearance", () => {
     expect(accented.theme).toBe("dark");
     expect(isDeck(accented)).toBe(true);
 
+    const terminal = findSection(setSectionTheme(deck, PAGE, section.id, "terminal"), PAGE, section.id)!;
+    expect(sectionAppearance(deck, terminal)).toEqual({ theme: "terminal", accent: "#4cc9f0" });
+
     const resetTheme = setSectionTheme(accented, PAGE, section.id, null);
     const resetAccent = setSectionAccent(resetTheme, PAGE, section.id, null);
     const reset = findSection(resetAccent, PAGE, section.id)!;

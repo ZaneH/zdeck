@@ -404,15 +404,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glass_theme_round_trips_through_a_restart() {
-        let dir = TempDir::new();
-        let store = DeckStore::new(dir.file());
-        let mut deck = default_deck();
-        deck.theme = Theme::Glass;
-        deck.pages[0].sections[0].theme = Some(Theme::Glass);
-        let saved = store.save(0, deck.clone(), vec![]).await.unwrap();
-        assert_eq!(saved.deck, deck);
-        assert_eq!(DeckStore::new(dir.file()).load().await.unwrap().deck, deck);
+    async fn opt_in_themes_round_trip_through_a_restart() {
+        for theme in [Theme::Glass, Theme::Terminal] {
+            let dir = TempDir::new();
+            let store = DeckStore::new(dir.file());
+            let mut deck = default_deck();
+            deck.theme = theme;
+            deck.pages[0].sections[0].theme = Some(theme);
+            let saved = store.save(0, deck.clone(), vec![]).await.unwrap();
+            assert_eq!(saved.deck, deck);
+            assert_eq!(DeckStore::new(dir.file()).load().await.unwrap().deck, deck);
+        }
     }
 
     #[tokio::test]
