@@ -5,6 +5,7 @@ export const LINKS = {
   download: "#download",
   docs: "#docs",
   discord: "https://discord.gg/PyeaPSPZe2",
+  harmony: "https://har.mony.lol/invite/TCSYPQX7"
 } as const;
 
 export type OsId = "macos" | "linux" | "windows";
