@@ -269,25 +269,25 @@ describe("legacy local deck migration", () => {
     };
   }
 
-  it("upgrades in memory only and writes v3 on the normal explicit save", () => {
+  it("upgrades in memory only and writes v4 on the normal explicit save", () => {
     const legacy = legacyDeck();
     let stored = JSON.stringify(legacy), writes = 0;
     const storage = { getItem: () => stored, setItem: (_: string, value: string) => { stored = value; writes++; } };
     const loaded = loadDeck(storage);
     expect(loaded.status).toBe("loaded");
-    expect(loaded.deck.version).toBe(3);
+    expect(loaded.deck.version).toBe(4);
     expect(isDeck(legacy)).toBe(false);
     expect(JSON.parse(stored).version).toBe(1);
     expect(writes).toBe(0);
     expect(saveDeck(storage, loaded.deck)).toBe(true);
-    expect(JSON.parse(stored).deck.version).toBe(3);
+    expect(JSON.parse(stored).deck.version).toBe(4);
     expect(writes).toBe(1);
   });
 
   it("refuses v1 plugin variants, unknown fields, corrupt data and newer versions without clobbering", () => {
     const legacy = legacyDeck();
     const control = createControl("plugin", options);
-    const badDecks = [{ ...legacy, version: 4 }, { ...legacy, unknown: true },
+    const badDecks = [{ ...legacy, version: 5 }, { ...legacy, unknown: true },
       { ...legacy, pages: [{ ...legacy.pages[0], unknown: true }] },
       { ...legacy, pages: [{ ...legacy.pages[0], controls: [control] }] },
       { ...legacy, pages: [{ ...legacy.pages[0], controls: [{ id: "mic", label: "Mic", action: "mic-mute", unknown: true }] }] },

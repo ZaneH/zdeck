@@ -3,6 +3,8 @@ import { ACCENTS, THEMES } from "./types";
 import type { Accent, Deck, Section, Theme } from "./types";
 import { freshId, newId } from "./actions";
 import { MAX_CONTROLS_PER_PAGE } from "./deck";
+import { validateCustomThemeReference } from "./themePackage";
+import type { CustomThemeReference } from "./themePackage";
 
 /** Matches the schema's byte bound for section ids and names. */
 export const MAX_SECTION_NAME_BYTES = 128;
@@ -173,16 +175,31 @@ export function setSectionTheme(
 ): Deck {
   if (theme !== null && !THEMES.includes(theme)) return deck;
   const section = findSection(deck, pageId, sectionId);
-  if (!section || section.theme === (theme ?? undefined)) return deck;
+  if (!section) return deck;
+  if (theme === null && section.theme === undefined && section.customTheme === undefined) return deck;
+  if (theme !== null && section.theme === theme && section.customTheme === undefined) return deck;
   return mapSections(deck, pageId, (sections) =>
     sections.map((item) => {
       if (item.id !== sectionId) return item;
-      if (theme === null) {
-        const { theme: _removed, ...rest } = item;
-        return rest;
-      }
-      return { ...item, theme };
+      // A built-in choice or inheritance replaces any custom package reference.
+      const { theme: _theme, customTheme: _custom, ...rest } = item;
+      return theme === null ? rest : { ...rest, theme };
     }),
+  );
+}
+
+/** Sets a custom package overlay on its explicit built-in base theme. */
+export function setSectionCustomTheme(
+  deck: Deck,
+  sectionId: string,
+  reference: CustomThemeReference,
+  base: Theme,
+): Deck {
+  const customTheme = validateCustomThemeReference(reference);
+  const pageId = deck.pages.find((page) => page.sections.some((section) => section.id === sectionId))?.id;
+  if (!customTheme || !THEMES.includes(base) || !pageId) return deck;
+  return mapSections(deck, pageId, (sections) =>
+    sections.map((item) => item.id === sectionId ? { ...item, theme: base, customTheme } : item),
   );
 }
 
@@ -211,8 +228,13 @@ export function setSectionAccent(
 export function sectionAppearance(
   deck: Deck,
   section: Section,
-): { theme: Theme; accent: Accent } {
-  return { theme: section.theme ?? deck.theme, accent: section.accent ?? deck.accent };
+): { theme: Theme; accent: Accent; customTheme?: CustomThemeReference } {
+  const customTheme = section.theme === undefined ? deck.customTheme : section.customTheme;
+  return {
+    theme: section.theme ?? deck.theme,
+    accent: section.accent ?? deck.accent,
+    ...(customTheme ? { customTheme } : {}),
+  };
 }
 
 /** Scoped token override for one section; inherited values need no inline style. */

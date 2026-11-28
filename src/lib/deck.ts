@@ -14,6 +14,8 @@ import type {
 } from "./types";
 import { actionDefinition, clampVolume, createControl, freshId, newId } from "./actions";
 import { isPluginArgs, pluginIdentifier } from "./plugin";
+import { validateCustomThemeReference } from "./themePackage";
+import type { CustomThemeReference } from "./themePackage";
 
 export const MAX_PAGES = 12;
 export const MAX_CONTROLS_PER_PAGE = 24;
@@ -285,7 +287,21 @@ export function moveControl(
 }
 
 export function setTheme(deck: Deck, theme: Theme): Deck {
-  return deck.theme === theme ? deck : { ...deck, theme };
+  if (deck.theme === theme && !deck.customTheme) return deck;
+  const next: Deck = { ...deck, theme };
+  delete next.customTheme;
+  return next;
+}
+
+/** A custom theme overlays its built-in base, which stays the deck theme. */
+export function setCustomTheme(
+  deck: Deck,
+  reference: CustomThemeReference,
+  base: Theme,
+): Deck {
+  const customTheme = validateCustomThemeReference(reference);
+  if (!customTheme || !isTheme(base)) return deck;
+  return { ...deck, theme: base, customTheme };
 }
 
 export function setAccent(deck: Deck, accent: Accent): Deck {
@@ -427,10 +443,18 @@ function migratedSectionId(pageId: string, index: number, used: Set<string>): st
   return `section_${fallbackIndex}`;
 }
 
-/** Only local import/load may upgrade a fully validated legacy deck; phone snapshots stay v3-only. */
+/** Only local import/load may upgrade a fully validated legacy deck; phone snapshots stay current-only. */
 export function normalizeDeck(value: unknown): Deck | null {
   if (isDeck(value)) return value;
-  if (!isRecord(value) || (value.version !== 1 && value.version !== 2) || !Array.isArray(value.pages)) return null;
+  if (!isRecord(value)) return null;
+  if (value.version === 3) {
+    // v3 keeps its shape; custom theme references only exist from v4 on.
+    if (!isDeckVersion(value, 3)) return null;
+    const promoted = { ...value, version: DECK_VERSION };
+    return isDeck(promoted) ? promoted : null;
+  }
+  if ((value.version !== 1 && value.version !== 2) || !Array.isArray(value.pages)
+    || Object.hasOwn(value, "customTheme")) return null;
   const usedSectionIds = new Set<string>();
   const pages: unknown[] = [];
   for (const [index, page] of value.pages.entries()) {
@@ -452,9 +476,17 @@ export function normalizeDeck(value: unknown): Deck | null {
 }
 
 export function isDeck(value: unknown): value is Deck {
-  if (!isRecord(value) || !onlyFields(value, ["version", "pages", "activePageId", "theme", "accent"])) return false;
-  if (value.version !== DECK_VERSION) return false;
+  return isDeckVersion(value, DECK_VERSION);
+}
+
+function isDeckVersion(value: unknown, version: number): boolean {
+  const current = version === DECK_VERSION;
+  if (!isRecord(value)
+    || !onlyFields(value, ["version", "pages", "activePageId", "theme", "accent",
+      ...(current ? ["customTheme"] : [])].filter((key) => Object.hasOwn(value, key)))) return false;
+  if (value.version !== version) return false;
   if (!isTheme(value.theme) || !isAccent(value.accent)) return false;
+  if (Object.hasOwn(value, "customTheme") && !validateCustomThemeReference(value.customTheme)) return false;
   if (
     !Array.isArray(value.pages) ||
     value.pages.length === 0 ||
@@ -477,7 +509,7 @@ export function isDeck(value: unknown): value is Deck {
     let controlCount = 0;
     for (const section of page.sections) {
       if (!isRecord(section) || !onlyFields(section, ["id", "name", "controls",
-        ...["theme", "accent"].filter((key) => Object.hasOwn(section, key))])) return false;
+        ...["theme", "accent", ...(current ? ["customTheme"] : [])].filter((key) => Object.hasOwn(section, key))])) return false;
       if (typeof section.id !== "string" || !section.id || sectionIds.has(section.id)
         || utf8Length(section.id) > MAX_SECTION_BYTES) return false;
       sectionIds.add(section.id);
@@ -485,6 +517,8 @@ export function isDeck(value: unknown): value is Deck {
         || utf8Length(section.name) > MAX_SECTION_BYTES) return false;
       if (Object.hasOwn(section, "theme") && !isTheme(section.theme)) return false;
       if (Object.hasOwn(section, "accent") && !isAccent(section.accent)) return false;
+      if (Object.hasOwn(section, "customTheme")
+        && (!validateCustomThemeReference(section.customTheme) || !Object.hasOwn(section, "theme"))) return false;
       if (!Array.isArray(section.controls)) return false;
       controlCount += section.controls.length;
 

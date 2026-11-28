@@ -61,7 +61,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const savedDeck: Deck = {
-  version: 3, theme: "dark", accent: ACCENTS[0].value, activePageId: "stream",
+  version: 4, theme: "dark", accent: ACCENTS[0].value, activePageId: "stream",
   pages: [{ id: "stream", name: "Stream", sections: [{
     id: "stream-controls", name: "Stream", theme: "glass",
     controls: [

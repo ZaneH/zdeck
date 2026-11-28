@@ -232,7 +232,7 @@ describe("deck validation", () => {
     const badVersion = JSON.parse(JSON.stringify(createDefaultDeck())) as {
       version: number;
     };
-    badVersion.version = 4;
+    badVersion.version = 5;
     expect(isDeck(badVersion)).toBe(false);
 
     const badTheme = JSON.parse(JSON.stringify(createDefaultDeck())) as {
@@ -337,7 +337,7 @@ describe("page sections", () => {
         })),
       };
       const migrated = normalizeDeck(legacy);
-      expect(migrated?.version).toBe(3);
+      expect(migrated?.version).toBe(4);
       expect(migrated?.pages).toEqual(deck.pages);
     }
   });

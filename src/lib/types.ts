@@ -1,6 +1,7 @@
 import type { ControlIcon } from "./icons";
+import type { CustomThemeReference } from "./themePackage";
 
-export const DECK_VERSION = 3 as const;
+export const DECK_VERSION = 4 as const;
 
 export const THEMES = ["dark", "light", "glass", "terminal", "macintosh"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -89,6 +90,8 @@ export interface Section {
   controls: Control[];
   theme?: Theme;
   accent?: Accent;
+  /** Installed package overlay; requires an explicit `theme` base. */
+  customTheme?: CustomThemeReference;
 }
 
 export interface Page {
@@ -103,6 +106,7 @@ export interface Deck {
   activePageId: string;
   theme: Theme;
   accent: Accent;
+  customTheme?: CustomThemeReference;
 }
 
 export type ControlPatch = {

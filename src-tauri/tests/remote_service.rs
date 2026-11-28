@@ -1167,7 +1167,7 @@ async fn deck_store_changes_are_published_over_the_socket() {
         .expect("websocket");
     let initial = read_json(&mut websocket).await;
     assert_eq!(initial["revision"], 1);
-    assert_eq!(initial["deck"]["version"], 3);
+    assert_eq!(initial["deck"]["version"], 4);
     assert!(initial.get("trash").is_none(), "phone snapshots must never include local trash");
 
     let mut deck = default_deck();
@@ -1443,7 +1443,7 @@ async fn plugin_deck(env: &TestEnv) {
             plugin_args: json!({"volume":50}).as_object().unwrap().clone(),
         },
     });
-    assert_eq!(env.deck.save(1, deck, vec![]).await.unwrap().deck.version,3);
+    assert_eq!(env.deck.save(1, deck, vec![]).await.unwrap().deck.version,4);
 }
 
 #[tokio::test]

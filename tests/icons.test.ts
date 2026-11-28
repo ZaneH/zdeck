@@ -66,7 +66,7 @@ describe("portable custom icons", () => {
       ...sample,
       version: 1,
       pages: sample.pages.map((page) => ({ id: page.id, name: page.name, controls: page.sections[0].controls })),
-    })?.version).toBe(3);
+    })?.version).toBe(4);
     deck = updateControl(deck, pageId, id, { icon: { type: "builtin", name: "star" } });
     expect(isDeck(deck)).toBe(true);
     deck = updateControl(deck, pageId, id, { label: "New label" });

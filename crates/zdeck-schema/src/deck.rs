@@ -2,8 +2,10 @@
 use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
+use crate::theme_package::CustomThemeReference;
+
 /// Deck schema version understood by both the frontend and this store.
-pub const DECK_VERSION: u32 = 3;
+pub const DECK_VERSION: u32 = 4;
 pub const MAX_PAGES: usize = 12;
 pub const MAX_CONTROLS_PER_PAGE: usize = 24;
 /// Newest deleted controls and sections kept for restore, outside the deck.
@@ -128,6 +130,9 @@ pub struct Section {
     pub theme: Option<Theme>,
     #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
     pub accent: Option<String>,
+    /// Installed package overlay; requires an explicit `theme` base.
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub custom_theme: Option<CustomThemeReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,6 +151,8 @@ pub struct Deck {
     pub active_page_id: String,
     pub theme: Theme,
     pub accent: String,
+    #[serde(default, deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
+    pub custom_theme: Option<CustomThemeReference>,
 }
 
 /// Where a deleted control or section came from, for restore clamping.
@@ -213,11 +220,13 @@ fn valid_control_payload(control: &Control) -> bool {
                 controls: vec![control.clone()],
                 theme: None,
                 accent: None,
+                custom_theme: None,
             }],
         }],
         active_page_id: "__trash_page".into(),
         theme: Theme::Dark,
         accent: ACCENTS[0].to_string(),
+        custom_theme: None,
     }
     .validate()
     .is_ok()
@@ -234,6 +243,7 @@ fn valid_section_payload(section: &Section) -> bool {
         active_page_id: "__trash_page".into(),
         theme: Theme::Dark,
         accent: ACCENTS[0].to_string(),
+        custom_theme: None,
     }
     .validate()
     .is_ok()
@@ -408,6 +418,9 @@ impl Deck {
         if !ACCENTS.contains(&self.accent.as_str()) {
             return Err(DeckError::invalid_input("Unknown accent color."));
         }
+        if self.custom_theme.as_ref().is_some_and(|reference| !reference.valid()) {
+            return Err(DeckError::invalid_input("Custom theme references must be valid."));
+        }
 
         let mut page_ids: HashSet<&str> = HashSet::new();
         let mut section_ids: HashSet<&str> = HashSet::new();
@@ -445,6 +458,13 @@ impl Deck {
                 }
                 if section.accent.as_deref().is_some_and(|accent| !ACCENTS.contains(&accent)) {
                     return Err(DeckError::invalid_input("Unknown section accent color."));
+                }
+                if section.custom_theme.as_ref().is_some_and(|reference| !reference.valid())
+                    || (section.custom_theme.is_some() && section.theme.is_none())
+                {
+                    return Err(DeckError::invalid_input(
+                        "Custom theme references must be valid and carry an explicit base theme.",
+                    ));
                 }
                 for control in &section.controls {
                 if control.id.is_empty()
@@ -531,13 +551,14 @@ pub fn default_deck() -> Deck {
     }
 
     fn section(id: &str, name: &str, controls: Vec<Control>) -> Section {
-        Section { id: id.to_string(), name: name.to_string(), controls, theme: None, accent: None }
+        Section { id: id.to_string(), name: name.to_string(), controls, theme: None, accent: None, custom_theme: None }
     }
 
     Deck {
         version: DECK_VERSION,
         theme: Theme::Dark,
         accent: ACCENTS[0].to_string(),
+        custom_theme: None,
         active_page_id: "page_stream".to_string(),
         pages: vec![
             Page {
@@ -633,14 +654,28 @@ fn promote_legacy_pages(value: &mut serde_json::Value) -> Result<(), DeckError> 
     Ok(())
 }
 
-/// Decode and validate a stored document, promoting valid v1/v2 decks in memory.
+fn contains_custom_theme(value: &serde_json::Value) -> bool {
+    value.pointer("/deck/customTheme").is_some()
+        || value
+            .pointer("/deck/pages")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|pages| {
+                pages.iter().any(|page| {
+                    page.get("sections")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|sections| sections.iter().any(|section| section.get("customTheme").is_some()))
+                })
+            })
+}
+
+/// Decode and validate a stored document, promoting valid v1-v3 decks in memory.
 /// This does not rewrite bytes or advance the stored revision.
 pub fn decode_document(bytes: &[u8]) -> Result<DeckDocument, DeckError> {
     let mut value: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|_| DeckError::invalid_file("The deck file is not valid JSON."))?;
     let version = value.pointer("/deck/version").and_then(serde_json::Value::as_u64);
     if let Some(version) = version {
-        if version != 1 && version != 2 && version != u64::from(DECK_VERSION) {
+        if version != 1 && version != 2 && version != 3 && version != u64::from(DECK_VERSION) {
             return Err(DeckError::unsupported_version("The deck version is not supported."));
         }
     }
@@ -648,6 +683,17 @@ pub fn decode_document(bytes: &[u8]) -> Result<DeckDocument, DeckError> {
     if legacy {
         // Promotion is in-memory only; the store still owns explicit saves.
         promote_legacy_pages(&mut value)?;
+    }
+    // Older versions cannot smuggle in the custom theme fields added by v4.
+    if matches!(version, Some(1 | 2 | 3)) && contains_custom_theme(&value) {
+        return Err(DeckError::invalid_file("The deck file is not a valid versioned deck document."));
+    }
+    if version == Some(3) {
+        let deck = value
+            .get_mut("deck")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| DeckError::invalid_file("The deck file is not a valid versioned deck document."))?;
+        deck.insert("version".into(), DECK_VERSION.into());
     }
     let document: DeckDocument = serde_json::from_value(value).map_err(|_| {
         DeckError::invalid_file("The deck file is not a valid versioned deck document.")
@@ -761,7 +807,7 @@ mod tests {
 
     #[test]
     fn stored_document_rejects_unsupported_versions() {
-        for version in [0, 4, u64::MAX] {
+        for version in [0, 5, u64::MAX] {
             let mut value = stored_fixture();
             value["deck"]["version"] = version.into();
             assert_eq!(decode_document(&serde_json::to_vec(&value).unwrap()),
@@ -1062,6 +1108,77 @@ mod tests {
 
         let duplicate = section.clone();
         assert!(validate_trash(&[section, duplicate]).is_err());
+    }
+
+    fn custom_reference() -> serde_json::Value {
+        serde_json::json!({"id":"midnight-maze","version":"0.1.0","digest":"a".repeat(64)})
+    }
+
+    #[test]
+    fn custom_theme_references_round_trip_on_the_deck_and_a_section() {
+        let mut value = serde_json::to_value(default_deck()).unwrap();
+        value["customTheme"] = custom_reference();
+        value["pages"][0]["sections"][0]["theme"] = serde_json::json!("glass");
+        value["pages"][0]["sections"][0]["customTheme"] = custom_reference();
+        let document = serde_json::json!({"revision": 2, "deck": value});
+        let decoded = decode_document(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), document);
+        assert_eq!(decoded.deck.custom_theme.unwrap().id, "midnight-maze");
+
+        for bad in [
+            serde_json::Value::Null,
+            serde_json::json!({"id":"midnight-maze","version":"0.1.0"}),
+            serde_json::json!({"id":"Midnight","version":"0.1.0","digest":"a".repeat(64)}),
+            serde_json::json!({"id":"midnight-maze","version":"1","digest":"a".repeat(64)}),
+            serde_json::json!({"id":"midnight-maze","version":"0.1.0","digest":"A".repeat(64)}),
+            serde_json::json!({"id":"midnight-maze","version":"0.1.0","digest":"a".repeat(64),"extra":1}),
+        ] {
+            let mut value = document.clone();
+            value["deck"]["customTheme"] = bad.clone();
+            assert!(decode_document(&serde_json::to_vec(&value).unwrap()).is_err(), "accepted {bad}");
+        }
+        let mut unknown_base = document;
+        unknown_base["deck"]["theme"] = serde_json::json!("midnight");
+        assert!(decode_document(&serde_json::to_vec(&unknown_base).unwrap()).is_err());
+    }
+
+    #[test]
+    fn section_custom_theme_requires_an_explicit_base_theme() {
+        let reference = crate::theme_package::parse_custom_theme_reference(&custom_reference()).unwrap();
+        let mut deck = default_deck();
+        deck.pages[0].sections[0].custom_theme = Some(reference);
+        assert!(deck.validate().is_err());
+        deck.pages[0].sections[0].theme = Some(Theme::Glass);
+        deck.validate().unwrap();
+        let encoded = serde_json::to_value(&deck).unwrap();
+        assert_eq!(encoded["pages"][0]["sections"][0]["customTheme"], custom_reference());
+    }
+
+    #[test]
+    fn v3_documents_promote_without_rewrite_or_custom_theme_fields() {
+        let canonical = serde_json::to_value(default_deck()).unwrap();
+        let mut value = serde_json::json!({"revision": 5, "deck": canonical.clone()});
+        value["deck"]["version"] = 3.into();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let document = decode_document(&bytes).unwrap();
+        assert_eq!(document.deck.version, DECK_VERSION);
+        assert_eq!(document.revision, 5);
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(), value);
+        assert_eq!(decode_document(&serde_json::to_vec(&document).unwrap()).unwrap(), document);
+
+        for version in [1, 2] {
+            let mut legacy = stored_fixture();
+            legacy["deck"]["version"] = version.into();
+            legacy["deck"]["customTheme"] = custom_reference();
+            assert!(decode_document(&serde_json::to_vec(&legacy).unwrap()).is_err());
+        }
+        let mut deck_level = value.clone();
+        deck_level["deck"]["customTheme"] = custom_reference();
+        assert!(decode_document(&serde_json::to_vec(&deck_level).unwrap()).is_err());
+        let mut section_level = value;
+        section_level["deck"]["pages"][0]["sections"][0]["theme"] = serde_json::json!("glass");
+        section_level["deck"]["pages"][0]["sections"][0]["customTheme"] = custom_reference();
+        assert!(decode_document(&serde_json::to_vec(&section_level).unwrap()).is_err());
     }
 
     #[test]
