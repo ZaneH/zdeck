@@ -2216,6 +2216,9 @@ try {
     JSON.stringify(bothCaches),
   );
   await update.screenshot("/tmp/deck-smoke-update-banner.png");
+  await update.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
+  check("update Reload button retains padding and fits a narrow banner", await update.eval("(() => { const button = document.querySelector('.update-banner button'); const cs = getComputedStyle(button); const r = button.getBoundingClientRect(); const banner = button.parentElement.getBoundingClientRect(); return parseFloat(cs.paddingInlineStart) >= 12 && parseFloat(cs.paddingInlineEnd) >= 12 && parseFloat(cs.paddingTop) >= 6 && parseFloat(cs.paddingBottom) >= 6 && cs.flexShrink === '0' && button.scrollWidth <= button.clientWidth + 1 && r.left >= banner.left && r.right <= banner.right && banner.left >= 0 && banner.right <= innerWidth; })()"));
+  await update.send("Emulation.clearDeviceMetricsOverride");
 
   await update.eval(click(".update-banner button"));
   await update.waitFor("document.querySelector('.app-shell') && document.querySelector('.app-shell').dataset.build === 'two'", 20000);

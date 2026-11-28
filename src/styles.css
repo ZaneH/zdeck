@@ -628,6 +628,8 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .segmented .button[aria-pressed="true"], .segmented .button[aria-selected="true"] { background: var(--surface-3); border-color: var(--border-strong); }
 .update-banner { position: fixed; z-index: 50; bottom: max(18px, env(safe-area-inset-bottom)); left: 50%; display: flex; align-items: center; gap: 16px; max-width: calc(100% - 24px); padding: 10px 12px 10px 16px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 32px #0004; font-size: 12px; transform: translateX(-50%); }
 
+.update-banner > .button { flex-shrink: 0; padding: 6px 12px; }
+
 .phone-preview, .phone-device { display: contents; }
 .phone-preview-bar { display: none; }
 .phone-preview-title { color: var(--text-muted); font-size: 12px; }
