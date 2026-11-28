@@ -73,14 +73,10 @@ type Viewport = "desktop" | "phone";
 function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport }) {
   // The Storybook toolbar decorator applies its own theme after this story mounts; the args win.
   useEffect(() => { applyTheme(theme, ACCENTS[0].value); }, [theme]);
-  const renderTiles = (controls: Control[]) => controls.map(control => {
-    // Glass cells are square and narrow; a dial's face and readout need two of them.
-    const columnSpan = theme === "glass" && control.presentation === "dial" ? 2 : undefined;
-    return (
-      <ControlTile key={control.id} control={{ ...control, columnSpan }} plugins={plugins}
-        variant={viewport === "phone" ? "phone" : "editor"} appearance={theme} volume={62} />
-    );
-  });
+  const renderTiles = (controls: Control[]) => controls.map(control => (
+    <ControlTile key={control.id} control={control} plugins={plugins}
+      variant={viewport === "phone" ? "phone" : "editor"} appearance={theme} volume={62} />
+  ));
   const caption = "Local preview only. No actions are sent.";
   if (viewport === "phone") return (
     <div data-theme={theme} data-appearance={theme} data-testid="theme-preview"
@@ -142,8 +138,8 @@ function expectInside(rect: DOMRect, bounds: DOMRect, edge = 1) {
   expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + edge);
 }
 
-// Glass one-row capsules must keep their label header, body and 44px target inside the pill,
-// clear of its curved edges. Check the inner content, not only the tile box.
+// Glass capsules and modules keep their labels, bodies and 44px targets inside the tile.
+// Check the inner content, not only the tile box.
 function assertGlassSpacing(sections: HTMLElement[]) {
   const tiles = sections.flatMap(part => Array.from(part.querySelectorAll<HTMLElement>(".control-tile")));
   for (const tile of tiles) {
@@ -193,13 +189,13 @@ function assertGlassSpacing(sections: HTMLElement[]) {
       expect(dialBox.width).toBeGreaterThanOrEqual(44);
       expect(dialBox.height).toBeGreaterThanOrEqual(44);
       expectInside(dialBox, box);
-      if (labelBox) expect(dialBox.left - labelBox.right).toBeGreaterThanOrEqual(4);
+      if (labelBox) expect(dialBox.top - labelBox.bottom).toBeGreaterThanOrEqual(6);
       const readout = tile.querySelector<HTMLElement>(".volume-readout");
       if (readout) {
         const readoutBox = readout.getBoundingClientRect();
         expectInside(readoutBox, box);
         belowLabel(readoutBox);
-        expect(readoutBox.right).toBeLessThanOrEqual(dialBox.left - 4);
+        expect(readoutBox.top - dialBox.bottom).toBeGreaterThanOrEqual(6);
       }
     }
     const reading = tile.querySelector<HTMLElement>(".tile-reading");

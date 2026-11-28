@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { applyTheme } from "../lib/theme";
 import { ACCENTS } from "../lib/types";
 import type { Control, Deck } from "../lib/types";
@@ -107,6 +107,49 @@ export const SavedLayoutInDarkDeck: Story = {
     await expect(image.getBoundingClientRect().width).toBe(28);
     await expect(image.getBoundingClientRect().height).toBe(28);
     await expect(getComputedStyle(canvasElement.querySelector<HTMLElement>('[data-redundant="true"]')!).clipPath).toBe("inset(50%)");
+  },
+};
+
+export const SavedOneCellDial: Story = {
+  // Desktop PhoneDeck adds 40px of preview gutters around the 320px phone.
+  render: () => <div style={{ width: 360 }}><PhoneDeck initialDeck={{ ...savedDeck, pages: [{
+    id: "stream", name: "Stream", sections: [{ id: "dials", name: "Dials", theme: "glass", controls: [
+      { id: "dial", action: "volume", label: "Very long speaker volume label", volume: 50, presentation: "dial", columnSpan: 1, rowSpan: 1 },
+      { id: "button", action: "mic-mute", label: "Adjacent button", columnSpan: 1, rowSpan: 1 },
+    ] }],
+  }] }} initialStatus="loaded" mode="native" /></div>,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const dial = canvas.getByRole("slider", { name: "Very long speaker volume label" });
+    await expect(dial).toHaveAccessibleName("Very long speaker volume label");
+    const tile = dial.closest("article")!;
+    await expect(tile).toHaveAttribute("data-column-span", "1");
+    await expect(getComputedStyle(tile).gridColumnStart).toBe("span 2");
+    await expect(tile).toHaveAttribute("data-row-span", "1");
+    await expect(getComputedStyle(tile).gridRowStart).toBe("span 2");
+    await expect(tile).toHaveAttribute("data-shape", "module");
+    await userEvent.click(dial);
+    for (const [key, value] of [["{Home}", "0"], ["{End}", "100"], ["{Home}{PageUp}{PageUp}{PageUp}{PageUp}{PageUp}", "50"]]) {
+      await userEvent.keyboard(key);
+      await expect(dial).toHaveAttribute("aria-valuenow", value);
+      const box = tile.getBoundingClientRect();
+      const knob = dial.getBoundingClientRect();
+      await expect(knob.width).toBeGreaterThanOrEqual(44);
+      await expect(knob.height).toBeGreaterThanOrEqual(44);
+      const button = canvas.getByRole("button", { name: /Press Adjacent button/ }).getBoundingClientRect();
+      for (const selector of [".tile-primary", ".tile-icon", ".tile-label", ".dial-face", ".volume-readout"]) {
+        const part = tile.querySelector(selector)!.getBoundingClientRect();
+        await expect(part.left).toBeGreaterThanOrEqual(box.left - 1);
+        await expect(part.right).toBeLessThanOrEqual(box.right + 1);
+        await expect(part.top).toBeGreaterThanOrEqual(box.top - 1);
+        await expect(part.bottom).toBeLessThanOrEqual(box.bottom + 1);
+        await expect(part.right <= button.left || part.left >= button.right || part.bottom <= button.top || part.top >= button.bottom).toBe(true);
+      }
+      const label = tile.querySelector(".tile-label")!.getBoundingClientRect();
+      const readout = tile.querySelector(".volume-readout")!.getBoundingClientRect();
+      await expect(knob.top - label.bottom).toBeGreaterThanOrEqual(6);
+      await expect(readout.top - knob.bottom).toBeGreaterThanOrEqual(6);
+    }
   },
 };
 

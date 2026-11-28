@@ -886,6 +886,64 @@ try {
     check(`Glass rendering preserves saved ${columnSpan}x${rowSpan} sizing`, await sizingPage.eval(`(() => { const c = JSON.parse(localStorage.getItem('deck.local.v1')).pages[0].sections[0].controls[3]; return c.columnSpan === ${columnSpan} && c.rowSpan === ${rowSpan}; })()`));
   }
 
+  // A saved one-cell dial must use the shared minimum beside a real button, including narrow editor/preview.
+  const dialDeck = structuredClone(sizingDeck);
+  dialDeck.pages[0].sections = [{ id: 'dials', name: 'Dials', theme: 'glass', controls: [
+    { id: 'dial', action: 'volume', label: 'Very long speaker volume label', presentation: 'dial', volume: 100 },
+    { id: 'neighbor', action: 'mic-mute', label: 'Adjacent button', columnSpan: 1, rowSpan: 1 },
+  ] }];
+  const dialCheck = `(() => {
+    const tile = document.querySelector('[data-presentation="dial"]');
+    const box = tile.getBoundingClientRect();
+    const part = selector => tile.querySelector(selector).getBoundingClientRect();
+    const knob = part('.dial-face'), label = part('.tile-label'), readout = part('.volume-readout');
+    const neighbor = document.querySelector('[data-action="mic-mute"]').getBoundingClientRect();
+    const inside = r => r.left >= box.left - 1 && r.right <= box.right + 1 && r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+    const apart = (a, b, gap = 0) => a.right + gap <= b.left || b.right + gap <= a.left || a.bottom + gap <= b.top || b.bottom + gap <= a.top;
+    return ['.tile-primary', '.tile-icon', '.tile-label', '.dial-face', '.volume-readout'].every(s => inside(part(s)) && apart(part(s), neighbor))
+      && knob.top - label.bottom >= 6 && readout.top - knob.bottom >= 6
+      && knob.width >= 44 && knob.height >= 44
+      && tile.dataset.shape === 'module' && parseInt(tile.style.getPropertyValue('--column-span')) >= 2 && parseInt(tile.style.getPropertyValue('--row-span')) >= 2
+      && tile.querySelector('.dial-face').getAttribute('aria-label') === 'Very long speaker volume label'
+      && tile.parentElement.scrollWidth <= tile.parentElement.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth;
+  })()`;
+  for (const [columnSpan, rowSpan] of [[undefined, undefined], [1, 1], [1, 24], [2, 2], [2, 4], [3, 1], [3, 3], [4, 1], [4, 24]]) {
+    Object.assign(dialDeck.pages[0].sections[0].controls[0], { columnSpan, rowSpan });
+    await sizingPage.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sizingPage.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(dialDeck))}); location.hash = '#/'`);
+    await sizingPage.reload();
+    await sizingPage.waitFor("!!document.querySelector('.deck-section .dial-face')");
+    check(`Glass dial saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'} fits the actual editor`, await sizingPage.eval(dialCheck));
+    if (columnSpan === 1 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-dial-editor.png');
+    await sizingPage.eval(click('[aria-label="Open phone preview"]'));
+    await sizingPage.waitFor("!!document.querySelector('.phone-preview.is-landscape .dial-face')");
+    check(`Glass dial saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'} fits landscape preview`, await sizingPage.eval(dialCheck));
+    if (columnSpan === 1 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-dial-landscape.png');
+    await sizingPage.eval(clickText('.phone-preview-bar button', 'Portrait'));
+    check(`Glass dial saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'} fits portrait preview`, await sizingPage.eval(dialCheck));
+    if (columnSpan === 1 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-dial-portrait.png');
+    await sizingPage.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
+    check(`Glass dial saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'} fits a 320px phone`, await sizingPage.eval(dialCheck));
+    if (columnSpan === 1 && rowSpan === 1) {
+      await sizingPage.eval("document.querySelector('.dial-face').focus()");
+      for (const [key, code, value] of [['Home', 36, 0], ['End', 35, 100]]) {
+        await pressKey(sizingPage, key, key, code);
+        check(`Glass dial keyboard reaches ${value} without crowding the header or neighbor`, await sizingPage.eval(dialCheck) && await sizingPage.eval(`document.querySelector('.dial-face').getAttribute('aria-valuenow') === '${value}'`));
+      }
+      const knob = await sizingPage.eval(rectOf('.dial-face'));
+      await sizingPage.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: knob.cx, y: knob.cy }] });
+      await sizingPage.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: knob.cx, y: knob.cy + 75 }] });
+      await sizingPage.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      check('Glass dial touch drag reaches 50 and keeps all anatomy contained', await sizingPage.eval(dialCheck) && await sizingPage.eval("document.querySelector('.dial-face').getAttribute('aria-valuenow') === '50'"));
+      await sizingPage.screenshot('/tmp/zdeck-glass-dial-phone-320.png');
+    }
+    check(`Glass dial rendering never rewrites saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'}`, await sizingPage.eval(`JSON.stringify(JSON.parse(localStorage.getItem('deck.local.v1'))) === ${JSON.stringify(JSON.stringify(dialDeck))}`));
+    await sizingPage.eval("location.hash = '#/'");
+    await sizingPage.waitFor("!!document.querySelector('.deck-section .dial-face')");
+    check(`Glass dial saved ${columnSpan ?? 'auto'}x${rowSpan ?? 'auto'} fits the 320px editor with 44px targets`, await sizingPage.eval(dialCheck));
+    if (columnSpan === 1 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-dial-editor-320.png');
+  }
+
   await glassPhone.eval("window.__glassAppearances = []; new MutationObserver(records => { for (const record of records) window.__glassAppearances.push(record.target.dataset.appearance); }).observe(document.querySelector('.phone-shell'), { attributes: true, attributeFilter: ['data-appearance'] })");
   await glassPhone.send("Page.bringToFront");
   for (let step = 0; step < 6; step += 1) {

@@ -95,6 +95,20 @@ describe("remote phone command gating", () => {
     expect(volume).toMatchObject({ columnSpan: 4, rowSpan: 1 });
   });
 
+  it("applies the Glass dial minimum on the remote without rewriting the saved one-cell layout", () => {
+    const saved = structuredClone(deck);
+    const page = saved.pages.find(page => page.id === "page_media")!;
+    page.sections[0].theme = "glass";
+    const volume = page.sections[0].controls.find(control => control.action === "volume")!;
+    Object.assign(volume, { presentation: "dial", columnSpan: 1, rowSpan: 1 });
+    fixture.remote = makeRemote({ deck: saved });
+    const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
+    expect(html).toContain('--column-span:2;--row-span:2');
+    expect(html).toContain('data-column-span="1" data-row-span="1" data-shape="module"');
+    expect(html).toContain('class="dial-face" role="slider" tabindex="0" aria-label="Volume"');
+    expect(volume).toMatchObject({ presentation: "dial", columnSpan: 1, rowSpan: 1 });
+  });
+
   it("does not append routine volume instructions to the section scroller", () => {
     fixture.remote = makeRemote();
     const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));

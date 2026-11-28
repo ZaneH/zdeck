@@ -884,7 +884,8 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 /*
  * Presentation slot contract (theme stylesheet). A theme may own the visibility, size,
  * position, order and shape of these existing slots. It must not change the action, accessible
- * name, focus target, hit area, disabled/unknown/reading-failed semantics, or explicit spans.
+ * name, focus target, hit area or disabled/unknown/reading-failed semantics. Theme geometry
+ * may enforce minimum footprints without rewriting explicit saved spans.
  *   .tile-primary  container (button or static) for .tile-icon and .tile-label
  *   .tile-icon     action icon; .tile-label visual label (may be hidden when another name exists)
  *   .tile-volume   numeric track host; its native input keeps the gesture and value semantics
@@ -924,7 +925,7 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"]:not([data-presentation="button"]) {
   --glass-pill-inset: clamp(14px, 6cqw, 20px);
 }
-:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-primary {
+:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .tile-primary {
   position: absolute;
   inset: 0 var(--glass-pill-inset) auto;
   z-index: 2;
@@ -944,34 +945,11 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
   padding: 26px var(--glass-pill-inset) 4px;
 }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="toggle-button"] .tile-toggle { justify-content: center; gap: 8px; }
-/* Dial: label and reading on the left, the 48px gauge on the right. */
-:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .tile-primary { right: calc(var(--glass-pill-inset) + 56px); gap: 6px; }
-:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .tile-dial {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  padding: 0;
-  pointer-events: none;
-}
-:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .dial-face {
-  position: absolute;
-  top: 50%;
-  right: calc(var(--glass-pill-inset) - 6px);
-  transform: translateY(-50%);
-  pointer-events: auto;
-}
-:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .volume-readout {
-  position: absolute;
-  bottom: 6px;
-  left: var(--glass-pill-inset);
-  font-size: 18px;
-}
-
 /* Narrow phones shrink the one-row capsule header so its 44px body and label stay apart. */
 @container (max-width: 340px) {
   :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"]:not([data-presentation="button"]) { --glass-pill-inset: 14px; }
-  :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-primary { padding-top: 5px; }
-  :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-label { font-size: 13px; }
+  :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .tile-primary { padding-top: 5px; }
+  :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .tile-label { font-size: 13px; }
   :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .toggle-state { font-size: 10px; line-height: 1.1; }
 }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="module"][data-presentation="button"] .tile-primary { align-items: flex-start; justify-content: flex-end; padding: 18px; text-align: left; }
@@ -979,6 +957,11 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="module"]:not([data-presentation="button"]) .tile-primary { padding: 14px 18px 0; }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="module"] .tile-icon :is(svg, img) { width: 26px; height: 26px; }
 :is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-shape="module"] .tile-label { font-size: 14px; font-weight: 550; }
+
+/* Dial modules stack the label, 48px target and value, including at the smallest phone grid. */
+:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-presentation="dial"] .tile-icon :is(svg, img) { width: 18px; height: 18px; }
+:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-presentation="dial"] .tile-dial { flex-direction: column; justify-content: center; gap: 6px; padding: 6px 12px 10px; }
+:is(.deck-section, .phone-section)[data-appearance="glass"] .control-tile[data-presentation="dial"] .volume-readout { font-size: 18px; line-height: 1; text-align: center; }
 
 @property --control-fill { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
 

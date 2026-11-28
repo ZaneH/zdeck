@@ -57,10 +57,32 @@ describe("theme-owned control geometry", () => {
             expect(controlGeometry(control, "slider", theme))
               .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1, shape: "tile" });
           }
-          // Switching presentation also restores the stored sizing.
+          // Switching to a button restores stored sizing without the slider constraint.
+          expect(controlGeometry(control, "button", "dark"))
+            .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1, shape: "tile" });
+          expect(control).toEqual(saved);
+        }
+      }
+    }
+  });
+
+  it("gives Glass volume and plugin dials 2×2 modules without losing saved taller/larger spans", () => {
+    for (const action of ["volume", "plugin"] as const) {
+      for (const columnSpan of [undefined, ...Array.from({ length: MAX_COLUMN_SPAN }, (_, i) => i + 1)]) {
+        for (const rowSpan of [undefined, ...Array.from({ length: MAX_ROW_SPAN }, (_, i) => i + 1)]) {
+          const control: Control = action === "volume"
+            ? { id: "dial", label: "Level", action, volume: 50, columnSpan, rowSpan, presentation: "dial" }
+            : { id: "dial", label: "Level", action, pluginId: "studio", pluginAction: "level", pluginArgs: {}, columnSpan, rowSpan, presentation: "dial" };
+          const saved = structuredClone(control);
+          const columns = Math.max(2, columnSpan ?? 2);
+          const rows = Math.max(2, rowSpan ?? 2);
           expect(controlGeometry(control, "dial", "glass"))
-            .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1,
-              shape: (columnSpan ?? 1) > (rowSpan ?? 1) ? "capsule" : "module" });
+            .toEqual({ columns, rows, shape: "module" });
+          for (const theme of ["dark", "light", "terminal"] as const) {
+            expect(controlGeometry(control, "dial", theme))
+              .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1, shape: "tile" });
+          }
+          expect(controlGeometry(control, "button", "glass").columns).toBe(columnSpan ?? 1);
           expect(control).toEqual(saved);
         }
       }
