@@ -1,12 +1,12 @@
 # Theme directory and installation proposal
 
-Status: proposal, not an implemented package format or store. Glass and Wasteland Terminal are built-in appearances; neither is a downloadable plugin.
+Status: directory/source-preview foundation implemented; package installation remains a proposal. The registry has separate Plugins/Themes categories, built-in Glass and Wasteland Terminal entries, local standard-fixture screenshots and a theme source-preview submission tool. The app provides the shared Storybook fixture and screenshot exporter; see [theme development](theme-development.md). Glass and Wasteland Terminal remain built-in appearances, not downloadable plugins.
 
 ## Recommendation
 
-Keep Wasteland Terminal built in for this iteration. Prove the presentation across all controls before introducing downloaded themes. When theme packages exist, extend the existing static registry with a separate Themes category; keep its Git-backed review workflow, not accounts or a publishing service.
+Keep Wasteland Terminal built in for this iteration. Prove the presentation across all controls before introducing downloaded themes. The existing static registry now has a separate Themes category with its Git-backed review workflow, not accounts or a publishing service. Community submissions document source and standard previews; they are not installable packages.
 
-The existing registry at `../zdeck-registry` accepts executable plugin packages (`.zdx`), plugin records and signed plugin-install requests. Do not disguise a theme as a plugin or enable an install link before the desktop can validate and install its actual format. No registry records, downloads, signing or publication are added by this proposal.
+The registry at `../zdeck-registry` accepts executable plugin packages (`.zdx`), plugin records and signed plugin-install requests, separately from theme source-preview records. Do not disguise a theme as a plugin or enable an install link before the desktop can validate and install its actual format. No theme downloads, signing or publication are added by this proposal.
 
 ## Browse → preview → install → apply
 
@@ -27,6 +27,14 @@ The existing registry at `../zdeck-registry` accepts executable plugin packages 
 
 No new backend, ratings, account system, automatic publication or third-party code execution is needed.
 
+## Themes, controls and plugin widgets
+
+Theme authors style zDeck's existing controls; they do not reimplement sliders, dials, switches, buttons or their input behavior. zDeck owns accessibility, touch/keyboard handling, state delivery and safety gating. The standard Storybook fixture should render those real shared components, not a parallel implementation for screenshots.
+
+Plugins own integration behavior and may eventually expose widgets as well as actions and readings. For example, a Twitch plugin could supply bounded chat messages and a chat widget; that is functionality, not a theme. A widget would use host-provided panel, scrolling list, text, badge, button and input components so its content adopts the active deck/section theme. The host owns widget lifecycle, responsive layout, accessible interactions and delivery to the phone. Credentials and service connections stay on the desktop; the phone receives only the authorized data it needs.
+
+This is a proposed widget extension point, not an implemented plugin UI API. Start with host-rendered compositions of shared components rather than arbitrary plugin HTML/JavaScript in the phone. A genuinely custom renderer would require a separate isolation, resource-budget and versioning design. Theme packages must not introduce functionality, service connections or widget code. Widgets belong to their plugin's registry entry; themes remain a separate category.
+
 ## Package boundary: decide before building
 
 A token-only format is safer but cannot express every theme's presentation. Glass already changes geometry, label placement and slider orientation; a whitelist of colors alone is not a faithful package for it.
@@ -46,9 +54,9 @@ This deliberately limits independent creators to supported presentation presets.
 
 ## Implementation gates
 
-1. **Current iteration:** built-in Wasteland Terminal, restart/schema/remote coverage, all-control visual fixtures and this proposal. No download claim.
+1. **Implemented foundation:** built-in Wasteland Terminal; restart/schema/remote coverage; shared all-control Storybook fixture and local screenshot exporter; separate registry Themes browsing/detail, whole-catalogue validation, and source-preview PR tooling. No theme download claim.
 2. **Package foundation:** versioned data parser and limits, immutable identity, import/preview/apply/remove, migration, atomic persistence, export and phone delivery. Tests cover malformed/untrusted files, unavailable versions, rollback and offline use.
-3. **Directory:** theme records, local curated previews, author tooling/docs and verified exact-byte downloads. Whole-catalogue validation remains mandatory.
+3. **Package directory extension:** build on the implemented source-preview records, local curated previews and author tooling/docs with authenticated, verified exact-byte package downloads. Whole-catalogue validation remains mandatory.
 4. **Desktop handoff:** authenticated theme release records, explicit install confirmation and cross-platform native verification before enabling one-click install.
 
-Open product choice: is preset-based customization sufficient for community themes, or must authors invent entirely new control layouts? Resolve that before committing to a package format. Neither approach should compromise remote-phone parity.
+Open product choice: how much control over the visual arrangement of existing slots should theme authors have beyond supported presets? This is presentation customization, not a requirement to recreate controls or add functionality. Resolve that before committing to a package format. Neither themes nor future plugin widgets should compromise remote-phone parity.

@@ -1,0 +1,84 @@
+# Theme development
+
+Status: the four built-in appearances only — Dark, Light, Glass and Wasteland Terminal. There is no theme
+package format, download or install yet; see [theme store](theme-store.md) for that proposal. Nothing here
+adds one, and a screenshot is not an installable theme.
+
+## How an appearance is built today
+
+An appearance is source code in the app, not data:
+
+- `THEMES` in `src/lib/types.ts` is a closed enum. `applyTheme(theme, accent)` in `src/lib/theme.ts` writes
+  `data-theme` on `<html>` and the `--accent` custom property; the app persists the chosen value.
+- `src/styles.css` defines each appearance as a token block, `[data-theme="glass"], [data-appearance="glass"] { … }`:
+  colors, borders, radii, shadows, backgrounds and material filters. The same block is reachable through
+  `data-theme` (a scoped section or deck) and `data-appearance` (the resolved appearance of a section or tile).
+- Presentation rules are per appearance: `[data-appearance="terminal"] .control-tile { … }` changes geometry,
+  label placement, slider orientation and material. These are opt-in selectors, not inherited from the deck theme.
+- The app owns the controls, DOM, input handling, hit areas, focus, accessible names and the disabled/unknown/reading-failed semantics. Theme authors do not reimplement sliders, dials or switches. An appearance may restyle and rearrange the stable presentation slots listed in `src/styles.css` while preserving their behavior and accessibility. New integration functionality belongs to plugins, not themes.
+
+To add an appearance: add the token block and its presentation rules, add the id to `THEMES`, add the Storybook
+toolbar item in `.storybook/preview.tsx`, and add it to the standard fixture and exporter below so its stories and screenshots
+exist. Also update the Rust `Theme` enum in `crates/zdeck-schema/src/deck.rs`, global and per-section Appearance menus, theme-color mapping, and schema/persistence/remote tests. This is an app-source change, not a supported custom-theme installation workflow. Keep new effects within what the existing tests already check (contrast, focus, reduced motion, forced
+colors).
+
+## The standard fixture is the developer workspace
+
+`src/components/ThemePreview.stories.tsx` (`Themes/Theme preview`) renders one fixed sample deck for every
+appearance, as `Desktop` and `Phone` stories per built-in id:
+
+- one control for each presentation: button, slider, dial, toggle switch, toggle button and a numeric reading;
+- normal active/inactive states, plus a toggle whose state is unknown and a reading that failed;
+- the same controls, labels and captions in every appearance — only the appearance changes, so a preview shows
+  the theme and not different content;
+- local preview semantics: nothing is executed or sent, and the controls stay keyboard reachable;
+- the fixture scopes the appearance with `data-theme`/`data-appearance`, so the story's `theme` arg wins over the
+  Storybook toolbar theme on the preview surface.
+
+Each story's interaction test asserts that all six presentations render, that the appearance tokens resolve at the
+fixture boundary (the page outside keeps its own appearance), that appearance-specific presentation applies
+(Glass material, Terminal geometry and mono face) and that no tile overflows the viewport or its section.
+
+```bash
+npm run storybook                                    # browse Themes/Theme preview
+CHROME_BIN="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+  npx vitest run --project=storybook ThemePreview     # the same checks, headless
+```
+
+`npm run storybook:test` runs every story, including these.
+
+## Screenshots for a registry or a review
+
+The exporter drives the standard stories in an already running local Storybook. It never fetches a remote site,
+adds no dependency and writes outside the app; commit nothing it produces.
+
+```bash
+# In one terminal: npm run storybook (stop it when finished).
+# In another terminal:
+npm run theme:previews -- --url http://127.0.0.1:6006 --out /tmp/zdeck-theme-previews --themes glass,terminal
+```
+
+- `--url` is required and must be a local Storybook (`localhost`, `127.0.0.1` or `::1`); other hosts are refused.
+  `--out` is required; `--themes` takes built-in ids and defaults to all four.
+- Playwright launches your installed Chromium-based browser through `CHROME_BIN`. On macOS the Brave path
+  (`/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`) is the default; elsewhere `CHROME_BIN` is required.
+- Fixed viewports: desktop 1200×800, phone 390×844, device scale factor 1. The run asks for reduced motion, `en-US`
+  and UTC so the reading caption is stable, waits for fonts and two rendered frames, and disables CSS animations
+  while capturing.
+- Before writing a file it checks that the requested appearance is the one rendered, that all six presentations are
+  present and that nothing overflows the viewport. A failed check aborts instead of shipping a wrong picture.
+- Output: `zdeck-theme-<theme>-<viewport>.png` for each requested id, plus `manifest.json` listing the story id,
+  viewport, pixel dimensions, byte size and SHA-256 of every file, so a consumer can pair exact bytes with a
+  release.
+
+Quote the dimensions and hashes with the files. They describe these PNGs, not the app on a phone or in the
+Tauri webview.
+
+## Validation limits
+
+- These stories and screenshots cover the browser at two sizes. They are not accessibility, performance or native
+  parity evidence; check keyboard and screen-reader behaviour, forced colors, reduced motion, long labels, large
+  decks and the desktop/phone shells separately.
+- Only the four built-in ids load in the app. There is no custom theme package, import or install. The registry's source-preview workflow documents source changes and screenshots for review; it does not make them installable. Do not present an exported PNG as an installable theme or infer package support from it.
+- A future appearance format still needs a validated, bounded data parser and the platform evidence described in
+  [theme store](theme-store.md); a picture of a theme is not that evidence.
