@@ -27,7 +27,7 @@ interface ControlTileProps {
   selected?: boolean;
   pressed?: boolean;
   disabled?: boolean;
-  /** Disabled only while a volume gesture is in flight; keep the safety state without a dimmed flash. */
+  /** Brief command gating keeps the safety state without a dimmed flash. */
   transientDisabled?: boolean;
   /** In-flight action; shown separately from disabled controls. */
   busy?: boolean;
@@ -41,7 +41,7 @@ interface ControlTileProps {
   onPrimary?: () => void;
   onRefresh?: () => Promise<void>;
   onVolumeChange?: (value: number) => void;
-  /** Numeric targets stream during live gestures; preview targets fire on release. Never fires on cancel/blur. */
+  /** Desktop live targets stream; phone/preview targets commit on release. Never commits on cancel/blur. */
   onVolumeCommit?: (value: number) => void;
 }
 
@@ -88,7 +88,7 @@ export function ControlTile({
     valueRef.current = value;
     setLocalValue(value);
     onVolumeChange?.(value);
-    if (!disabled && semantics !== "preview" && (volumeGesture.current || dialPointer.current)) commitValue(value);
+    if (!disabled && semantics === "live" && (volumeGesture.current || dialPointer.current)) commitValue(value);
   };
   const dialPointer = useRef<{ id: number; y: number; value: number } | null>(null);
   const remote = semantics === "remote";

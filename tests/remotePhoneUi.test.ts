@@ -19,7 +19,7 @@ const makeRemote = (overrides: Record<string, unknown> = {}) => ({
 const tileClass = (html: string, action: string) =>
   html.match(new RegExp(`class="([^"]*)"[^>]*data-action="${action}"`))?.[1] ?? "";
 
-describe("remote phone transient volume gating", () => {
+describe("remote phone command gating", () => {
   beforeEach(() => {
     vi.stubGlobal("window", { location: { protocol: "https:" } });
   });
@@ -41,13 +41,15 @@ describe("remote phone transient volume gating", () => {
     expect(html).toContain("Target value for Volume");
   });
 
-  it("keeps controls visibly disabled during a button action", () => {
+  it("keeps other controls safely disabled without dimming during a button action", () => {
     fixture.remote = makeRemote({ busyControlId: "ctl_media_pause" });
     const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
     for (const action of ["volume", "media-play-pause"]) {
       expect(tileClass(html, action)).toContain("is-disabled");
-      expect(tileClass(html, action)).not.toContain("is-transient-disabled");
     }
+    expect(tileClass(html, "volume")).toContain("is-transient-disabled");
+    expect(tileClass(html, "media-play-pause")).toContain("is-busy");
+    expect(html).toMatch(/type="range"[^>]*disabled=""/);
   });
 
   it("keeps controls visibly disabled when the connection is unavailable", () => {

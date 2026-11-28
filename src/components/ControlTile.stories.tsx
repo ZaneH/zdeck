@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, waitFor } from "storybook/test";
 import { ControlTile } from "./ControlTile";
 import type { Control, Presentation } from "../lib/types";
 import type { PluginSnapshots } from "../lib/plugin";
@@ -76,4 +77,30 @@ export const PresentationStates: Story = { render: () => <div style={{ display: 
   <PresentationExample presentation="toggle-switch" unknown />
   <PresentationExample presentation="toggle-button" disabled />
 </div> };
+export const BriefCommandGating: Story = {
+  render: () => <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, maxWidth: 700 }}>
+    {([controls[0], { ...controls[3], presentation: "dial" },
+      { id: "power", action: "plugin", label: "Power", pluginId: "mixer", pluginAction: "power", pluginArgs: { enabled: false }, presentation: "toggle-switch" },
+    ] as Control[]).map(control => <ControlTile key={control.id} control={control} plugins={presentationPlugins}
+      variant="phone" semantics="remote" volume={50} disabled transientDisabled />)}
+    <ControlTile control={{ id: "unknown-power", action: "plugin", label: "Unknown power", pluginId: "mixer", pluginAction: "power", pluginArgs: { enabled: false }, presentation: "toggle-switch" }}
+      plugins={{ mixer: { ...presentationPlugins.mixer, state: {} } }} variant="phone" semantics="remote" volume={50} disabled transientDisabled />
+  </div>,
+  play: async ({ canvasElement }) => {
+    await waitFor(() => {
+      for (const tile of canvasElement.querySelectorAll(".control-tile")) expect(getComputedStyle(tile).opacity).toBe("1");
+    });
+    expect(canvasElement.querySelector<HTMLButtonElement>("button.tile-primary")!.disabled).toBe(true);
+    const dial = canvasElement.querySelector<HTMLElement>(".dial-face")!;
+    expect(dial.getAttribute("aria-disabled")).toBe("true");
+    expect(getComputedStyle(dial).opacity).toBe("1");
+    const toggle = canvasElement.querySelector<HTMLButtonElement>(".tile-toggle")!;
+    expect(toggle.disabled).toBe(true);
+    expect(getComputedStyle(toggle).opacity).toBe("1");
+    const unknown = canvasElement.querySelector<HTMLButtonElement>(".control-tile:last-child .tile-toggle")!;
+    expect(unknown.disabled).toBe(true);
+    expect(unknown.textContent).toContain("State unknown");
+    expect(getComputedStyle(unknown).opacity).toBe("0.55");
+  },
+};
 export const NarrowVolume: Story = { render: () => <div style={{ width: 240, maxWidth: "100%" }}><TileExample control={controls[3]} /></div> };

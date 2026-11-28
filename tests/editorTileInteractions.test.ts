@@ -23,7 +23,7 @@ describe("Native slider gestures", () => {
     input.props.onPointerDown(pointer);
     expect(currentTarget.setPointerCapture).not.toHaveBeenCalled();
     input.props.onChange({ target: currentTarget });
-    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 0 : 1);
+    expect(commit).toHaveBeenCalledTimes(semantics === "live" ? 1 : 0);
     input.props.onPointerUp(pointer);
     input.props.onPointerUp(pointer);
     expect(commit).toHaveBeenCalledExactlyOnceWith(75);
@@ -61,12 +61,23 @@ describe("Glass whole-pill slider gestures", () => {
     input.props.onPointerMove(pointer(currentTarget, 150));
     input.props.onPointerMove(pointer(currentTarget, 150));
     expect(change.mock.calls).toEqual([[25], [75]]);
-    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 0 : 2);
+    expect(commit).toHaveBeenCalledTimes(semantics === "live" ? 2 : 0);
     input.props.onPointerUp(pointer(currentTarget, 150));
     input.props.onPointerUp(pointer(currentTarget, 150));
     expect(commit).toHaveBeenLastCalledWith(75);
-    expect(commit).toHaveBeenCalledTimes(semantics === "preview" ? 1 : 2);
+    expect(commit).toHaveBeenCalledTimes(semantics === "live" ? 2 : 1);
     expect(currentTarget.releasePointerCapture).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("keeps long phone drags local and sends only the final target on release", () => {
+    const commit = vi.fn(), change = vi.fn(), input = slider({ semantics: "remote", onVolumeCommit: commit, onVolumeChange: change }), currentTarget = target();
+    input.props.onPointerDown(pointer(currentTarget, 200));
+    for (let index = 0; index < 200; index++) input.props.onPointerMove(pointer(currentTarget, 100 + index % 200));
+    input.props.onPointerMove(pointer(currentTarget, 154));
+    expect(change.mock.calls.length).toBeGreaterThan(100);
+    expect(commit).not.toHaveBeenCalled();
+    input.props.onPointerUp(pointer(currentTarget, 154));
+    expect(commit).toHaveBeenCalledExactlyOnceWith(73);
   });
 
   it("clamps captured drags outside the pill and rounds to the volume step", () => {
@@ -92,7 +103,7 @@ describe("Glass whole-pill slider gestures", () => {
   });
 
   it.each(["onPointerCancel", "onLostPointerCapture", "onBlur"])("does not commit after %s", (cancel) => {
-    const commit = vi.fn(), input = slider({ onVolumeCommit: commit }), currentTarget = target();
+    const commit = vi.fn(), input = slider({ semantics: "remote", onVolumeCommit: commit }), currentTarget = target();
     input.props.onPointerDown(pointer(currentTarget, 100));
     input.props[cancel](pointer(currentTarget, 100));
     input.props.onPointerMove(pointer(currentTarget, 300));
@@ -108,6 +119,33 @@ describe("Glass whole-pill slider gestures", () => {
     expect(currentTarget.setPointerCapture).not.toHaveBeenCalled();
     expect(change).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
+  });
+});
+
+describe("Phone dial commits", () => {
+  it.each([false, true])("keeps dial movement local until release (cancelled=%s)", (cancelled) => {
+    const commit = vi.fn();
+    const dial = ControlTile({ control, variant: "phone", semantics: "remote", volume: 50,
+      onVolumeCommit: commit }).props.children[3].props.children[2];
+    const currentTarget = { focus: vi.fn(), setPointerCapture: vi.fn() };
+    const pointer = event({ pointerId: 1, isPrimary: true, button: 0, clientY: 200, currentTarget });
+    dial.props.onPointerDown(pointer);
+    dial.props.onPointerMove({ ...pointer, clientY: 170 });
+    expect(commit).not.toHaveBeenCalled();
+    if (cancelled) dial.props.onPointerCancel();
+    dial.props.onPointerUp(pointer);
+    if (cancelled) expect(commit).not.toHaveBeenCalled();
+    else expect(commit).toHaveBeenCalledExactlyOnceWith(70);
+  });
+
+  it("commits keyboard changes only on key release", () => {
+    const commit = vi.fn();
+    const dial = ControlTile({ control, variant: "phone", semantics: "remote", volume: 50,
+      onVolumeCommit: commit }).props.children[3].props.children[2];
+    dial.props.onKeyDown(event({ key: "ArrowUp" }));
+    expect(commit).not.toHaveBeenCalled();
+    dial.props.onKeyUp(event({ key: "ArrowUp" }));
+    expect(commit).toHaveBeenCalledExactlyOnceWith(51);
   });
 });
 
