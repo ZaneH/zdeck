@@ -1,11 +1,13 @@
-# Theme package format (foundation)
+# External theme packages
 
-Status: format parser plus a native catalog storage foundation. Theme packages are **not
-installable through the app** yet: no picker, IPC command, preview, apply/remove flow or phone
-delivery exists, and the catalog is not opened at launch. This document describes the bounded data
-contract implemented in `src/lib/themePackage.ts` and
-`crates/zdeck-schema/src/theme_package.rs`, and the host-owned catalog primitive in
-`src-tauri/src/theme_store.rs`.
+Status: local desktop import, preview, explicit install, apply/remove, persistent catalog, deck v4
+references and authenticated phone delivery are implemented (unreleased). Registry downloads and
+one-click installation are not implemented. Manual native verification on all three operating
+systems remains a release gate. This document describes the bounded data contract implemented
+in `src/lib/themePackage.ts` and `crates/zdeck-schema/src/theme_package.rs`, the host-owned catalog
+primitive in `src-tauri/src/theme_store.rs`, and the renderer flow in
+`src/lib/customThemes.ts`, `src/components/ThemesSettingsCard.tsx`, `src/lib/theme.ts` and
+`src/lib/remotePhone.ts`.
 
 ## Contract
 
@@ -50,8 +52,8 @@ asset, HTML, JavaScript or font field. A package also must not contain its own d
 ## Parsing
 
 - TypeScript: `parseThemePackageBytes(bytes: Uint8Array)` returns a validated `ThemePackage` or
-  `null`. `validateThemePackage(value: unknown)` validates a parsed value. Both reject BOM, invalid
-  UTF-8, malformed JSON, unknown fields and invalid values.
+  `null`, rejecting BOM, invalid UTF-8, malformed JSON and duplicate keys.
+  `validateThemePackage(value: unknown)` validates a parsed value’s fields and values.
 - Rust: `parse_theme_package(bytes: &[u8]) -> Option<ThemePackage>` does the same through
   `serde` with `deny_unknown_fields` plus explicit validation.
 
@@ -59,7 +61,19 @@ Both implementations share the same valid sample bytes in
 `tests/fixtures/theme-packages/midnight-maze.json`. The sample package
 `packages/themes/midnight-maze.zdeck-theme.json` maps the Midnight Maze prototype palette to safe
 tokens (for example maze `#3158ff`, pellet `#ffe34b`, tile surface `#101a38`). Authorship and
-licence come from this repository (`Zane Helton`, MIT). The sample is format evidence only.
+licence come from this repository (`Zane Helton`, MIT).
+
+## Try Midnight Maze
+
+1. Open the desktop app, then **Settings → General → Installed themes**.
+2. Choose **Import theme file…**, then `packages/themes/midnight-maze.zdeck-theme.json` from this repository.
+3. Inspect the local preview and choose **Install theme**. Your current appearance stays unchanged.
+4. Choose **Use for deck**, or select the installed version in a section’s Appearance menu.
+5. To remove it, explicitly replace its deck and section references with built-in appearances first.
+   The native host also refuses removal while Trash still references the package.
+
+The example supplies colors, radii and a sparse host-rendered maze motif. Pixel icons remain a
+separate prototype asset set, not part of this package or an installed icon pack.
 
 ## Custom theme references
 
@@ -71,10 +85,12 @@ validated separately from package bytes:
 ```
 
 `CustomThemeReference` accepts exactly `id`, `version` and `digest`; `id` and `version` follow the
-package rules and `digest` is 64 lowercase hexadecimal characters. The reference is defined here,
-but deck integration does not exist yet. A package never supplies its own reference digest.
+package rules and `digest` is 64 lowercase hexadecimal characters. Deck schema v4 stores these
+references on the deck and optionally its sections; v1–v3 documents migrate in memory without an
+automatic rewrite. Older apps cannot read v4 decks: update desktop and phone assets together.
+A package never supplies its own reference digest.
 
-## Native catalog storage (foundation)
+## Native catalog storage
 
 The host owns `<app-data>/themes.v1.json`. The renderer never supplies this path. The catalog
 retains each package's **exact source bytes as a UTF-8 string**, validates them with
@@ -101,22 +117,63 @@ catalog or settings problem cannot prevent launch.
 
 `ThemeStore` exposes asynchronous `list()`, `install(bytes)` and
 `remove(reference, in_use_references)`. Errors are typed and serializable. Removal refuses any
-reference supplied by the trusted caller, including Trash; it never edits a deck. Wiring into
-launch, IPC, deck validation or migration is a later stage.
+reference supplied by the trusted caller, including Trash; it never edits a deck. Native
+commands obtain this list from the authoritative saved deck, not renderer claims. Each command
+requires the local main editor window; the renderer never supplies a filesystem path.
+
+## Renderer import, preview, install, apply and remove
+
+`ThemesSettingsCard` lists installed packages with id, version, author, licence, source text and
+the exact SHA-256 digest. Importing picks one local source file, validates its bounded bytes and
+renders a local preview using the real shared `ControlTile`; only the explicit **Install theme**
+action calls the native installer. Installation never applies a theme and never arms controls.
+
+Applying is explicit and uses the existing deck history and save path:
+
+- **Use for deck** stores an exact `CustomThemeReference` through `setCustomTheme`.
+- The deck Appearance dropdown lists built-ins plus installed packages under their exact
+  `id@version#digest` identity. The section menu does the same through `setSectionCustomTheme`.
+- Removing an installed theme is disabled with an explanation while the current deck uses it.
+  Choosing a built-in appearance explicitly replaces that selection’s package reference, not the
+  installed package or references in other sections.
+- A missing or different-digest reference keeps its deck/section reference and shows a visible
+  recovery choice: import the exact package or explicitly choose a built-in appearance. It never
+  substitutes another version or digest, and it never clears a reference silently.
+- Catalog load failures stay visible in Settings but do not block launch. Built-ins keep working.
+
+Resolution is shared by the editor, local phone preview and remote phone. A package may map only
+the 15 documented hex colors and two integer radii to host tokens; it cannot supply CSS, selectors,
+URLs or assets. The package `base` still owns geometry, focus and interaction behavior. The sparse
+maze/pellet motif is host-owned SVG generated from validated `maze` and `pellet` colors, drawn at
+320px with `.12`/`.25` opacity only on a resolved custom deck/section/phone surface. Switching back
+to a built-in appearance removes every inline custom property from the root.
+
+## Phone delivery client
+
+The authenticated `GET /api/v1/state`, reading refreshes and websocket snapshots may include
+`externalThemes: Array<{ reference, source }>` and an optional `themeError`. The client:
+
+- accepts at most 16 entries and at most 128 KiB of serialized `externalThemes`;
+- re-validates every package source (untrusted even when the authenticated desktop supplied it),
+  requires the source id/version to match the exact reference and rejects duplicate identities;
+- fails closed on a malformed payload rather than rendering a silently different theme;
+- keeps the deck's reference and shows a visible warning when a definition is absent, including
+  after reconnect.
 
 ## Limitations and next stages
 
-- No in-app installation, file picker, registry download, signature verification, preview,
-  apply/remove flow, migration, export or phone delivery. The native catalog primitive is not yet
-  wired to launch, IPC or the deck UI.
-- Built-in appearances remain the only selectable themes. Existing deck validation still rejects
-  unknown theme values; adding custom IDs requires a deliberate schema migration.
+- No registry download, signing, deck export/import or one-click install is added here.
+- Oversized appearance delivery drops optional definitions with a visible warning rather than
+  disconnecting an otherwise valid phone snapshot. Saved references remain unchanged.
+- Native removal checks the saved deck before catalog removal; a concurrent deck edit can introduce
+  a missing reference afterward. Recovery preserves that reference and asks for the exact package.
+- Built-in appearances remain the only values in the `Theme` enum. Custom identity stays in
+  `CustomThemeReference`; control tiles receive only the validated built-in base for geometry.
 - Authenticated release/catalog identity is future work. A SHA-256 digest proves byte identity,
   not authorship. Do not treat a parsed or installed package as trusted provenance.
-- Accessibility, contrast, layout presets and cross-platform behavior still need review before a
-  package can be offered to users.
-- Future work must keep installation atomic, preserve the current appearance on failure, and make
-  unavailable references recoverable rather than silently replaced.
+- Contrast, forced colors and reduced motion use the fixed base palette and host tokens; a package
+  cannot add motion or unrestricted styling. Native three-platform parity is not claimed by these
+  browser/unit checks.
 
 Checks used for this foundation:
 

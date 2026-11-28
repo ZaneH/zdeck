@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { effectivePresentation } from "../lib/presentations";
 import { controlVolume } from "../lib/actions";
 import { activePage, findPage, pageControls } from "../lib/deck";
-import { sectionAppearance, sectionStyle } from "../lib/sections";
+import { sectionStyle } from "../lib/sections";
+import { resolveDeckTheme, resolveSectionTheme } from "../lib/customThemes";
+import type { InstalledTheme } from "../lib/customThemes";
 import { applyTheme } from "../lib/theme";
 import { useRemotePhone } from "../lib/useRemotePhone";
 import type { RemotePhase } from "../lib/remotePhone";
@@ -179,12 +181,14 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const page = deck
     ? (remote.pageId ? findPage(deck, remote.pageId) ?? activePage(deck) : activePage(deck))
     : null;
-  const theme = deck?.theme;
   const accent = deck?.accent;
+  const externalThemes: InstalledTheme[] = remote.externalThemes ?? [];
+  const deckTheme = deck ? resolveDeckTheme(deck, externalThemes) : null;
+  const theme = deckTheme?.appearance;
   // Unconditional: this component returns early for pairing, so keep the hook above those paths.
   useEffect(() => {
-    if (theme && accent) applyTheme(theme, accent);
-  }, [theme, accent]);
+    if (theme && accent) applyTheme(theme, accent, deckTheme?.custom?.package.appearance ?? null);
+  }, [theme, accent, remote.externalThemes, deck?.customTheme?.digest]);
   const navigation = usePhoneNavigation({
     pageId: showActivity ? ACTIVITY_PAGE_ID : page?.id ?? "",
     pageIds: [...(deck?.pages.map((item) => item.id) ?? []), ACTIVITY_PAGE_ID],
@@ -280,10 +284,13 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
   const transientCommand = active && remote.busyControlId !== null;
   const latestActivity = remote.activity[0];
   const surfaceSection = page.sections[navigation.sectionIndex] ?? page.sections[0];
-  const surface = sectionAppearance(deck, surfaceSection);
+  const surface = resolveSectionTheme(deck, surfaceSection, externalThemes);
 
   return (
-    <div className="remote-app" data-state={remote.phase} data-appearance={surface.theme} style={sectionStyle(surfaceSection)}>
+    <div className="remote-app" data-state={remote.phase} data-appearance={surface.appearance}
+      data-custom-theme={surface.custom ? "true" : undefined}
+      data-custom-motif={surface.motif ?? undefined}
+      style={{ ...sectionStyle(surfaceSection), ...surface.style }}>
       <header className="phone-header remote-header">
         <div className="phone-brand"><BrandMark /></div>
         {active ? null : (
@@ -298,13 +305,19 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
           <h1>{showActivity ? "Activity" : page.name}</h1>
         </div>
 
-        {!showActivity && page.sections.map((section) => (
+        {!showActivity && page.sections.map((section) => {
+          const resolved = resolveSectionTheme(deck, section, externalThemes);
+          return (
           <section
             key={section.id} className="phone-section" data-phone-section={section.id}
-            data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
+            data-theme={section.theme} data-appearance={resolved.appearance}
+            data-custom-theme={resolved.custom ? "true" : undefined}
+            data-custom-motif={section.customTheme ? resolved.motif ?? undefined : undefined}
+            style={{ ...sectionStyle(section), ...resolved.style }}
             aria-labelledby={`remote-section-${section.id}`}
           >
             <h2 id={`remote-section-${section.id}`} className="section-heading" data-redundant={section.name === page.name || undefined}>{section.name}</h2>
+            {resolved.missing ? <p className="theme-recovery" role="alert">Installed theme unavailable; this section uses its built-in base.</p> : null}
             <div className="phone-grid">
               {section.controls.map((control) => (
                 <ControlTile
@@ -313,7 +326,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
                   plugins={remote.plugins}
                   onRefresh={control.presentation === "value" ? () => remote.refreshValue(control.id) : undefined}
                   variant="phone"
-                  appearance={sectionAppearance(deck, section).theme}
+                  appearance={resolved.appearance}
                   semantics="remote"
                   disabled={controlsDisabled && !(active && remote.busyControlId === control.id && ["slider", "dial"].includes(effectivePresentation(control, remote.plugins)))}
                   transientDisabled={transientCommand && remote.busyControlId !== control.id}
@@ -329,7 +342,8 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
               ))}
             </div>
           </section>
-        ))}
+          );
+        })}
 
         {!showActivity && pageControls(page).length === 0 ? (
           <p className="empty-note">This page has no controls yet.</p>
@@ -344,6 +358,12 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
         {remote.warning ? (
           <p className="remote-warning" data-kind="unknown" role="status" aria-live="polite">
             {remote.warning}
+          </p>
+        ) : null}
+
+        {remote.themeError ? (
+          <p className="remote-warning" data-kind="theme" role="status" aria-live="polite">
+            {remote.themeError}
           </p>
         ) : null}
 

@@ -1,8 +1,10 @@
 # Theme development
 
-Status: the five built-in appearances only — Dark, Light, Glass, Wasteland Terminal and Classic Macintosh. There is no theme
-package format, download or install yet; see [theme store](theme-store.md) for that proposal. Nothing here
-adds one, and a screenshot is not an installable theme.
+Status: five built-in appearances — Dark, Light, Glass, Wasteland Terminal and Classic Macintosh —
+plus bounded external theme packages through local desktop import (unreleased). See
+[external theme packages](theme-packages.md) for authoring and installation; registry downloads
+remain future work. The source-development guide below covers host-owned presentation behavior,
+not permission for packages to supply CSS. A screenshot is not an installable theme.
 
 ## How an appearance is built today
 
@@ -126,6 +128,6 @@ Tauri webview.
 - These stories and screenshots cover the browser at two sizes. They are not accessibility, performance or native
   parity evidence; check keyboard and screen-reader behaviour, forced colors, reduced motion, long labels, large
   decks and the desktop/phone shells separately.
-- Only the five built-in ids load in the app. There is no custom theme package, import or install. The registry's source-preview workflow documents source changes and screenshots for review; it does not make them installable. Do not present an exported PNG as an installable theme or infer package support from it.
+- The five built-in ids remain the closed base-theme enum. External packages use separate exact-version references and the bounded [package format](theme-packages.md), imported locally in the desktop app. The registry’s source-preview records still do not provide package downloads. Do not present an exported PNG as an installable theme or infer package support from it.
 - A future appearance format still needs a validated, bounded data parser and the platform evidence described in
   [theme store](theme-store.md); a picture of a theme is not that evidence.

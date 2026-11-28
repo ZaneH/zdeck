@@ -1,10 +1,10 @@
 # Theme directory and installation proposal
 
-Status: directory/source-preview foundation implemented; package installation remains a proposal. The registry has separate Plugins/Themes categories, built-in Glass and Wasteland Terminal entries, local standard-fixture screenshots and a theme source-preview submission tool. The app provides the shared Storybook fixture and screenshot exporter; see [theme development](theme-development.md). Glass and Wasteland Terminal remain built-in appearances, not downloadable plugins.
+Status: directory/source-preview foundation implemented; local desktop theme-package import, preview, explicit install, apply/remove, persistent storage and authenticated phone delivery are implemented (unreleased). Registry downloads and authenticated one-click installation remain proposals. The registry has separate Plugins/Themes categories, built-in Glass and Wasteland Terminal entries, local standard-fixture screenshots and a theme source-preview submission tool. The app provides the shared Storybook fixture and screenshot exporter; see [theme development](theme-development.md). Glass and Wasteland Terminal remain built-in appearances, not downloadable plugins.
 
 ## Recommendation
 
-Keep Wasteland Terminal built in for this iteration. Prove the presentation across all controls before introducing downloaded themes. The existing static registry now has a separate Themes category with its Git-backed review workflow, not accounts or a publishing service. Community submissions document source and standard previews; they are not installable packages.
+Keep the five default appearances built in. External themes now have a bounded local import path; verify native behavior on all three operating systems before enabling registry downloads. The existing static registry now has a separate Themes category with its Git-backed review workflow, not accounts or a publishing service. Community submissions document source and standard previews; they are not installable packages.
 
 The registry at `../zdeck-registry` accepts executable plugin packages (`.zdx`), plugin records and signed plugin-install requests, separately from theme source-preview records. Do not disguise a theme as a plugin or enable an install link before the desktop can validate and install its actual format. No theme downloads, signing or publication are added by this proposal.
 
@@ -55,7 +55,7 @@ This deliberately limits independent creators to supported presentation presets.
 ## Implementation gates
 
 1. **Implemented foundation:** built-in Wasteland Terminal; restart/schema/remote coverage; shared all-control Storybook fixture and local screenshot exporter; separate registry Themes browsing/detail, whole-catalogue validation, and source-preview PR tooling. No theme download claim.
-2. **Package foundation:** versioned data parser and limits, immutable identity, import/preview/apply/remove, migration, atomic persistence, export and phone delivery. Tests cover malformed/untrusted files, unavailable versions, rollback and offline use.
+2. **Package foundation:** versioned data parser and limits, immutable identity, local import/preview/explicit install/apply/remove, deck v4 references, atomic native catalog storage and authenticated phone delivery are implemented. The native picker/IPC module is landing separately; registry download, signing, export and one-click install remain proposals. Tests cover malformed/untrusted files, unavailable versions and exact-digest recovery.
 3. **Package directory extension:** build on the implemented source-preview records, local curated previews and author tooling/docs with authenticated, verified exact-byte package downloads. Whole-catalogue validation remains mandatory.
 4. **Desktop handoff:** authenticated theme release records, explicit install confirmation and cross-platform native verification before enabling one-click install.
 

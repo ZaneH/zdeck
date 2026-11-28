@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, PanelRightClose, PanelRightOpen, Plus, Redo2, Settings, Smartphone, Undo2 } from "lucide-react";
 import { ACCENTS } from "./lib/types";
 import type {
@@ -27,6 +27,7 @@ import {
   renamePage,
   setAccent,
   setActivePage,
+  setCustomTheme,
   setTheme,
   updateControl,
 } from "./lib/deck";
@@ -105,11 +106,22 @@ import {
   pageArrowDelta,
   removeSection,
   renameSection,
-  sectionAppearance,
   sectionNameError,
   setSectionAccent,
+  setSectionCustomTheme,
   setSectionTheme,
 } from "./lib/sections";
+import {
+  isThemeInUse,
+  nativeThemeAdapter,
+  referenceKey,
+  resolveDeckTheme,
+  resolveSectionTheme,
+  useInstalledThemes,
+} from "./lib/customThemes";
+import type { InstalledTheme } from "./lib/customThemes";
+import type { CustomThemeReference } from "./lib/themePackage";
+import { ThemesSettingsCard } from "./components/ThemesSettingsCard";
 
 type Route = "editor" | "settings" | "phone";
 
@@ -164,8 +176,18 @@ function NativeGate({
   );
 }
 
+const BUILTIN_THEME_OPTIONS = [
+  { value: "builtin:dark", label: "Dark" },
+  { value: "builtin:light", label: "Light" },
+  { value: "builtin:glass", label: "Glass" },
+  { value: "builtin:terminal", label: "Wasteland Terminal" },
+  { value: "builtin:macintosh", label: "Classic Macintosh" },
+];
+
 export default function App() {
   const nativeMode = nativeAvailable();
+  const themeAdapter = useMemo(() => nativeThemeAdapter(), []);
+  const themeCatalog = useInstalledThemes(themeAdapter, nativeMode);
   const serviceRestore = useRestoreRemoteService();
   const [initial] = useState(() => loadDeck(getStorage()));
   const [route, setRoute] = useState<Route>(() => parseRoute());
@@ -183,6 +205,7 @@ export default function App() {
     setSidebar({ collapsed, error: saved ? null : "Sidebar preference was not saved. Storage is unavailable or full; this choice may not survive a restart." });
   };
   const [deck, setDeck] = useState<Deck>(initial.deck);
+  const deckTheme = resolveDeckTheme(deck, themeCatalog.themes);
   const [trash, setTrash] = useState<TrashEntry[]>(initial.trash);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>(initial.status);
   const [saveError, setSaveError] = useState(initial.status === "unavailable");
@@ -380,8 +403,8 @@ export default function App() {
   }, [nativeMode, resetHistory]);
 
   useEffect(() => {
-    applyTheme(deck.theme, deck.accent);
-  }, [deck.theme, deck.accent]);
+    applyTheme(deckTheme.appearance, deck.accent, deckTheme.custom?.package.appearance ?? null);
+  }, [deckTheme.appearance, deck.accent, themeCatalog.themes, deck.customTheme?.digest]);
 
   useEffect(
     () => () => {
@@ -547,6 +570,17 @@ export default function App() {
   };
 
   const handleTheme = (theme: Theme) => commitDeck(setTheme(deck, theme));
+  const handleThemeChoice = (value: string) => {
+    if (value.startsWith("builtin:")) {
+      handleTheme(value.slice("builtin:".length) as Theme);
+      return;
+    }
+    const selected = themeCatalog.themes.find((theme) =>
+      `custom:${referenceKey(theme.reference)}` === value);
+    if (selected) commitDeck(setCustomTheme(deck, selected.reference, selected.package.appearance.base));
+  };
+  const handleUseDeckTheme = (theme: InstalledTheme) =>
+    commitDeck(setCustomTheme(deck, theme.reference, theme.package.appearance.base));
   const handleAccent = (accent: Accent) => commitDeck(setAccent(deck, accent));
 
   const handleAddSection = (afterSectionId: string | null) => {
@@ -603,6 +637,11 @@ export default function App() {
     commitDeck(setSectionTheme(deck, page.id, sectionId, theme));
   };
 
+  const handleSectionCustomTheme = (sectionId: string, reference: CustomThemeReference, base: Theme) => {
+    if (desktop.live || desktop.inflight || desktop.pending) return;
+    commitDeck(setSectionCustomTheme(deck, sectionId, reference, base));
+  };
+
   const handleSectionAccent = (sectionId: string, accent: Accent | null) => {
     if (desktop.live || desktop.inflight || desktop.pending) return;
     commitDeck(setSectionAccent(deck, page.id, sectionId, accent));
@@ -645,6 +684,7 @@ export default function App() {
         plugins={plugin.snapshots}
         initialStatus={loadStatus}
         mode={nativeMode ? "native" : "browser"}
+        installedThemes={themeCatalog.themes}
       />
     );
   }
@@ -689,6 +729,7 @@ export default function App() {
   return (
     <div
       className="app-shell"
+      data-custom-motif={deckTheme.motif ?? undefined}
       data-build={import.meta.env.VITE_BUILD_MARKER || undefined}
       onClick={(event) => {
         if (route === "editor" && event.target instanceof Element &&
@@ -791,9 +832,23 @@ export default function App() {
             <h2>Appearance</h2>
             <div className="appearance-fields">
               <Dropdown
-                label="Theme" value={deck.theme}
-                options={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }, { value: "glass", label: "Glass" }, { value: "terminal", label: "Wasteland Terminal" }, { value: "macintosh", label: "Classic Macintosh" }]}
-                onChange={(value) => handleTheme(value as Theme)}
+                label="Theme"
+                value={deck.customTheme ? `custom:${referenceKey(deck.customTheme)}` : `builtin:${deck.theme}`}
+                options={[
+                  ...BUILTIN_THEME_OPTIONS,
+                  ...themeCatalog.themes.map((theme) => ({
+                    value: `custom:${referenceKey(theme.reference)}`,
+                    label: theme.package.name,
+                    description: `${theme.package.version} · ${theme.package.author}`,
+                  })),
+                  ...(deck.customTheme && !deckTheme.custom ? [{
+                    value: `custom:${referenceKey(deck.customTheme)}`,
+                    label: `${deck.customTheme.id} ${deck.customTheme.version} (unavailable)`,
+                    description: "Import the exact package below or choose a built-in theme.",
+                    disabled: true,
+                  }] : []),
+                ]}
+                onChange={handleThemeChoice}
               />
               <Dropdown
                 label="Accent" value={deck.accent}
@@ -802,6 +857,16 @@ export default function App() {
               />
             </div>
           </section>
+
+          <ThemesSettingsCard
+            adapter={themeAdapter}
+            themes={themeCatalog.themes}
+            loading={themeCatalog.loading}
+            loadError={themeCatalog.error}
+            onRefresh={themeCatalog.refresh}
+            onUseTheme={handleUseDeckTheme}
+            isInUse={(theme) => isThemeInUse(deck, theme.reference)}
+          />
 
           <section className="settings-card">
             <h2>Storage</h2>
@@ -875,6 +940,16 @@ export default function App() {
               </p>
             ) : null}
 
+            {deck.customTheme && deckTheme.missing ? (
+              <p className="storage-alert" role="alert">
+                This deck uses the installed theme {deck.customTheme.id} {deck.customTheme.version}, which is not available.{" "}
+                <a href="#/settings/general">Import the exact package</a> or{" "}
+                <button type="button" className="button secondary small" onClick={() => handleTheme(deck.theme)}>
+                  use a built-in theme
+                </button>.
+              </p>
+            ) : null}
+
             {sidebar.error ? <p className="storage-alert" role="alert">{sidebar.error}</p> : null}
             <SectionList
               deck={deck} page={page} selectedSectionId={selectedSectionId}
@@ -883,7 +958,10 @@ export default function App() {
               onRename={handleRenameSection} onDuplicate={handleDuplicateSection}
               onRemove={handleRemoveSection}
               onMove={handleMoveSection} onTheme={handleSectionTheme}
+              onCustomTheme={handleSectionCustomTheme}
               onAccent={handleSectionAccent}
+              themes={themeCatalog.themes}
+              resolveTheme={(section) => resolveSectionTheme(deck, section, themeCatalog.themes)}
               renderControls={(section) => (
                 <div className="control-grid">
                     {section.controls.map((control, index) => (
@@ -908,7 +986,7 @@ export default function App() {
                         duplicateReason={pageControls(page).length >= MAX_CONTROLS_PER_PAGE ? `Page has ${MAX_CONTROLS_PER_PAGE} controls. Remove one first.` : undefined}
                         onRefresh={control.action === "plugin" && control.presentation === "value" && plugin.native ? () => plugin.readState(control.pluginId) : undefined}
                         variant="editor"
-                        appearance={sectionAppearance(deck, section).theme}
+                        appearance={resolveSectionTheme(deck, section, themeCatalog.themes).appearance}
                         order={!desktop.live ? { index, total: section.controls.length, move: handleMoveControl } : undefined}
                         semantics={desktop.live ? "live" : "preview"}
                         disabled={!!desktop.pending || (desktop.inflight && !["slider", "dial"].includes(effectivePresentation(control, plugin.snapshots)))}

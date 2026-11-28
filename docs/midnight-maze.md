@@ -1,7 +1,12 @@
 # Midnight Maze (Storybook visual prototype)
 
-Status: prototype only. This is **not** a built-in appearance, not in `THEMES`, not in the
-Appearance menu, and not installable from a package or the theme store. It is one Storybook story.
+Status: prototype only. This is **not** a built-in appearance, not in `THEMES`, and not the
+installable sample package. It is one Storybook story with its own fixture icons. The production
+bundle does not include these pixel icons.
+
+A separate data-only sample package (`packages/themes/midnight-maze.zdeck-theme.json`) maps the
+same palette to safe host tokens and can be imported through the external-theme flow. It uses the
+shared host renderer and no prototype CSS or icons.
 
 Browse `Themes / Midnight Maze (prototype)`:
 

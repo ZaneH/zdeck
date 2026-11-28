@@ -796,7 +796,7 @@ try {
   const glassPhone = await openPage("glass-phone", `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, glassCtx);
   livePages.push(glassPhone);
   const glassDeck = {
-    version: 3, theme: 'glass', accent: '#4cc9f0', activePageId: 'p1',
+    version: 4, theme: 'glass', accent: '#4cc9f0', activePageId: 'p1',
     pages: [{ id: 'p1', name: 'Studio', sections: [{ id: 's1', name: 'Control Center', controls: [
       { id: 'c1', label: 'Camera', action: 'obs-scene', scene: 'Camera' },
       { id: 'c2', label: 'Mic', action: 'mic-mute' },
@@ -1230,7 +1230,7 @@ try {
   const adminFixture = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/deck.sample.json'), 'utf8'));
   const adminDeck = {
     ...adminFixture,
-    version: 3,
+    version: 4,
     pages: adminFixture.pages.map((page) => ({
       id: page.id,
       name: page.name,
@@ -1274,6 +1274,7 @@ try {
       if (command === 'plugin_archive_view') return {busy:false,review:null,error:null,installedEpoch:0};
       window.__adminCalls.push(command);
       if (command === 'desktop_tray_notice') return null;
+      if (command === 'theme_list') return [];
       if (command === 'desktop_close_to_tray') return window.__closeToTray ?? false;
       if (command === 'desktop_set_close_to_tray') {
         if (window.__failPreferenceSave) throw 'Desktop preference save failed';
@@ -1508,7 +1509,7 @@ try {
   check('deliberate stop persists native desired off', await admin.waitFor("JSON.parse(localStorage.getItem('zdeck.smoke.nativeService'))?.enabled === false"));
   await admin.reload();
   check('application relaunch honors desired off', await admin.waitFor("document.querySelector('.settings-view')?.textContent.includes('Local service stopped.')") && await admin.eval("window.__remoteStartArgs.length === 0"));
-  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice','plugin_registry_website_status'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
+  check('pairing presentation never requests native action execution', await admin.eval("window.__adminCalls.every(command => command === 'native_deck_load' || ['desktop_close_to_tray','desktop_tray_notice','plugin_registry_website_status','theme_list'].includes(command) || command === 'plugin_snapshots' || command === 'plugin_catalog' || command === 'obs_snapshot' || command === 'obs_load_preferences' || /^system_(output|microphone|media)_snapshot$/.test(command) || command.startsWith('remote_'))"), await admin.eval("[...new Set(window.__adminCalls)].join(', ')"));
   await admin.eval("location.hash = '#/settings/general'");
   await admin.waitFor("!document.querySelector('[aria-label=General][role=region]').hidden");
   check('close-to-tray defaults off', await admin.eval("!document.querySelector('[aria-describedby=close-to-tray-help]').checked"));
@@ -2086,7 +2087,7 @@ try {
   const phoneNav = await openPage('phone-sections', `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, navCtx);
   livePages.push(phoneNav);
   const navDeck = {
-    version: 3, theme: 'dark', accent: '#4cc9f0', activePageId: 'p1',
+    version: 4, theme: 'dark', accent: '#4cc9f0', activePageId: 'p1',
     pages: [
       { id: 'p1', name: 'One', sections: [
         { id: 's1', name: 'First', controls: [{ id: 'c1', label: 'Mute', action: 'mic-mute' }] },
@@ -2181,7 +2182,7 @@ try {
   const phoneTheme = await openPage('phone-theme', `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, themeCtx);
   livePages.push(phoneTheme);
   const themeDeck = {
-    version: 3, theme: 'light', accent: '#f4b860', activePageId: 'p1',
+    version: 4, theme: 'light', accent: '#f4b860', activePageId: 'p1',
     pages: [{ id: 'p1', name: 'Amber', sections: [
       { id: 's1', name: 'Theme only', theme: 'dark', controls: [{ id: 'c1', label: 'Mute', action: 'mic-mute' }] },
       { id: 's2', name: 'Rose', theme: 'dark', accent: '#ff7a9c', controls: [{ id: 'c2', label: 'Play', action: 'media-play-pause' }] },

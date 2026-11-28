@@ -4,6 +4,13 @@ import type { Control, Deck } from "./types";
 import { parsePluginSnapshots } from "./plugin";
 import type { PluginSnapshots } from "./plugin";
 import { effectivePresentation, presentationCompatible, validControlValue } from "./presentations";
+import { missingThemeWarning } from "./customThemes";
+import type { InstalledTheme } from "./customThemes";
+import {
+  MAX_THEME_PACKAGE_BYTES,
+  parseThemePackageBytes,
+  validateCustomThemeReference,
+} from "./themePackage";
 
 /**
  * Authenticated phone client for the private desktop service.
@@ -16,6 +23,9 @@ import { effectivePresentation, presentationCompatible, validControlValue } from
 
 export const REMOTE_PROTOCOL_VERSION = 1;
 export const MAX_SNAPSHOT_CHARS = 512 * 1024;
+/** Exact serialized externalThemes budget on the authenticated snapshot. */
+export const MAX_EXTERNAL_THEMES_BYTES = 128 * 1024;
+export const MAX_EXTERNAL_THEMES = 16;
 export const POLL_INTERVAL_MS = 2000;
 /** Bounded in-memory history of completed action outcomes. */
 export const MAX_ACTIVITY = 10;
@@ -64,6 +74,9 @@ export interface RemotePhoneSnapshot {
   phase: RemotePhase;
   deck: Deck | null;
   plugins: PluginSnapshots;
+  /** Validated packages named by the deck; absent definitions keep references + a warning. */
+  externalThemes: InstalledTheme[];
+  themeError: string | null;
   revision: number | null;
   pageId: string | null;
   invite: string | null;
@@ -203,6 +216,41 @@ export interface RemoteSnapshot {
   revision: number;
   deck: Deck;
   plugins?: PluginSnapshots;
+  externalThemes?: InstalledTheme[];
+  themeError?: string;
+}
+
+/**
+ * Source bytes are untrusted even though the authenticated desktop supplied them.
+ * Rejects duplicate identities, over-limit counts/bytes and any id/version mismatch.
+ */
+export function parseExternalThemes(value: unknown): InstalledTheme[] | null {
+  if (!Array.isArray(value) || value.length > MAX_EXTERNAL_THEMES) return null;
+  let bytes: number;
+  try {
+    bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return null;
+  }
+  if (bytes > MAX_EXTERNAL_THEMES_BYTES) return null;
+  const seen = new Set<string>();
+  const themes: InstalledTheme[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)
+      || Object.keys(entry).length !== 2
+      || !["reference", "source"].every((key) => Object.hasOwn(entry, key))
+      || typeof entry.source !== "string"
+      || new TextEncoder().encode(entry.source).byteLength > MAX_THEME_PACKAGE_BYTES) return null;
+    const reference = validateCustomThemeReference(entry.reference);
+    if (!reference) return null;
+    const pkg = parseThemePackageBytes(new TextEncoder().encode(entry.source));
+    if (!pkg || pkg.id !== reference.id || pkg.version !== reference.version) return null;
+    const key = `${reference.id}@${reference.version}#${reference.digest}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    themes.push({ package: pkg, reference, source: entry.source });
+  }
+  return themes;
 }
 
 /** Protocol/shape check. Fails closed on anything but a valid desktop deck. */
@@ -217,7 +265,18 @@ export function parseSnapshot(payload: unknown): RemoteSnapshot | null {
   if (!isDeck(payload.deck)) return null;
   const plugins = payload.plugins === undefined ? undefined : parsePluginSnapshots(payload.plugins);
   if (plugins === null) return null;
-  return { revision, deck: payload.deck, ...(plugins ? { plugins } : {}) };
+  const externalThemes = payload.externalThemes === undefined
+    ? undefined
+    : parseExternalThemes(payload.externalThemes);
+  if (externalThemes === null) return null;
+  const themeError = payload.themeError === undefined ? undefined : sanitizeMessage(payload.themeError);
+  if (payload.themeError !== undefined && themeError === null) return null;
+  return {
+    revision, deck: payload.deck,
+    ...(plugins ? { plugins } : {}),
+    ...(externalThemes ? { externalThemes } : {}),
+    ...(themeError ? { themeError } : {}),
+  };
 }
 
 export function sanitizeMessage(value: unknown): string | null {
@@ -292,6 +351,8 @@ function initialSnapshot(): RemotePhoneSnapshot {
     phase: "checking",
     deck: null,
     plugins: {},
+    externalThemes: [],
+    themeError: null,
     revision: null,
     pageId: null,
     invite: null,
@@ -700,6 +761,7 @@ export class RemotePhoneConnection {
       revision: snapshot.revision,
       pageId: this.choosePage(snapshot.deck),
       plugins: snapshot.plugins ?? {},
+      ...this.themeState(snapshot),
       phase: "connecting",
       statusText: "Waiting for a live update…",
     });
@@ -722,9 +784,17 @@ export class RemotePhoneConnection {
       if (!snapshot || snapshot.revision < this.lastRevision) throw new Error("Reading unavailable");
       this.lastRevision = snapshot.revision;
       this.update({ deck: snapshot.deck, revision: snapshot.revision, plugins: snapshot.plugins ?? {},
-        pageId: this.choosePage(snapshot.deck) });
+        pageId: this.choosePage(snapshot.deck), ...this.themeState(snapshot) });
       if (body?.readingFailed) throw new Error("Reading unavailable");
     } finally { this.reading = false; }
+  }
+
+  private themeState(snapshot: RemoteSnapshot): Pick<RemotePhoneSnapshot, "externalThemes" | "themeError"> {
+    const externalThemes = snapshot.externalThemes ?? [];
+    return {
+      externalThemes,
+      themeError: snapshot.themeError ?? missingThemeWarning(snapshot.deck, externalThemes),
+    };
   }
 
   private choosePage(deck: Deck): string {
@@ -789,6 +859,7 @@ export class RemotePhoneConnection {
       plugins: snapshot.plugins ?? {},
       revision: snapshot.revision,
       pageId: this.choosePage(snapshot.deck),
+      ...this.themeState(snapshot),
       phase: "active",
       statusText: "Connected.",
     });

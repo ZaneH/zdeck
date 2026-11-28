@@ -5,6 +5,8 @@ import { ACCENTS } from "../lib/types";
 import type { Accent, Deck, Page, Section, Theme } from "../lib/types";
 import { sectionAppearance, sectionNameError, sectionStyle } from "../lib/sections";
 import { MAX_CONTROLS_PER_PAGE, pageControls } from "../lib/deck";
+import type { CustomThemeReference } from "../lib/themePackage";
+import type { InstalledTheme, ResolvedTheme } from "../lib/customThemes";
 import { useDialogBackdrop } from "../lib/useDialogBackdrop";
 import { SectionSettingsMenu } from "./SectionSettingsMenu";
 
@@ -21,14 +23,19 @@ interface SectionListProps {
   onRemove: (sectionId: string) => void;
   onMove: (sectionId: string, delta: number) => void;
   onTheme: (sectionId: string, theme: Theme | null) => void;
+  onCustomTheme?: (sectionId: string, reference: CustomThemeReference, base: Theme) => void;
   onAccent: (sectionId: string, accent: Accent | null) => void;
+  themes?: InstalledTheme[];
+  /** Exact package resolution for the section wrapper; controls resolve the same way. */
+  resolveTheme?: (section: Section) => ResolvedTheme;
   /** Renders the control grid for one section. */
   renderControls: (section: Section) => ReactNode;
 }
 
 export function SectionList({
   deck, page, selectedSectionId, disabled = false,
-  onSelect, onAdd, onRename, onDuplicate, onRemove, onMove, onTheme, onAccent, renderControls,
+  onSelect, onAdd, onRename, onDuplicate, onRemove, onMove, onTheme, onCustomTheme, onAccent,
+  themes = [], resolveTheme, renderControls,
 }: SectionListProps) {
   const confirmRef = useRef<HTMLDialogElement>(null);
   const cancelRemoveRef = useRef<HTMLButtonElement>(null);
@@ -127,11 +134,16 @@ export function SectionList({
         {page.sections.map((section, index) => {
           const editing = editingId === section.id;
           const error = editing ? renameError : null;
+          const resolved = resolveTheme?.(section)
+            ?? { appearance: sectionAppearance(deck, section).theme, custom: null, missing: false, style: {}, motif: null };
           return (
             <section
               key={section.id} id={`section-card-${section.id}`} data-section-id={section.id}
               className={`deck-section${section.id === selected?.id ? " is-selected" : ""}${section.id === draggingId ? " is-dragging" : ""}${section.id === dropId ? " is-drop-target" : ""}`}
-              data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
+              data-theme={section.theme} data-appearance={resolved.appearance}
+              data-custom-theme={resolved.custom ? "true" : undefined}
+              data-custom-motif={section.customTheme ? resolved.motif ?? undefined : undefined}
+              style={{ ...sectionStyle(section), ...resolved.style }}
               aria-labelledby={`section-${section.id}`}
               onClick={(event) => {
                 if (!(event.target as HTMLElement).closest("button, input, [role^='menuitem']")) onSelect(section.id);
@@ -209,6 +221,7 @@ export function SectionList({
                   <SectionSettingsMenu
                     sectionName={section.name} controlCount={section.controls.length}
                     theme={section.theme ?? null} accent={section.accent ?? null}
+                    customTheme={section.customTheme ?? null} themes={themes}
                     inheritedTheme={deck.theme} inheritedAccentName={accentName}
                     disabled={disabled}
                     onDuplicate={() => onDuplicate(section.id)}
@@ -216,6 +229,7 @@ export function SectionList({
                       ? `Page has ${MAX_CONTROLS_PER_PAGE} controls; a copy needs ${section.controls.length} more.`
                       : null}
                     onTheme={(theme) => onTheme(section.id, theme)}
+                    onCustomTheme={(reference, base) => onCustomTheme?.(section.id, reference, base)}
                     onAccent={(accent) => onAccent(section.id, accent)}
                   />
                   <button
@@ -229,6 +243,16 @@ export function SectionList({
                 </div>
               </header>
               {error ? <p id={`section-rename-error-${section.id}`} className="section-error" role="alert">{error}</p> : null}
+              {resolved.missing ? (
+                <p className="theme-recovery" role="alert">
+                  This section’s installed theme is not available. Import the exact package in{" "}
+                  <a href="#/settings/general">Settings → Appearance</a> or choose a built-in theme.{" "}
+                  <button type="button" className="button secondary small" disabled={disabled}
+                    onClick={() => onTheme(section.id, deck.theme)}>
+                    Use built-in theme
+                  </button>
+                </p>
+              ) : null}
               <div className="section-body">{renderControls(section)}</div>
               <span className="sr-only">Section {index + 1} of {page.sections.length}</span>
             </section>

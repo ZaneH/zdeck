@@ -2,6 +2,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Cog } from "lucide-react";
 import { ACCENTS } from "../lib/types";
 import type { Accent, Theme } from "../lib/types";
+import type { CustomThemeReference } from "../lib/themePackage";
+import type { InstalledTheme } from "../lib/customThemes";
+import { referenceKey } from "../lib/customThemes";
 import { useExclusiveMenu } from "../lib/useExclusiveMenu";
 
 const THEMES: { value: "" | Theme; label: string }[] = [
@@ -16,13 +19,15 @@ const THEMES: { value: "" | Theme; label: string }[] = [
 const themeLabel = (theme: Theme) => THEMES.find((option) => option.value === theme)?.label ?? theme;
 
 export function SectionSettingsMenu({
-  sectionName, controlCount, theme, accent, inheritedTheme, inheritedAccentName, disabled = false,
-  onDuplicate, duplicateReason, onTheme, onAccent,
+  sectionName, controlCount, theme, accent, customTheme, themes, inheritedTheme, inheritedAccentName, disabled = false,
+  onDuplicate, duplicateReason, onTheme, onCustomTheme, onAccent,
 }: {
   sectionName: string;
   controlCount: number;
   theme: Theme | null;
   accent: Accent | null;
+  customTheme: CustomThemeReference | null;
+  themes: InstalledTheme[];
   inheritedTheme: Theme;
   inheritedAccentName: string;
   disabled?: boolean;
@@ -30,6 +35,7 @@ export function SectionSettingsMenu({
   /** Present when copying this section would exceed the page control limit. */
   duplicateReason?: string | null;
   onTheme: (theme: Theme | null) => void;
+  onCustomTheme: (reference: CustomThemeReference, base: Theme) => void;
   onAccent: (accent: Accent | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -114,13 +120,32 @@ export function SectionSettingsMenu({
             {THEMES.map((option) => (
               <button
                 key={option.value} type="button" role="menuitemradio" tabIndex={-1}
-                aria-checked={(theme ?? "") === option.value}
+                aria-checked={!customTheme && (theme ?? "") === option.value}
                 onClick={() => choose(() => onTheme(option.value ? option.value as Theme : null))}
               >
                 {option.value ? option.label : `Inherit (${themeLabel(inheritedTheme)})`}
               </button>
             ))}
           </div>
+          {(themes.length > 0 || customTheme) ? (
+            <div className="section-settings-group" role="group" aria-label="Installed theme">
+              <p className="section-settings-label" role="presentation">Installed theme</p>
+              {customTheme && !themes.some((item) => referenceKey(item.reference) === referenceKey(customTheme)) ? (
+                <button type="button" role="menuitemradio" tabIndex={-1} aria-checked={true} disabled>
+                  {customTheme.id} {customTheme.version} (unavailable)
+                </button>
+              ) : null}
+              {themes.map((item) => (
+                <button
+                  key={referenceKey(item.reference)} type="button" role="menuitemradio" tabIndex={-1}
+                  aria-checked={!!customTheme && referenceKey(customTheme) === referenceKey(item.reference)}
+                  onClick={() => choose(() => onCustomTheme(item.reference, item.package.appearance.base))}
+                >
+                  {item.package.name} {item.package.version}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="section-settings-group" role="group" aria-label="Accent">
             <p className="section-settings-label" role="presentation">Accent</p>
             <button type="button" role="menuitemradio" tabIndex={-1} aria-checked={accent == null}
