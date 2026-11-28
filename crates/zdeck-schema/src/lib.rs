@@ -2,5 +2,6 @@
 pub mod deck;
 pub mod icons;
 pub mod plugin;
+pub mod theme_package;
 
 pub use deck::*;

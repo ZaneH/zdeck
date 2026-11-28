@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "kind": "zdeck-theme",
+  "id": "midnight-maze",
+  "version": "0.1.0",
+  "name": "Midnight Maze",
+  "author": "Zane Helton",
+  "license": "MIT",
+  "source": "https://github.com/ZaneH/zdeck",
+  "appearance": {
+    "base": "dark",
+    "motif": "maze",
+    "colors": {
+      "bg": "#05060c",
+      "bgSoft": "#080b16",
+      "surface": "#0b1124",
+      "surface2": "#111a3a",
+      "surface3": "#182450",
+      "border": "#22336e",
+      "borderStrong": "#4059c4",
+      "text": "#eef2ff",
+      "textMuted": "#bcc6ec",
+      "textFaint": "#9aa6d4",
+      "danger": "#ff9aa5",
+      "warning": "#ffe34b",
+      "maze": "#3158ff",
+      "pellet": "#ffe34b",
+      "tileSurface": "#101a38"
+    },
+    "tileRadius": 8,
+    "sectionRadius": 12
+  }
+}
