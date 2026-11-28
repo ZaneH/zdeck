@@ -243,7 +243,7 @@ code { font-family: var(--mono); font-size: .9em; overflow-wrap: anywhere; }
 /* Separate container per editor section; phone sections keep their own backdrop. */
 .deck-section, .phone-section { -webkit-backdrop-filter: var(--material-filter); backdrop-filter: var(--material-filter); }
 .phone-section:not([data-theme]) { padding: var(--phone-inherited-padding); border: var(--phone-inherited-border); border-radius: var(--phone-inherited-radius); background: var(--phone-inherited-bg); }
-.deck-section { padding: 10px 12px 12px; border: 1px solid var(--section-border); border-radius: var(--section-radius); background: var(--section-bg); box-shadow: var(--section-shadow); }
+.deck-section { cursor: pointer; padding: 10px 12px 12px; border: 1px solid var(--section-border); border-radius: var(--section-radius); background: var(--section-bg); box-shadow: var(--section-shadow); }
 .phone-section[data-theme] { padding: 12px; border: 1px solid var(--section-border); border-radius: var(--phone-section-radius); background: var(--section-bg); }
 .deck-section.is-selected { border-color: var(--border-strong); }
 .deck-section.is-dragging { opacity: .55; }

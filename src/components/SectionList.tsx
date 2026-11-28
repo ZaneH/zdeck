@@ -133,6 +133,9 @@ export function SectionList({
               className={`deck-section${section.id === selected?.id ? " is-selected" : ""}${section.id === draggingId ? " is-dragging" : ""}${section.id === dropId ? " is-drop-target" : ""}`}
               data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
               aria-labelledby={`section-${section.id}`}
+              onClick={(event) => {
+                if (!(event.target as HTMLElement).closest("button, input, [role^='menuitem']")) onSelect(section.id);
+              }}
             >
               <h2 id={`section-${section.id}`} className="sr-only">{section.name}</h2>
               <header className="deck-section-head" onClick={() => onSelect(section.id)}>

@@ -757,6 +757,14 @@ try {
   check("Glass controls own the blur while the section stays clear", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(section).trim()) && (!supported || filter(tile).includes('blur(22px)')); })()"));
   check("Glass editor caps the control grid instead of stretching it across the canvas", await editor.eval("(() => { const grid = document.querySelector('.deck-section[data-appearance=\"glass\"] .control-grid'); const style = getComputedStyle(grid); return grid.getBoundingClientRect().width <= 360 && parseFloat(style.gridAutoRows) <= 80; })()"));
   await editor.screenshot("/tmp/deck-design-glass.png");
+  const originalSectionId = await editor.eval("document.querySelector('.deck-section.is-selected').dataset.sectionId");
+  await editor.eval(click('[aria-label="Add section"]'));
+  check("adding a section selects it", await editor.waitFor(`document.querySelector('.deck-section.is-selected').dataset.sectionId !== ${JSON.stringify(originalSectionId)}`));
+  await editor.eval(`document.querySelector('[data-section-id="' + ${JSON.stringify(originalSectionId)} + '"]').scrollIntoView({block: 'center'})`);
+  const sectionBody = await editor.eval(`(() => { const r = document.querySelector('[data-section-id="' + ${JSON.stringify(originalSectionId)} + '"] .section-body').getBoundingClientRect(); return { x: r.right - 4, y: r.top + 4 }; })()`);
+  await pointerClick(editor, sectionBody.x, sectionBody.y);
+  check("clicking the Glass section body selects it without touching the handle", await editor.waitFor(`document.querySelector('.deck-section.is-selected').dataset.sectionId === ${JSON.stringify(originalSectionId)}`));
+  await editor.eval(click('[aria-label="Undo"]'));
   const { browserContextId: glassCtx } = await cdp.send('Target.createBrowserContext');
   const glassPhone = await openPage("glass-phone", `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, glassCtx);
   livePages.push(glassPhone);
