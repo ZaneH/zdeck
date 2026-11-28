@@ -843,18 +843,15 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .phone-section[data-appearance="glass"] .section-heading,
 .deck-section[data-appearance="glass"] .section-heading { width: fit-content; padding: 5px 10px; border-radius: 999px; background: var(--surface); color: var(--text-muted); text-shadow: none; }
 
-/* Square grid units keep one-cell buttons truly circular, including landscape previews. */
+/* Capped square grid units keep Glass compact and circular on editor, preview and remote phone. */
 .phone-section[data-appearance="glass"], .deck-section[data-appearance="glass"] { container-type: inline-size; }
 .phone-section[data-appearance="glass"] .phone-grid,
 .deck-section[data-appearance="glass"] .control-grid {
   --grid-columns: 4;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: calc((100cqw - 42px) / 4);
-  gap: 14px;
-}
-.deck-section[data-appearance="glass"] .control-grid {
   max-width: 360px;
   grid-auto-rows: calc((min(100cqw, 360px) - 42px) / 4);
+  gap: 14px;
 }
 @media (max-width: 360px) {
   .phone-shell[data-appearance="glass"] .phone-main,

@@ -844,6 +844,48 @@ try {
   check("saved one-cell Play is an accessible circle without squeezed label text", await glassPhone.eval("(() => { const t = document.querySelector('.control-tile[data-action=\"media-play-pause\"]'); const r = t.getBoundingClientRect(); return t.dataset.shape === 'circle' && Math.abs(r.width - r.height) <= 2 && r.width >= 44 && getComputedStyle(t.querySelector('.tile-label')).display === 'none' && t.querySelector('button').getAttribute('aria-label').includes('Play'); })()"));
   await glassPhone.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await glassPhone.screenshot("/tmp/deck-design-glass-saved-layout.png");
+
+  // Exercise saved layouts in the actual editor and PhoneDeck, not only the standard theme fixture.
+  const { browserContextId: sizingCtx } = await cdp.send('Target.createBrowserContext');
+  const sizingPage = await openPage('glass-saved-sizing', `${BASE}/#/phone`, { width: 1280, height: 900 }, sizingCtx);
+  livePages.push(sizingPage);
+  const sizingDeck = structuredClone(savedGlassDeck);
+  const sizingCheck = `(() => {
+    const section = document.querySelector(':is(.deck-section, .phone-section)[data-appearance="glass"]');
+    const grid = section.querySelector(':is(.control-grid, .phone-grid)');
+    const circle = section.querySelector('[data-shape="circle"]').getBoundingClientRect();
+    const tile = section.querySelector('[data-presentation="slider"]');
+    const pill = tile.getBoundingClientRect();
+    const input = tile.querySelector('input').getBoundingClientRect();
+    return circle.width >= 44 && circle.width <= 80 && Math.abs(circle.width - circle.height) <= 2
+      && pill.width >= 44 && pill.width <= 80 && pill.height > pill.width * 2
+      && Math.abs(input.width - pill.width) <= 2 && Math.abs(input.height - pill.height) <= 2
+      && grid.getBoundingClientRect().width <= 360 && grid.scrollWidth <= grid.clientWidth + 1
+      && document.documentElement.scrollWidth <= innerWidth;
+  })()`;
+  for (const [columnSpan, rowSpan] of [[4, 1], [4, 2], [3, 1], [2, 2], [1, 1], [2, 4]]) {
+    Object.assign(sizingDeck.pages[0].sections[0].controls[3], { columnSpan, rowSpan });
+    await sizingPage.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sizingPage.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(sizingDeck))}); location.hash = '#/'`);
+    await sizingPage.reload();
+    await sizingPage.waitFor("!!document.querySelector('.deck-section[data-appearance=glass] input[type=range]')");
+    check(`Glass actual editor keeps saved ${columnSpan}x${rowSpan} slider thin and circles compact`, await sizingPage.eval(sizingCheck));
+    if (columnSpan === 4 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-saved-wide-editor.png');
+    await sizingPage.eval(click('[aria-label="Open phone preview"]'));
+    await sizingPage.waitFor("!!document.querySelector('.phone-preview.is-landscape .phone-shell')");
+    check(`Glass actual landscape preview keeps saved ${columnSpan}x${rowSpan} slider thin and circles bounded`, await sizingPage.eval(sizingCheck));
+    if (columnSpan === 4 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-saved-wide-landscape.png');
+    await sizingPage.eval(clickText('.phone-preview-bar button', 'Portrait'));
+    check(`Glass actual portrait preview keeps saved ${columnSpan}x${rowSpan} slider thin`, await sizingPage.eval(sizingCheck));
+    if (columnSpan === 4 && rowSpan === 1) await sizingPage.screenshot('/tmp/zdeck-glass-saved-wide-portrait.png');
+    for (const [width, height] of [[844, 390], [390, 844], [320, 700]]) {
+      await sizingPage.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
+      check(`Glass phone ${width}x${height} keeps saved ${columnSpan}x${rowSpan} slider tall with no overflow`, await sizingPage.eval(sizingCheck));
+      if (columnSpan === 4 && rowSpan === 1 && width === 844) await sizingPage.screenshot('/tmp/zdeck-glass-saved-wide-phone-landscape.png');
+    }
+    check(`Glass rendering preserves saved ${columnSpan}x${rowSpan} sizing`, await sizingPage.eval(`(() => { const c = JSON.parse(localStorage.getItem('deck.local.v1')).pages[0].sections[0].controls[3]; return c.columnSpan === ${columnSpan} && c.rowSpan === ${rowSpan}; })()`));
+  }
+
   await glassPhone.eval("window.__glassAppearances = []; new MutationObserver(records => { for (const record of records) window.__glassAppearances.push(record.target.dataset.appearance); }).observe(document.querySelector('.phone-shell'), { attributes: true, attributeFilter: ['data-appearance'] })");
   await glassPhone.send("Page.bringToFront");
   for (let step = 0; step < 6; step += 1) {
@@ -2367,6 +2409,10 @@ try {
     "deck-design-glass-volume-50.png",
     "deck-design-glass-volume-100.png",
     "deck-design-glass-phone-320.png",
+    "zdeck-glass-saved-wide-editor.png",
+    "zdeck-glass-saved-wide-landscape.png",
+    "zdeck-glass-saved-wide-portrait.png",
+    "zdeck-glass-saved-wide-phone-landscape.png",
     "deck-design-glass-settings.png",
     "deck-design-glass-settings-narrow.png",
     "deck-design-preview-landscape.png",

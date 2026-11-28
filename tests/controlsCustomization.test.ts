@@ -37,6 +37,27 @@ describe("control layout and ordering", () => {
     }
   });
 
+  it("round-trips wide saved Glass sliders while rendering narrow in editor, preview and remote", () => {
+    let deck = createDefaultDeck();
+    deck.theme = "glass";
+    deck = updateControl(deck, "page_stream", "ctl_mic", { action: "volume", rowSpan: 1, columnSpan: 4 });
+    const storage = memoryStorage();
+    expect(saveDeck(storage, deck)).toBe(true);
+    const loaded = loadDeck(storage);
+    expect(loaded.deck).toEqual(deck);
+    const control = loaded.deck.pages[0].sections[0].controls[2];
+    for (const variant of ["editor", "phone"] as const) {
+      for (const semantics of ["preview", "remote"] as const) {
+        const html = renderToStaticMarkup(createElement(ControlTile, { control, variant, semantics, appearance: "glass", volume: 50 }));
+        expect(html).toContain('--column-span:1;--row-span:2');
+        expect(html).toContain('data-column-span="4" data-row-span="1"');
+        expect(html).toContain('aria-orientation="vertical"');
+      }
+    }
+    expect(saveDeck(storage, loaded.deck)).toBe(true);
+    expect(loadDeck(storage).deck).toEqual(deck);
+  });
+
   it("keeps a transient volume-disabled tile visibly enabled while its real disabled state remains", () => {
     const control = createDefaultDeck().pages[0].sections[0].controls[0];
     const html = renderToStaticMarkup(createElement(ControlTile, {

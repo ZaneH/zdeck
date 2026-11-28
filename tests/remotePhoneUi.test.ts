@@ -80,6 +80,21 @@ describe("remote phone command gating", () => {
     expect(tileClass(html, "media-play-pause")).toContain("is-transient-disabled");
   });
 
+  it("uses the shared narrow Glass slider geometry on the actual remote phone", () => {
+    const saved = structuredClone(deck);
+    const page = saved.pages.find(page => page.id === "page_media")!;
+    page.sections[0].theme = "glass";
+    const volume = page.sections[0].controls.find(control => control.action === "volume")!;
+    Object.assign(volume, { columnSpan: 4, rowSpan: 1 });
+    fixture.remote = makeRemote({ deck: saved });
+    const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));
+    expect(html).toContain('class="remote-app" data-state="active" data-appearance="glass"');
+    expect(html).toContain('--column-span:1;--row-span:2');
+    expect(html).toContain('data-column-span="4" data-row-span="1" data-shape="slider"');
+    expect(html).toContain('aria-orientation="vertical"');
+    expect(volume).toMatchObject({ columnSpan: 4, rowSpan: 1 });
+  });
+
   it("does not append routine volume instructions to the section scroller", () => {
     fixture.remote = makeRemote();
     const html = renderToStaticMarkup(createElement(RemotePhoneApp, { initialInvite: null }));

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyTheme, controlGeometry } from "../src/lib/theme";
 import type { Control } from "../src/lib/types";
+import { MAX_COLUMN_SPAN, MAX_ROW_SPAN } from "../src/lib/deck";
 
 const play: Control = { id: "play", action: "media-play-pause", label: "Play / pause" };
 const scene: Control = { id: "scene", action: "obs-scene", label: "Screen w Cam", scene: "Camera" };
@@ -40,6 +41,30 @@ describe("theme-owned control geometry", () => {
     expect(controlGeometry({ ...scene, columnSpan: 2, rowSpan: 1 }, "button", "glass").shape).toBe("capsule");
     const mic: Control = { id: "mic", action: "mic-mute", label: "Microphone", columnSpan: 2, rowSpan: 2 };
     expect(controlGeometry(mic, "button", "glass").shape).toBe("module");
+  });
+
+  it("keeps Glass sliders narrow and tall for every saved span without changing the control", () => {
+    for (const action of ["volume", "plugin"] as const) {
+      for (const columnSpan of [undefined, 1, 2, 3, MAX_COLUMN_SPAN]) {
+        for (const rowSpan of [undefined, ...Array.from({ length: MAX_ROW_SPAN }, (_, i) => i + 1)]) {
+          const control: Control = action === "volume"
+            ? { id: "level", action, label: "Level", volume: 64, columnSpan, rowSpan }
+            : { id: "level", action, label: "Level", pluginId: "studio", pluginAction: "level", pluginArgs: {}, columnSpan, rowSpan };
+          const saved = structuredClone(control);
+          expect(controlGeometry(control, "slider", "glass"))
+            .toEqual({ columns: 1, rows: Math.max(2, rowSpan ?? 2), shape: "slider" });
+          for (const theme of ["dark", "light", "terminal"] as const) {
+            expect(controlGeometry(control, "slider", theme))
+              .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1, shape: "tile" });
+          }
+          // Switching presentation also restores the stored sizing.
+          expect(controlGeometry(control, "dial", "glass"))
+            .toEqual({ columns: columnSpan ?? 1, rows: rowSpan ?? 1,
+              shape: (columnSpan ?? 1) > (rowSpan ?? 1) ? "capsule" : "module" });
+          expect(control).toEqual(saved);
+        }
+      }
+    }
   });
 
   it("keeps classic geometry and saved spans for Dark, Light and Wasteland Terminal", () => {

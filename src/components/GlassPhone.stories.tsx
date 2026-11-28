@@ -69,7 +69,7 @@ const savedDeck: Deck = {
         icon: { type: "image", src: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12M9 18c0 3-6 3-6 0s6-3 6 0Zm10-2c0 3-6 3-6 0s6-3 6 0Z" fill="none" stroke="white" stroke-width="2"/></svg>') } },
       { id: "saved-play", action: "media-play-pause", label: "Play / pause", columnSpan: 1, rowSpan: 1 },
       { id: "saved-scene", action: "obs-scene", label: "Screen w Cam", scene: "Camera", columnSpan: 2, rowSpan: 2 },
-      { id: "saved-volume", action: "volume", label: "Volume", volume: 64 },
+      { id: "saved-volume", action: "volume", label: "Volume", volume: 64, columnSpan: 4, rowSpan: 1 },
     ],
   }] }],
 };
@@ -91,6 +91,18 @@ export const SavedLayoutInDarkDeck: Story = {
     const box = play.closest("article")!.getBoundingClientRect();
     await expect(Math.abs(box.width - box.height)).toBeLessThanOrEqual(2);
     await expect(box.width).toBeGreaterThanOrEqual(44);
+    await expect(box.width).toBeLessThanOrEqual(80);
+    const slider = canvas.getByRole("slider");
+    const sliderBox = slider.getBoundingClientRect();
+    await expect(sliderBox.height).toBeGreaterThan(sliderBox.width);
+    await expect(sliderBox.width).toBeGreaterThanOrEqual(44);
+    await expect(sliderBox.width).toBeLessThanOrEqual(80);
+    await expect(slider.closest("article")).toHaveAttribute("data-column-span", "4");
+    await expect(getComputedStyle(slider.closest("article")!).gridColumnStart).toBe("span 1");
+    await expect(getComputedStyle(slider.closest("article")!).gridRowStart).toBe("span 2");
+    const grid = canvasElement.querySelector<HTMLElement>(".phone-grid")!;
+    await expect(grid.getBoundingClientRect().width).toBeLessThanOrEqual(360);
+    await expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth);
     const image = canvasElement.querySelector<HTMLImageElement>('.control-icon-image')!;
     await expect(image.getBoundingClientRect().width).toBe(28);
     await expect(image.getBoundingClientRect().height).toBe(28);
