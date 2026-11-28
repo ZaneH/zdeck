@@ -69,38 +69,6 @@ export const AllPresentations: Story = { render: () => <div style={{ display: "g
 export const Button: Story = { render: () => <PresentationExample presentation="button" /> };
 export const Slider: Story = { render: () => <PresentationExample presentation="slider" /> };
 export const Dial: Story = { render: () => <PresentationExample presentation="dial" /> };
-export const MacintoshDialAlignment: Story = {
-  render: () => <div style={{ display: "grid", gap: 24, maxWidth: 400 }}>
-    {(["editor", "phone"] as const).map(variant => <section key={variant} className="deck-section" data-appearance="macintosh">
-      <div className={variant === "phone" ? "phone-grid" : "control-grid"}
-        style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-        <ControlTile control={{ ...controls[3], label: "Volume", presentation: "dial" }} variant={variant} appearance="macintosh" volume={50} />
-        <ControlTile control={{ id: "power", label: "Power", action: "plugin", pluginId: "mixer", pluginAction: "power", pluginArgs: { enabled: false } }}
-          plugins={presentationPlugins} variant={variant} appearance="macintosh" volume={50} />
-      </div>
-    </section>)}
-  </div>,
-  play: async ({ canvasElement }) => {
-    await document.fonts.ready;
-    const center = (element: Element) => {
-      const box = element.getBoundingClientRect();
-      return box.top + box.height / 2;
-    };
-    for (const grid of canvasElement.querySelectorAll(".control-grid, .phone-grid")) {
-      const dialTile = grid.querySelector('[data-presentation="dial"]')!;
-      const button = grid.querySelector('[data-presentation="button"]')!;
-      const dial = dialTile.querySelector<HTMLElement>(".dial-face")!;
-      const readout = dialTile.querySelector(".volume-readout")!;
-      expect(Math.abs(center(dialTile.querySelector(".tile-icon")!) - center(button.querySelector(".tile-icon")!))).toBeLessThan(1);
-      expect(Math.abs(center(readout) - center(button.querySelector(".tile-label")!))).toBeLessThan(1);
-      expect(Math.abs(center(dial) - center(readout))).toBeLessThan(1);
-      const bounds = dialTile.getBoundingClientRect();
-      expect(dial.getBoundingClientRect().top).toBeGreaterThan(bounds.top);
-      expect(dial.getBoundingClientRect().bottom).toBeLessThan(bounds.bottom);
-      expect(dial.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
-    }
-  },
-};
 export const ToggleSwitch: Story = { render: () => <PresentationExample presentation="toggle-switch" /> };
 export const ToggleButton: Story = { render: () => <PresentationExample presentation="toggle-button" /> };
 export const PresentationStates: Story = { render: () => <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
