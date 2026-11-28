@@ -29,15 +29,20 @@ appearance, as `Desktop` and `Phone` stories per built-in id:
 
 - one control for each presentation: button, slider, dial, toggle switch, toggle button and a numeric reading;
 - normal active/inactive states, plus a toggle whose state is unknown and a reading that failed;
+- desktop shows the five normal controls and the three reading/state examples in two side-by-side sections;
+  phone keeps all eight controls in its single scrolling section;
 - the same controls, labels and captions in every appearance — only the appearance changes, so a preview shows
   the theme and not different content;
 - local preview semantics: nothing is executed or sent, and the controls stay keyboard reachable;
 - the fixture scopes the appearance with `data-theme`/`data-appearance`, so the story's `theme` arg wins over the
   Storybook toolbar theme on the preview surface.
 
-Each story's interaction test asserts that all six presentations render, that the appearance tokens resolve at the
-fixture boundary (the page outside keeps its own appearance), that appearance-specific presentation applies
-(Glass material, Terminal geometry and mono face) and that no tile overflows the viewport or its section.
+Each story's interaction test asserts that all six presentations render, that desktop has two sections while phone
+has one, that the appearance tokens resolve at the fixture boundary (the page outside keeps its own appearance),
+that appearance-specific presentation applies (Glass material, Terminal geometry and mono face) and that no tile
+overflows the viewport or its section. Glass additionally measures the icon, label, switch track/state, dial, reading
+and the 44px target inside each tile at desktop, 390px and a resized 320px shell, so the curved capsule inset and
+label/body spacing are checked on the content, not only on the tile box.
 
 ```bash
 npm run storybook                                    # browse Themes/Theme preview
@@ -65,11 +70,15 @@ npm run theme:previews -- --url http://127.0.0.1:6006 --out /tmp/zdeck-theme-pre
 - Fixed viewports: desktop 1200×800, phone 390×844, device scale factor 1. The run asks for reduced motion, `en-US`
   and UTC so the reading caption is stable, waits for fonts and two rendered frames, and disables CSS animations
   while capturing.
+- The desktop capture measures `[data-testid="theme-preview-content"]`, then uniformly scales and centers it to
+  fit a 28px margin inside 1200×800. It does not crop: the tightest of width and height decides the scale, so the
+  narrow tall Glass group and the widescreen Dark group both stay whole. Phone keeps its natural layout.
 - Before writing a file it checks that the requested appearance is the one rendered, that all six presentations are
-  present and that nothing overflows the viewport. A failed check aborts instead of shipping a wrong picture.
+  present and that neither a tile nor the scaled content group overflows the viewport. A failed check aborts
+  instead of shipping a wrong picture.
 - Output: `zdeck-theme-<theme>-<viewport>.png` for each requested id, plus `manifest.json` listing the story id,
-  viewport, pixel dimensions, byte size and SHA-256 of every file, so a consumer can pair exact bytes with a
-  release.
+  viewport, pixel dimensions, the desktop `contentScale`, byte size and SHA-256 of every file, so a consumer can
+  pair exact bytes with a release.
 
 Quote the dimensions and hashes with the files. They describe these PNGs, not the app on a phone or in the
 Tauri webview.

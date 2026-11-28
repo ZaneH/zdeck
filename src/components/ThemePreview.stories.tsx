@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { CSSProperties } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect } from "storybook/test";
 import { applyTheme } from "../lib/theme";
@@ -11,16 +12,19 @@ import { ControlTile } from "./ControlTile";
  * The standard sample deck every built-in appearance is judged against. Keep this content
  * identical across themes so a preview shows the appearance, not different controls.
  */
-const SAMPLE_CONTROLS: Control[] = [
+const NORMAL_CONTROLS: Control[] = [
   { id: "sample-button", action: "obs-scene", label: "Camera", scene: "Camera" },
   { id: "sample-slider", action: "volume", label: "Speakers", volume: 62 },
   { id: "sample-dial", action: "volume", label: "Gain", volume: 38, presentation: "dial" },
   { id: "sample-switch", action: "plugin", label: "Studio mute", pluginId: "sample", pluginAction: "mute", pluginArgs: { enabled: true }, presentation: "toggle-switch" },
   { id: "sample-toggle", action: "plugin", label: "Arm relay", pluginId: "sample", pluginAction: "arm", pluginArgs: { armed: false }, presentation: "toggle-button" },
+];
+const STATE_CONTROLS: Control[] = [
   { id: "sample-value", action: "plugin", label: "Input level", pluginId: "sample", pluginAction: "level", pluginArgs: { level: 62 }, presentation: "value" },
   { id: "sample-unknown", action: "plugin", label: "Coolant", pluginId: "sample-unknown", pluginAction: "mute", pluginArgs: { enabled: false }, presentation: "toggle-switch" },
   { id: "sample-failed", action: "plugin", label: "Reactor", pluginId: "sample-failed", pluginAction: "level", pluginArgs: { level: 10 }, presentation: "value" },
 ];
+const SAMPLE_CONTROLS = [...NORMAL_CONTROLS, ...STATE_CONTROLS];
 
 const levelConfig = { level: { type: "integer" as const, minimum: 0, maximum: 100, control: { step: 1 }, choicesKey: "levels" } };
 const levelValue = { id: "level", title: "Input level", config: levelConfig, stateKey: "levels", entityKey: "level" };
@@ -69,7 +73,7 @@ type Viewport = "desktop" | "phone";
 function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport }) {
   // The Storybook toolbar decorator applies its own theme after this story mounts; the args win.
   useEffect(() => { applyTheme(theme, ACCENTS[0].value); }, [theme]);
-  const tiles = SAMPLE_CONTROLS.map(control => {
+  const renderTiles = (controls: Control[]) => controls.map(control => {
     // Glass cells are square and narrow; a dial's face and readout need two of them.
     const columnSpan = theme === "glass" && control.presentation === "dial" ? 2 : undefined;
     return (
@@ -88,20 +92,32 @@ function StandardFixture({ theme, viewport }: { theme: Theme; viewport: Viewport
           <div className="phone-page-heading"><h1>Theme preview</h1></div>
           <section className="phone-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-heading">
             <h2 className="section-heading" id="theme-preview-heading">Standard controls</h2>
-            <div className="phone-grid">{tiles}</div>
+            <div className="phone-grid">{renderTiles(SAMPLE_CONTROLS)}</div>
           </section>
         </main>
       </div>
     </div>
   );
+  // A 2-column section is wider and taller than the old 4x2 strip, so a desktop capture can
+  // fill its frame without shrinking the controls. Glass keeps its own square grid geometry.
+  const desktopGrid: CSSProperties = theme === "glass" ? {} : { gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gridAutoRows: 156 };
   return (
     <div data-theme={theme} data-appearance={theme} data-testid="theme-preview"
       style={{ minHeight: "100dvh", padding: 24, background: "var(--bg)", backgroundImage: "var(--app-bg-image)" }}>
-      <section className="deck-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-heading" style={{ maxWidth: 760 }}>
-        <h2 className="section-heading" id="theme-preview-heading">Standard controls</h2>
-        <div className="control-grid">{tiles}</div>
-      </section>
-      <p className="field-note">{caption}</p>
+      {/* The exporter fits and centers this group inside the fixed capture viewport. */}
+      <div data-testid="theme-preview-content" style={{ width: "fit-content" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
+          <section className="deck-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-heading" style={{ width: 396 }}>
+            <h2 className="section-heading" id="theme-preview-heading">Standard controls</h2>
+            <div className="control-grid" style={desktopGrid}>{renderTiles(NORMAL_CONTROLS)}</div>
+          </section>
+          <section className="deck-section" data-theme={theme} data-appearance={theme} aria-labelledby="theme-preview-states-heading" style={{ width: 396 }}>
+            <h2 className="section-heading" id="theme-preview-states-heading">Readings and states</h2>
+            <div className="control-grid" style={desktopGrid}>{renderTiles(STATE_CONTROLS)}</div>
+          </section>
+        </div>
+        <p className="field-note" style={{ margin: "8px 0 0" }}>{caption}</p>
+      </div>
     </div>
   );
 }
@@ -119,9 +135,90 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function expectInside(rect: DOMRect, bounds: DOMRect, edge = 1) {
+  expect(rect.left).toBeGreaterThanOrEqual(bounds.left - edge);
+  expect(rect.right).toBeLessThanOrEqual(bounds.right + edge);
+  expect(rect.top).toBeGreaterThanOrEqual(bounds.top - edge);
+  expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + edge);
+}
+
+// Glass one-row capsules must keep their label header, body and 44px target inside the pill,
+// clear of its curved edges. Check the inner content, not only the tile box.
+function assertGlassSpacing(sections: HTMLElement[]) {
+  const tiles = sections.flatMap(part => Array.from(part.querySelectorAll<HTMLElement>(".control-tile")));
+  for (const tile of tiles) {
+    const box = tile.getBoundingClientRect();
+    // Capsule content clears the curved edge by at least the narrow-phone inset.
+    // The full-bleed slider centers its icon circle rather than insetting it from an edge.
+    const inset = tile.dataset.shape === "capsule" ? 13 : tile.dataset.shape === "slider" ? 0 : 16;
+    const icon = tile.querySelector<HTMLElement>(".tile-icon");
+    const label = tile.querySelector<HTMLElement>(".tile-label");
+    const labelVisible = !!label && getComputedStyle(label).display !== "none";
+    if (icon && getComputedStyle(icon).display !== "none") {
+      const iconBox = icon.getBoundingClientRect();
+      expect(iconBox.left).toBeGreaterThanOrEqual(box.left + inset - 1);
+      expect(iconBox.top).toBeGreaterThanOrEqual(box.top - 1);
+      if (labelVisible) {
+        const labelBox = label!.getBoundingClientRect();
+        // Stacked module labels (icon above, label below) have no side-by-side gap to check.
+        if (labelBox.top < iconBox.bottom && labelBox.bottom > iconBox.top) {
+          expect(labelBox.left - iconBox.right).toBeGreaterThanOrEqual(5);
+        }
+        expect(labelBox.left).toBeGreaterThanOrEqual(box.left + inset - 1);
+        expect(labelBox.right).toBeLessThanOrEqual(box.right - inset + 1);
+        expect(labelBox.top).toBeGreaterThanOrEqual(box.top + 4);
+      }
+    }
+    const labelBox = labelVisible ? label!.getBoundingClientRect() : null;
+    const belowLabel = (rect: DOMRect) => {
+      if (labelBox) expect(rect.top - labelBox.bottom).toBeGreaterThanOrEqual(4);
+    };
+    const toggle = tile.querySelector<HTMLElement>(".tile-toggle");
+    if (toggle) {
+      const toggleBox = toggle.getBoundingClientRect();
+      expect(toggleBox.height).toBeGreaterThanOrEqual(44);
+      expectInside(toggleBox, box);
+      for (const selector of [".toggle-track", ".toggle-state"]) {
+        const part = tile.querySelector<HTMLElement>(selector);
+        if (!part) continue;
+        const partBox = part.getBoundingClientRect();
+        if (partBox.width === 0) continue;
+        expectInside(partBox, box);
+        belowLabel(partBox);
+      }
+    }
+    const dial = tile.querySelector<HTMLElement>(".dial-face");
+    if (dial) {
+      const dialBox = dial.getBoundingClientRect();
+      expect(dialBox.width).toBeGreaterThanOrEqual(44);
+      expect(dialBox.height).toBeGreaterThanOrEqual(44);
+      expectInside(dialBox, box);
+      if (labelBox) expect(dialBox.left - labelBox.right).toBeGreaterThanOrEqual(4);
+      const readout = tile.querySelector<HTMLElement>(".volume-readout");
+      if (readout) {
+        const readoutBox = readout.getBoundingClientRect();
+        expectInside(readoutBox, box);
+        belowLabel(readoutBox);
+        expect(readoutBox.right).toBeLessThanOrEqual(dialBox.left - 4);
+      }
+    }
+    const reading = tile.querySelector<HTMLElement>(".tile-reading");
+    if (reading) {
+      for (const selector of [".tile-reading", ".tile-reading output", ".reading-time"]) {
+        const part = tile.querySelector<HTMLElement>(selector);
+        if (part) expectInside(part.getBoundingClientRect(), box);
+      }
+      belowLabel(reading.querySelector<HTMLElement>("output")!.getBoundingClientRect());
+    }
+  }
+}
+
 async function assertPreview(canvasElement: HTMLElement, theme: Theme, viewport: Viewport) {
   const fixture = canvasElement.querySelector<HTMLElement>('[data-testid="theme-preview"]')!;
-  const section = fixture.querySelector<HTMLElement>(".deck-section, .phone-section") ?? fixture;
+  const sections = Array.from(fixture.querySelectorAll<HTMLElement>(".deck-section, .phone-section"));
+  const section = sections[0] ?? fixture;
+  // Desktop shows normal controls and state examples side by side; phone keeps one section.
+  expect(sections).toHaveLength(viewport === "desktop" ? 2 : 1);
   // The theme must be scoped to this fixture, whatever the Storybook toolbar left on the page.
   expect(fixture.dataset.theme).toBe(theme);
   expect(fixture.dataset.appearance).toBe(theme);
@@ -132,9 +229,8 @@ async function assertPreview(canvasElement: HTMLElement, theme: Theme, viewport:
   expect(getComputedStyle(document.body).getPropertyValue("--tile-radius").trim()).toBe(TILE_RADIUS[pageTheme]);
 
   expect(section.classList.contains(viewport === "phone" ? "phone-section" : "deck-section")).toBe(true);
-  const grid = section.querySelector<HTMLElement>(".phone-grid, .control-grid")!;
-  expect(grid.children).toHaveLength(SAMPLE_CONTROLS.length);
-  const tiles = Array.from(grid.querySelectorAll<HTMLElement>(".control-tile"));
+  const tiles = sections.flatMap(part => Array.from(part.querySelectorAll<HTMLElement>(".control-tile")));
+  expect(tiles).toHaveLength(SAMPLE_CONTROLS.length);
   for (const presentation of PRESENTATIONS) expect(tiles.map(tile => tile.dataset.presentation)).toContain(presentation);
   expect(tiles[6].querySelector(".tile-toggle")!.textContent).toContain("State unknown");
   expect(tiles[7].querySelector(".tile-reading output")!.textContent).toContain("Reading failed");
@@ -153,14 +249,29 @@ async function assertPreview(canvasElement: HTMLElement, theme: Theme, viewport:
   // No overflow: every tile is fully visible and inside the section it belongs to.
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight + 1);
-  const bounds = section.getBoundingClientRect();
-  for (const tile of tiles) {
-    const box = tile.getBoundingClientRect();
-    expect(box.width).toBeGreaterThan(0);
-    expect(box.left).toBeGreaterThanOrEqual(-1);
-    expect(box.right).toBeLessThanOrEqual(window.innerWidth + 1);
-    expect(box.bottom).toBeLessThanOrEqual(window.innerHeight + 1);
-    expect(box.right).toBeLessThanOrEqual(bounds.right + 1);
+  for (const part of sections) {
+    expect(part.querySelector(".phone-grid, .control-grid")!.children.length).toBeGreaterThan(0);
+    const bounds = part.getBoundingClientRect();
+    expect(bounds.right).toBeLessThanOrEqual(window.innerWidth + 1);
+    for (const tile of part.querySelectorAll<HTMLElement>(".control-tile")) {
+      const box = tile.getBoundingClientRect();
+      expect(box.width).toBeGreaterThan(0);
+      expect(box.left).toBeGreaterThanOrEqual(-1);
+      expect(box.right).toBeLessThanOrEqual(window.innerWidth + 1);
+      expect(box.bottom).toBeLessThanOrEqual(window.innerHeight + 1);
+      expect(box.right).toBeLessThanOrEqual(bounds.right + 1);
+    }
+  }
+  if (theme === "glass") {
+    assertGlassSpacing(sections);
+    // Narrow phones must keep the same inset and spacing, not just avoid page overflow.
+    const shell = fixture.querySelector<HTMLElement>(".phone-shell");
+    if (viewport === "phone" && shell) {
+      const width = shell.style.width;
+      shell.style.width = "320px";
+      assertGlassSpacing(sections);
+      shell.style.width = width;
+    }
   }
 }
 

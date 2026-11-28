@@ -77,20 +77,41 @@ try {
           await document.fonts.ready;
           await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
         });
+        // Desktop fits the content group uniformly inside the fixed frame and centers it, so controls
+        // fill the picture without cropping. Phone keeps its natural 390x844 layout.
+        const framing = await page.evaluate(() => {
+          const content = document.querySelector('[data-testid="theme-preview-content"]');
+          if (!content) return null;
+          const margin = 28;
+          const box = content.getBoundingClientRect();
+          const availableWidth = window.innerWidth - margin * 2;
+          const availableHeight = window.innerHeight - margin * 2;
+          const scale = Math.min(availableWidth / box.width, availableHeight / box.height);
+          content.style.position = "fixed";
+          content.style.left = `${margin + (availableWidth - box.width * scale) / 2}px`;
+          content.style.top = `${margin + (availableHeight - box.height * scale) / 2}px`;
+          content.style.margin = "0";
+          content.style.transformOrigin = "top left";
+          content.style.transform = `scale(${scale})`;
+          return { scale: Number(scale.toFixed(3)), width: Math.round(box.width), height: Math.round(box.height) };
+        });
         const rendered = await page.evaluate(() => {
           const fixture = document.querySelector('[data-testid="theme-preview"]');
           const section = fixture?.querySelector(".deck-section, .phone-section");
+          const content = document.querySelector('[data-testid="theme-preview-content"]');
           const tiles = Array.from(document.querySelectorAll(".control-tile"));
           // A clipped tile would ship a wrong picture: every tile must be fully inside the viewport.
           const clipped = tiles.some(tile => {
             const box = tile.getBoundingClientRect();
             return box.left < -1 || box.top < -1 || box.right > window.innerWidth + 1 || box.bottom > window.innerHeight + 1;
           });
+          const contentBox = content?.getBoundingClientRect();
+          const clippedContent = contentBox ? contentBox.left < -1 || contentBox.top < -1 || contentBox.right > window.innerWidth + 1 || contentBox.bottom > window.innerHeight + 1 : false;
           return {
             fixtureTheme: fixture?.dataset.theme,
             tileRadius: section ? getComputedStyle(section).getPropertyValue("--tile-radius").trim() : "",
             presentations: tiles.map(tile => tile.dataset.presentation),
-            overflow: clipped || document.documentElement.scrollWidth > window.innerWidth + 1,
+            overflow: clipped || clippedContent || document.documentElement.scrollWidth > window.innerWidth + 1,
           };
         });
         if (rendered.fixtureTheme !== theme) throw new Error(`${storyId}: rendered theme ${rendered.fixtureTheme}, expected ${theme}`);
@@ -104,9 +125,10 @@ try {
         const bytes = readFileSync(path);
         files.push({
           theme, viewport, storyId, file, width: size.width, height: size.height,
+          contentScale: framing?.scale ?? 1,
           bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
         });
-        console.log(`${file} — ${size.width}x${size.height} (${bytes.length} bytes)`);
+        console.log(`${file} — ${size.width}x${size.height} (${bytes.length} bytes)${framing ? `, content ${framing.width}x${framing.height} at ${framing.scale}x` : ""}`);
       } finally {
         await context.close();
       }

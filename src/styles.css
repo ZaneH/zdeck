@@ -928,8 +928,65 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
   padding: 12px;
 }
 [data-appearance="glass"] .control-tile[data-shape="capsule"] .tile-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+
+/* Glass capsule slots: the label header clears the curved edge and the body is placed inside
+   the pill instead of stacking a 34px header plus a 44px control past a one-row height. */
+[data-appearance="glass"] .control-tile[data-shape="capsule"]:not([data-presentation="button"]) {
+  --glass-pill-inset: clamp(14px, 6cqw, 20px);
+}
+[data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-primary {
+  position: absolute;
+  inset: 0 var(--glass-pill-inset) auto;
+  z-index: 2;
+  width: auto;
+  gap: 8px;
+  min-height: 0;
+  padding: 7px 0 0;
+}
+/* Phone labels are static; let the whole pill stay the control's 44px+ hit area. */
+[data-appearance="glass"] .control-tile[data-shape="capsule"] .tile-primary-static { pointer-events: none; }
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .tile-toggle {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-height: 44px;
+  margin: 0;
+  padding: 26px var(--glass-pill-inset) 4px;
+}
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="toggle-button"] .tile-toggle { justify-content: center; gap: 8px; }
+/* Dial: label and reading on the left, the 48px gauge on the right. */
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .tile-primary { right: calc(var(--glass-pill-inset) + 56px); gap: 6px; }
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .tile-dial {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  pointer-events: none;
+}
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .dial-face {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--glass-pill-inset) - 6px);
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+[data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation="dial"] .volume-readout {
+  position: absolute;
+  bottom: 6px;
+  left: var(--glass-pill-inset);
+  font-size: 18px;
+}
+
+/* Narrow phones shrink the one-row capsule header so its 44px body and label stay apart. */
+@container (max-width: 340px) {
+  [data-appearance="glass"] .control-tile[data-shape="capsule"]:not([data-presentation="button"]) { --glass-pill-inset: 14px; }
+  [data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-primary { padding-top: 5px; }
+  [data-appearance="glass"] .control-tile[data-shape="capsule"]:is([data-presentation^="toggle-"], [data-presentation="dial"]) .tile-label { font-size: 13px; }
+  [data-appearance="glass"] .control-tile[data-shape="capsule"][data-presentation^="toggle-"] .toggle-state { font-size: 10px; line-height: 1.1; }
+}
 [data-appearance="glass"] .control-tile[data-shape="module"][data-presentation="button"] .tile-primary { align-items: flex-start; justify-content: flex-end; padding: 18px; text-align: left; }
 [data-appearance="glass"] .control-tile[data-shape="module"][data-presentation="button"] .tile-icon { position: absolute; top: 18px; left: 18px; }
+[data-appearance="glass"] .control-tile[data-shape="module"]:not([data-presentation="button"]) .tile-primary { padding: 14px 18px 0; }
 [data-appearance="glass"] .control-tile[data-shape="module"] .tile-icon :is(svg, img) { width: 26px; height: 26px; }
 [data-appearance="glass"] .control-tile[data-shape="module"] .tile-label { font-size: 14px; font-weight: 550; }
 
@@ -1189,11 +1246,11 @@ details[open] > .disclosure::before { transform: rotate(45deg); }
 .tile-reading { position: relative; display: grid; align-content: center; flex: 1; min-width: 0; gap: 3px; padding: 4px 10px 8px; text-align: center; }
 .tile-reading output { font-size: 22px; line-height: 1.1; font-weight: 550; overflow-wrap: anywhere; }
 .tile-reading output.reading-unknown { font-size: 12px; color: var(--text-muted); }
-.control-tile[data-presentation="value"] .tile-primary { padding-right: 38px; }
+.control-tile[data-presentation="value"]:has(.reading-refresh) .tile-primary { padding-right: 38px; }
 .reading-refresh { position: absolute; right: 5px; top: -30px; width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
 .control-tile.is-reorderable .reading-refresh, .control-tile.is-reorderable .reading-refresh * { cursor: pointer; touch-action: manipulation; }
 .control-tile.is-reorderable .reading-refresh:disabled, .control-tile.is-reorderable .reading-refresh:disabled * { cursor: not-allowed; }
-@media (pointer: coarse) { .reading-refresh { width: 44px; height: 44px; top: -36px; right: 0; } .control-tile[data-presentation="value"] .tile-primary { padding-right: 46px; } }
+@media (pointer: coarse) { .reading-refresh { width: 44px; height: 44px; top: -36px; right: 0; } .control-tile[data-presentation="value"]:has(.reading-refresh) .tile-primary { padding-right: 46px; } }
 .tile-reading .value-unit { margin-left: 3px; font-size: 14px; color: var(--text-muted); }
 .reading-time { font-size: 10px; color: var(--text-faint); }
 .tile-toggle { display: flex; flex: 1; align-items: center; justify-content: center; gap: 9px; min-height: 44px; margin: 2px 10px 9px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); color: var(--text-muted); font-size: 13px; font-weight: 550; transition: background .15s, border-color .15s, color .15s; }
