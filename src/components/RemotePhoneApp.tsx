@@ -276,9 +276,11 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
     && ["slider", "dial"].includes(effectivePresentation(activeBusyControl, remote.plugins));
   const hasVolume = pageControls(page).some((control) => control.action === "volume");
   const latestActivity = remote.activity[0];
+  const surfaceSection = page.sections[navigation.sectionIndex] ?? page.sections[0];
+  const surface = sectionAppearance(deck, surfaceSection);
 
   return (
-    <div className="remote-app" data-state={remote.phase}>
+    <div className="remote-app" data-state={remote.phase} data-appearance={surface.theme} style={sectionStyle(surfaceSection)}>
       <header className="phone-header remote-header">
         <div className="phone-brand"><BrandMark /></div>
         {active ? null : (
@@ -299,7 +301,7 @@ export function RemotePhoneApp({ initialInvite }: { initialInvite: string | null
             data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
             aria-labelledby={`remote-section-${section.id}`}
           >
-            <h2 id={`remote-section-${section.id}`} className="section-heading">{section.name}</h2>
+            <h2 id={`remote-section-${section.id}`} className="section-heading" data-redundant={section.name === page.name || undefined}>{section.name}</h2>
             <div className="phone-grid">
               {section.controls.map((control) => (
                 <ControlTile

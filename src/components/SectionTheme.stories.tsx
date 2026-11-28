@@ -84,9 +84,6 @@ function paintedBackgrounds(style: CSSStyleDeclaration, background: number[]): n
   const source = style.backgroundImage === "none" ? [style.backgroundColor] : colorsIn(style.backgroundImage);
   return source.length ? source.map(color => blend(color, background)) : [background];
 }
-function compositedSection(backgroundColor: string, backdrop: number[]): number[] {
-  return alphaOf(backgroundColor) === 0 ? backdrop : blend(backgroundColor, backdrop);
-}
 function expectedMix(accent: string, text: string, weight: number): number[] {
   const accentChannels = channels(accent);
   const textChannels = channels(text);
@@ -117,12 +114,14 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
     const sectionTheme = section.dataset.theme ?? deckTheme;
     const appearance = section.dataset.appearance ?? sectionTheme;
     // A phone section without its own data-theme has no backdrop; its text sits on the deck.
-    const background = lightest(backdrops.map(backdrop => compositedSection(style.backgroundColor, backdrop)));
+    const sectionBackgrounds = backdrops.flatMap(backdrop => paintedBackgrounds(style, backdrop));
+    const background = lightest(sectionBackgrounds);
     // Glass headings sit directly on the deck backdrop, including a flat Light deck.
     if (appearance === "glass") {
       const heading = section.querySelector<HTMLElement>(".section-heading")!;
-      for (const backdrop of backdrops) {
-        expect(contrast(getComputedStyle(heading).color, backdrop)).toBeGreaterThanOrEqual(4.5);
+      const headingStyle = getComputedStyle(heading);
+      for (const backdrop of sectionBackgrounds) {
+        expect(contrast(headingStyle.color, blend(headingStyle.backgroundColor, backdrop))).toBeGreaterThanOrEqual(4.5);
       }
     }
     // Glass sections are transparent: their labels sit on the wallpaper, controls carry the material.
@@ -196,7 +195,7 @@ async function assertSectionContrast(canvasElement: HTMLElement, deckTheme: Them
     expect(sectionFilter === "none" || sectionFilter === "").toBe(true);
     // Preserve Dark/Light geometry; Glass intentionally removes the group container.
     if (appearance === "glass") {
-      expect(style.borderRadius).toBe("0px");
+      expect(style.borderRadius).toBe(section.classList.contains("phone-section") ? "0px" : "30px");
     } else if (section.classList.contains("phone-section")) {
       if (section.dataset.theme) expect(style.borderRadius).toBe("8px");
     } else {

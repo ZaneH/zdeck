@@ -3,7 +3,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 import { applyTheme } from "../lib/theme";
 import { ACCENTS } from "../lib/types";
-import type { Control } from "../lib/types";
+import type { Control, Deck } from "../lib/types";
+import { PhoneDeck } from "./PhoneDeck";
 import type { PluginSnapshots } from "../lib/plugin";
 import { ControlTile } from "./ControlTile";
 
@@ -58,6 +59,41 @@ const meta = {
 } satisfies Meta<typeof GlassPhoneFixture>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const savedDeck: Deck = {
+  version: 3, theme: "dark", accent: ACCENTS[0].value, activePageId: "stream",
+  pages: [{ id: "stream", name: "Stream", sections: [{
+    id: "stream-controls", name: "Stream", theme: "glass",
+    controls: [
+      { id: "saved-mic", action: "mic-mute", label: "Microphone", columnSpan: 1, rowSpan: 1,
+        icon: { type: "image", src: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12M9 18c0 3-6 3-6 0s6-3 6 0Zm10-2c0 3-6 3-6 0s6-3 6 0Z" fill="none" stroke="white" stroke-width="2"/></svg>') } },
+      { id: "saved-play", action: "media-play-pause", label: "Play / pause", columnSpan: 1, rowSpan: 1 },
+      { id: "saved-scene", action: "obs-scene", label: "Screen w Cam", scene: "Camera", columnSpan: 2, rowSpan: 2 },
+      { id: "saved-volume", action: "volume", label: "Volume", volume: 64 },
+    ],
+  }] }],
+};
+
+export const SavedLayoutInDarkDeck: Story = {
+  render: () => <PhoneDeck initialDeck={savedDeck} initialStatus="loaded" mode="native" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const shell = canvasElement.querySelector<HTMLElement>(".phone-shell")!;
+    await expect(shell).toHaveAttribute("data-appearance", "glass");
+    await expect(getComputedStyle(shell).backgroundImage).toContain("radial-gradient");
+    const play = canvas.getByRole("button", { name: /Press Play \/ pause/ });
+    await expect(play).toHaveAccessibleName(/Play \/ pause/);
+    await expect(play.closest("article")).toHaveAttribute("data-shape", "circle");
+    await expect(play.querySelector(".tile-label")).not.toBeVisible();
+    const box = play.closest("article")!.getBoundingClientRect();
+    await expect(Math.abs(box.width - box.height)).toBeLessThanOrEqual(2);
+    await expect(box.width).toBeGreaterThanOrEqual(44);
+    const image = canvasElement.querySelector<HTMLImageElement>('.control-icon-image')!;
+    await expect(image.getBoundingClientRect().width).toBe(28);
+    await expect(image.getBoundingClientRect().height).toBe(28);
+    await expect(getComputedStyle(canvasElement.querySelector<HTMLElement>('[data-redundant="true"]')!).clipPath).toBe("inset(50%)");
+  },
+};
 
 export const ControlCenter: Story = {
   play: async ({ canvasElement }) => {

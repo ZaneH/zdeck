@@ -83,6 +83,9 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
     scrollerRef,
   });
 
+  const surfaceSection = page.sections[navigation.sectionIndex] ?? page.sections[0];
+  const surface = sectionAppearance(deck, surfaceSection);
+
   const press = (control: Control) => {
     setPressedId(control.id);
     setNotice(`Preview only: ${control.label} pressed. No desktop action was sent.`);
@@ -113,7 +116,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
         </a>
       </div>
       <div className="phone-device">
-      <div className="phone-shell">
+      <div className="phone-shell" data-appearance={surface.theme} style={sectionStyle(surfaceSection)}>
       <UpdateBanner />
       <header className="phone-header">
         <div className="phone-brand">
@@ -137,7 +140,7 @@ export function PhoneDeck({ initialDeck, initialStatus, mode, plugins = {} }: Ph
             data-theme={section.theme} data-appearance={sectionAppearance(deck, section).theme} style={sectionStyle(section)}
             aria-labelledby={`phone-section-${section.id}`}
           >
-            <h2 id={`phone-section-${section.id}`} className="section-heading">{section.name}</h2>
+            <h2 id={`phone-section-${section.id}`} className="section-heading" data-redundant={section.name === page.name || undefined}>{section.name}</h2>
             <div className="phone-grid">
               {section.controls.map((control) => (
                 <ControlTile

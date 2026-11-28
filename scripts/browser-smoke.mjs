@@ -744,7 +744,7 @@ try {
   await editor.waitFor("!!document.querySelector('.settings-view')");
   await editor.eval(click('.appearance-fields .dropdown:nth-of-type(1) .dropdown-trigger'));
   await editor.eval(clickText('.appearance-fields .dropdown:nth-of-type(1) .dropdown-menu [role=menuitemradio]', 'Glass'));
-  check("Glass applies the opted-in backdrop and theme color", await editor.waitFor("document.documentElement.dataset.theme === 'glass' && getComputedStyle(document.body).backgroundColor === 'rgb(200, 180, 242)' && getComputedStyle(document.body).backgroundImage.includes('radial-gradient') && document.querySelector('meta[name=theme-color]').content === '#c8b4f2'"));
+  check("Glass applies the opted-in backdrop and theme color", await editor.waitFor("document.documentElement.dataset.theme === 'glass' && getComputedStyle(document.body).backgroundColor === 'rgb(172, 131, 246)' && getComputedStyle(document.body).backgroundImage.includes('radial-gradient') && document.querySelector('meta[name=theme-color]').content === '#ac83f6'"));
   check("Appearance labels and the Glass value stay unclipped", await editor.eval("(() => { const labels = [...document.querySelectorAll('.appearance-fields .dropdown-label, .appearance-fields .dropdown-value')]; const field = document.querySelector('.appearance-fields'); return labels.length === 4 && labels.every((el) => el.scrollWidth <= el.clientWidth + 1) && field.scrollWidth <= field.clientWidth + 1 && [...document.querySelectorAll('.appearance-fields .dropdown-trigger')].every((el) => el.getBoundingClientRect().right <= innerWidth + 1); })()"));
   await editor.screenshot("/tmp/deck-design-glass-settings.png");
   await editor.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 680, deviceScaleFactor: 1, mobile: false });
@@ -753,8 +753,8 @@ try {
   await editor.send("Emulation.clearDeviceMetricsOverride");
   await editor.eval("location.hash = '#/'");
   await editor.waitFor("!!document.querySelector('.canvas-panel')");
-  check("Glass editor groups are transparent and controls carry the rounded material", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '0px' && getComputedStyle(document.querySelector('.deck-section')).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.control-tile')).borderRadius === '22px'"));
-  check("Glass controls own the blur while the section stays clear", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(section).trim()) && (!supported || filter(tile).includes('blur(18px)')); })()"));
+  check("Glass editor sections preview their own wallpaper and shaped controls", await editor.waitFor("getComputedStyle(document.querySelector('.deck-section')).borderRadius === '30px' && getComputedStyle(document.querySelector('.deck-section')).backgroundImage.includes('radial-gradient') && !!document.querySelector('.control-tile[data-shape]')"));
+  check("Glass controls own the blur while the section stays clear", await editor.eval("(() => { const section = document.querySelector('.deck-section'); const tile = document.querySelector('.control-tile'); const filter = (el) => getComputedStyle(el).getPropertyValue('backdrop-filter') || getComputedStyle(el).getPropertyValue('-webkit-backdrop-filter'); const supported = CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'); return ['', 'none'].includes(filter(section).trim()) && (!supported || filter(tile).includes('blur(22px)')); })()"));
   await editor.screenshot("/tmp/deck-design-glass.png");
   const { browserContextId: glassCtx } = await cdp.send('Target.createBrowserContext');
   const glassPhone = await openPage("glass-phone", `${BASE}/#/phone`, { width: 390, height: 844, mobile: true }, glassCtx);
@@ -813,6 +813,17 @@ try {
   await glassPhone.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 700, deviceScaleFactor: 1, mobile: true });
   check("Glass phone fits a 320px viewport", await glassPhone.eval("document.documentElement.scrollWidth <= innerWidth && getComputedStyle(document.querySelector('.phone-grid')).gridTemplateColumns.split(' ').length === 4 && [...document.querySelectorAll('.control-tile')].every(el => { const r = el.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })"));
   await glassPhone.screenshot("/tmp/deck-design-glass-phone-320.png");
+  const savedGlassDeck = structuredClone(glassDeck);
+  savedGlassDeck.theme = 'dark';
+  savedGlassDeck.pages[0].name = savedGlassDeck.pages[0].sections[0].name = 'Stream';
+  savedGlassDeck.pages[0].sections[0].theme = 'glass';
+  Object.assign(savedGlassDeck.pages[0].sections[0].controls[2], { columnSpan: 1, rowSpan: 1 });
+  await glassPhone.eval(`localStorage.setItem('deck.local.v1', ${JSON.stringify(JSON.stringify(savedGlassDeck))})`);
+  await glassPhone.reload();
+  check("a saved Glass section owns the phone wallpaper even in a Dark deck", await glassPhone.waitFor("document.documentElement.dataset.theme === 'dark' && document.querySelector('.phone-shell')?.dataset.appearance === 'glass' && getComputedStyle(document.querySelector('.phone-shell')).backgroundImage.includes('radial-gradient')"));
+  check("saved one-cell Play is an accessible circle without squeezed label text", await glassPhone.eval("(() => { const t = document.querySelector('.control-tile[data-action=\"media-play-pause\"]'); const r = t.getBoundingClientRect(); return t.dataset.shape === 'circle' && Math.abs(r.width - r.height) <= 2 && r.width >= 44 && getComputedStyle(t.querySelector('.tile-label')).display === 'none' && t.querySelector('button').getAttribute('aria-label').includes('Play'); })()"));
+  await glassPhone.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await glassPhone.screenshot("/tmp/deck-design-glass-saved-layout.png");
   await editor.send("Emulation.setEmulatedMedia", { features: [{ name: "forced-colors", value: "active" }] });
   const forcedGlass = await editor.eval("(() => { const section = getComputedStyle(document.querySelector('.deck-section')); const tile = getComputedStyle(document.querySelector('.control-tile')); const root = getComputedStyle(document.documentElement); const button = document.querySelector('.control-tile .tile-primary'); button.focus(); const focus = getComputedStyle(button); return root.getPropertyValue('--card-border').trim() === 'CanvasText' && root.getPropertyValue('--focus').trim() !== '' && section.boxShadow === 'none' && tile.boxShadow === 'none' && section.backgroundColor === tile.backgroundColor && focus.outlineStyle === 'solid' && focus.outlineWidth !== '0px'; })()");
   check("forced colors flatten Glass surfaces and keep focus visible", forcedGlass);
@@ -1781,7 +1792,7 @@ try {
 
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Glass'));
-  check('a Glass section inside a dark deck keeps its local accent and material', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); const tile = s.querySelector('.control-tile'); return s.dataset.theme === 'glass' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7' && getComputedStyle(s).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(s).borderRadius === '0px' && getComputedStyle(tile).backgroundImage.includes('gradient'); })()"));
+  check('a Glass section inside a dark deck keeps its local accent and material', await manage.waitFor("(() => { const s = document.querySelector('.deck-section:nth-child(2)'); const tile = s.querySelector('.control-tile'); return s.dataset.theme === 'glass' && getComputedStyle(s).getPropertyValue('--accent').trim() === '#6ee7b7' && getComputedStyle(s).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(s).borderRadius === '30px' && getComputedStyle(s).backgroundImage.includes('radial-gradient') && getComputedStyle(tile).backgroundImage.includes('gradient'); })()"));
   await manage.eval(click('.deck-section:nth-child(2) .section-actions .section-settings-trigger'));
   await manage.eval(clickText('.section-settings-menu [role=menuitemradio]', 'Light'));
   await manage.waitFor("document.querySelector('.deck-section:nth-child(2)').dataset.theme === 'light'");

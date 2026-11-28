@@ -9,6 +9,7 @@ import type { Control, Theme } from "../lib/types";
 import { ActionIcon } from "./ActionIcon";
 import { Dropdown } from "./Dropdown";
 import { verticalReorderIndex } from "../lib/tileNavigation";
+import { controlGeometry } from "../lib/theme";
 
 const VOLUME_COMMIT_KEYS = new Set([
   "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
@@ -67,6 +68,7 @@ export function ControlTile({
   useEffect(() => () => { dropTarget.current?.classList.remove("is-drop-target"); }, []);
   const contract = controlContract(control, plugins);
   const presentation = effectivePresentation(control, plugins);
+  const geometry = controlGeometry(control, presentation, appearance);
   const numeric = contract?.kind === "numeric" && (presentation === "slider" || presentation === "dial") ? contract : null;
   const toggle = contract?.kind === "boolean" && (presentation === "toggle-switch" || presentation === "toggle-button") ? contract : null;
   const [localValue, setLocalValue] = useState<number | null>(null);
@@ -113,11 +115,11 @@ export function ControlTile({
     <article ref={tileRef}
       onContextMenu={event => { if (variant === "editor") event.preventDefault(); }}
       className={`control-tile${selected ? " is-selected" : ""}${pressed ? " is-pressed" : ""}${disabled ? " is-disabled" : ""}${transientDisabled ? " is-transient-disabled" : ""}${busy ? " is-busy" : ""}${dragging ? " is-dragging" : ""}${order ? " is-reorderable" : ""}`}
-      style={{ ...(control.columnSpan ? { "--column-span": control.columnSpan } : {}), ...(control.rowSpan ? { "--row-span": control.rowSpan } : {}),
+      style={{ ...(appearance === "glass" || control.columnSpan ? { "--column-span": geometry.columns } : {}), ...(appearance === "glass" || control.rowSpan ? { "--row-span": geometry.rows } : {}),
         ...(numeric ? { "--control-fill": `${100 * (currentValue - numeric.minimum) / (numeric.maximum - numeric.minimum)}%` } : {}),
       } as CSSProperties}
       data-presentation={presentation} data-action={control.action} data-variant={variant} aria-busy={busy || undefined}
-      data-column-span={control.columnSpan} data-row-span={control.rowSpan}
+      data-column-span={control.columnSpan} data-row-span={control.rowSpan} data-shape={geometry.shape}
       data-order-index={order?.index}
       onPointerDownCapture={(event) => {
         if (!order || disabled || event.button !== 0 || (event.target as HTMLElement).closest(".tile-reading button, .dropdown")) return;
