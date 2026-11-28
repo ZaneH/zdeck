@@ -69,6 +69,37 @@ export const AllPresentations: Story = { render: () => <div style={{ display: "g
 export const Button: Story = { render: () => <PresentationExample presentation="button" /> };
 export const Slider: Story = { render: () => <PresentationExample presentation="slider" /> };
 export const Dial: Story = { render: () => <PresentationExample presentation="dial" /> };
+export const MacintoshDialSpacing: Story = {
+  render: () => <div style={{ display: "grid", gap: 24, maxWidth: 400 }}>
+    {(["editor", "phone"] as const).map(variant => <section key={variant} className="deck-section" data-appearance="macintosh">
+      <div className={variant === "phone" ? "phone-grid" : "control-grid"}
+        style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <ControlTile control={{ ...controls[3], label: "Volume", presentation: "dial" }} variant={variant} appearance="macintosh" volume={19} />
+        <ControlTile control={{ id: "power", label: "Power", action: "plugin", pluginId: "mixer", pluginAction: "power", pluginArgs: { enabled: false } }}
+          plugins={presentationPlugins} variant={variant} appearance="macintosh" volume={50} />
+      </div>
+    </section>)}
+  </div>,
+  play: async ({ canvasElement }) => {
+    await document.fonts.ready;
+    for (const tile of canvasElement.querySelectorAll('[data-presentation="dial"]')) {
+      const bounds = tile.getBoundingClientRect();
+      const heading = tile.querySelector(".tile-primary")!.getBoundingClientRect();
+      const dial = tile.querySelector(".dial-face")!.getBoundingClientRect();
+      const topSpace = heading.top - bounds.top;
+      const bottomSpace = bounds.bottom - dial.bottom;
+      expect(Math.abs(topSpace - bottomSpace)).toBeLessThan(1);
+      expect(topSpace).toBeGreaterThan(8);
+      expect(dial.top - heading.bottom).toBeGreaterThanOrEqual(8);
+      expect(dial.height).toBeGreaterThanOrEqual(44);
+    }
+    for (const button of canvasElement.querySelectorAll('[data-presentation="button"] .tile-primary')) {
+      expect(getComputedStyle(button).display).toBe("flex");
+      expect(getComputedStyle(button).flexDirection).toBe("column");
+      expect(getComputedStyle(button).padding).toBe("12px 8px");
+    }
+  },
+};
 export const ToggleSwitch: Story = { render: () => <PresentationExample presentation="toggle-switch" /> };
 export const ToggleButton: Story = { render: () => <PresentationExample presentation="toggle-button" /> };
 export const PresentationStates: Story = { render: () => <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
