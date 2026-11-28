@@ -35,7 +35,9 @@ use tokio::sync::{broadcast, Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio_websockets::{CloseCode, Limits as WsLimits, Message, ServerBuilder};
 use url::Url;
 
-use crate::deck::{ControlAction, DeckSnapshot, DeckStore};
+use crate::deck::{ControlAction, Deck, DeckSnapshot, DeckStore};
+use crate::theme_store::ThemeStore;
+use zdeck_schema::theme_package::CustomThemeReference;
 use crate::obs::ObsState;
 use crate::system::SystemState;
 use crate::plugin::PluginRegistry;
@@ -150,6 +152,9 @@ pub struct ServiceConfig {
     pub assets: Arc<dyn AssetProvider>,
     pub clock: Arc<dyn Clock>,
     pub limits: Limits,
+    /// Optional installed external theme catalog. Missing access hides definitions,
+    /// never the deck.
+    pub themes: Option<Arc<ThemeStore>>,
 }
 
 impl ServiceConfig {
@@ -170,7 +175,13 @@ impl ServiceConfig {
             assets,
             clock: Arc::new(SystemClock),
             limits: Limits::default(),
+            themes: None,
         }
+    }
+
+    pub fn with_themes(mut self, themes: Arc<ThemeStore>) -> Self {
+        self.themes = Some(themes);
+        self
     }
 }
 
@@ -396,6 +407,7 @@ struct Inner {
     assets: Arc<dyn AssetProvider>,
     clock: Arc<dyn Clock>,
     limits: Limits,
+    themes: Option<Arc<ThemeStore>>,
     registry: Mutex<Registry>,
     trust: Arc<Mutex<TrustStore>>,
     shutdown: broadcast::Sender<()>,
@@ -880,6 +892,7 @@ async fn start_with_trust(config: ServiceConfig, trust: Arc<Mutex<TrustStore>>) 
         assets: config.assets,
         clock: config.clock,
         limits: config.limits,
+        themes: config.themes,
         registry: Mutex::new(registry),
         trust,
         shutdown,
@@ -1137,18 +1150,103 @@ async fn pair_status(
     ))
 }
 
+/// Bound on the serialized external theme definitions sent to a phone.
+const MAX_EXTERNAL_THEMES_BYTES: usize = 128 * 1024;
+const THEME_UNAVAILABLE: &str = "A referenced theme is not installed on this desktop. Reinstall it in zDeck or choose a built-in theme.";
+const THEME_CATALOG_ERROR: &str = "Installed themes could not be read on this desktop. Reinstall the referenced theme in zDeck or choose a built-in theme.";
+const THEME_TOO_LARGE: &str = "Referenced theme definitions are too large to send to this device. Remove unused themes in zDeck or choose a built-in theme.";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalThemeDefinition {
+    pub reference: CustomThemeReference,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AppearanceSnapshot {
+    pub external_themes: Vec<ExternalThemeDefinition>,
+    pub theme_error: Option<&'static str>,
+}
+
+impl AppearanceSnapshot {
+    fn unavailable(message: &'static str) -> Self {
+        Self { external_themes: Vec::new(), theme_error: Some(message) }
+    }
+
+    /// Merge only appearance fields; the deck and revision stay untouched.
+    fn merge_into(&self, payload: &mut serde_json::Value) {
+        payload["externalThemes"] = serde_json::to_value(&self.external_themes)
+            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+        if let Some(error) = self.theme_error {
+            payload["themeError"] = serde_json::Value::String(error.into());
+        }
+    }
+}
+
+/// Referenced deck and section themes only; Trash never leaves the desktop.
+fn referenced_themes(deck: &Deck) -> Vec<&CustomThemeReference> {
+    let mut references: Vec<&CustomThemeReference> = deck.custom_theme.iter().collect();
+    for page in &deck.pages {
+        references.extend(page.sections.iter().filter_map(|section| section.custom_theme.as_ref()));
+    }
+    references
+}
+
+/// One collector for every authenticated snapshot so GET, refresh and sockets agree.
+pub(crate) async fn appearance_snapshot(
+    themes: Option<&ThemeStore>,
+    deck: &Deck,
+) -> AppearanceSnapshot {
+    let references = referenced_themes(deck);
+    if references.is_empty() {
+        return AppearanceSnapshot::default();
+    }
+    let Some(store) = themes else {
+        return AppearanceSnapshot::unavailable(THEME_UNAVAILABLE);
+    };
+    let installed = match store.list().await {
+        Ok(installed) => installed,
+        Err(_) => return AppearanceSnapshot::unavailable(THEME_CATALOG_ERROR),
+    };
+    let mut external_themes: Vec<ExternalThemeDefinition> = Vec::new();
+    let mut missing = false;
+    for reference in references {
+        if external_themes.iter().any(|definition| definition.reference == *reference) {
+            continue;
+        }
+        match installed.iter().find(|theme| theme.reference == *reference) {
+            Some(theme) => external_themes.push(ExternalThemeDefinition {
+                reference: reference.clone(),
+                source: theme.source.clone(),
+            }),
+            None => missing = true,
+        }
+    }
+    if external_themes.is_empty() {
+        return AppearanceSnapshot::unavailable(THEME_UNAVAILABLE);
+    }
+    if serde_json::to_vec(&external_themes).map_or(true, |bytes| bytes.len() > MAX_EXTERNAL_THEMES_BYTES) {
+        return AppearanceSnapshot::unavailable(THEME_TOO_LARGE);
+    }
+    AppearanceSnapshot {
+        external_themes,
+        theme_error: missing.then_some(THEME_UNAVAILABLE),
+    }
+}
+
 async fn state(State(inner): State<Arc<Inner>>, headers: HeaderMap) -> Result<Response, ApiError> {
     inner.authenticate(&headers).await?;
     let snapshot = load_saved_deck(inner.as_ref()).await?;
-    Ok(json_response(
-        StatusCode::OK,
-        &json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "revision": snapshot.revision,
-            "deck": snapshot.deck,
-            "plugins": inner.actions.presentation_plugins().await,
-        }),
-    ))
+    let appearance = appearance_snapshot(inner.themes.as_deref(), &snapshot.deck).await;
+    let mut payload = json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "revision": snapshot.revision,
+        "deck": snapshot.deck,
+        "plugins": inner.actions.presentation_plugins().await,
+    });
+    appearance.merge_into(&mut payload);
+    Ok(json_response(StatusCode::OK, &payload))
 }
 
 async fn refresh_reading(State(inner): State<Arc<Inner>>, headers: HeaderMap, Path(id): Path<String>) -> Result<Response, ApiError> {
@@ -1171,9 +1269,12 @@ async fn refresh_reading(State(inner): State<Arc<Inner>>, headers: HeaderMap, Pa
     let result = inner.actions.refresh_value(control).await;
     // Return the safe stopped/unknown snapshot on read failure, never an old successful value.
     let plugins = inner.actions.presentation_plugins().await;
-    Ok(json_response(StatusCode::OK, &json!({ "protocolVersion": PROTOCOL_VERSION,
+    let appearance = appearance_snapshot(inner.themes.as_deref(), &snapshot.deck).await;
+    let mut payload = json!({ "protocolVersion": PROTOCOL_VERSION,
         "revision": snapshot.revision, "deck": snapshot.deck, "plugins": plugins,
-        "readingFailed": result.is_err() })))
+        "readingFailed": result.is_err() });
+    appearance.merge_into(&mut payload);
+    Ok(json_response(StatusCode::OK, &payload))
 }
 
 async fn events(
@@ -1242,6 +1343,7 @@ async fn run_socket(
     let mut shutdown = inner.shutdown.subscribe();
     let mut revoke = inner.revoke.subscribe();
     let mut saved = inner.deck.subscribe();
+    let mut themes = inner.themes.as_ref().map(|store| store.subscribe());
     // A stop may have happened before this socket subscribed to the broadcast.
     if inner.stopped.load(Ordering::SeqCst) {
         let _ = sink
@@ -1274,7 +1376,7 @@ async fn run_socket(
             .await;
         return Ok(());
     }
-    if send_snapshot(&mut sink, &initial, &inner.actions).await.is_err() {
+    if send_snapshot(&mut sink, &initial, &inner).await.is_err() {
         return Ok(());
     }
 
@@ -1315,7 +1417,34 @@ async fn run_socket(
                 }
                 match load_saved_deck(inner.as_ref()).await {
                     Ok(snapshot) => {
-                        if send_snapshot(&mut sink, &snapshot, &inner.actions).await.is_err() {
+                        if send_snapshot(&mut sink, &snapshot, &inner).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        let _ = sink.send(Message::close(Some(CloseCode::INTERNAL_SERVER_ERROR), "Deck unavailable")).await;
+                        break;
+                    }
+                }
+            }
+            _ = async {
+                match themes.as_mut() {
+                    Some(themes) => {
+                        if themes.changed().await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                if !inner.is_approved(&hash).await {
+                    let _ = sink.send(Message::close(Some(CloseCode::POLICY_VIOLATION), "Device revoked")).await;
+                    break;
+                }
+                // A theme package may have appeared or disappeared without a deck edit.
+                match load_saved_deck(inner.as_ref()).await {
+                    Ok(snapshot) => {
+                        if send_snapshot(&mut sink, &snapshot, &inner).await.is_err() {
                             break;
                         }
                     }
@@ -1346,18 +1475,26 @@ async fn run_socket(
     Ok(())
 }
 
-async fn send_snapshot<S>(sink: &mut S, snapshot: &crate::deck::DeckSnapshot, actions: &ActionDispatcher) -> Result<(), ()>
+async fn send_snapshot<S>(sink: &mut S, snapshot: &crate::deck::DeckSnapshot, inner: &Inner) -> Result<(), ()>
 where
     S: Sink<Message, Error = tokio_websockets::Error> + Unpin,
 {
-    let payload = json!({
+    let appearance = appearance_snapshot(inner.themes.as_deref(), &snapshot.deck).await;
+    let mut payload = json!({
         "type": "snapshot",
         "protocolVersion": PROTOCOL_VERSION,
         "revision": snapshot.revision,
         "deck": snapshot.deck,
-        "plugins": actions.presentation_plugins().await,
+        "plugins": inner.actions.presentation_plugins().await,
     });
+    appearance.merge_into(&mut payload);
     let text = serde_json::to_string(&payload).map_err(|_| ())?;
+    if text.len() > inner.limits.max_socket_payload {
+        let _ = sink
+            .send(Message::close(Some(CloseCode::MESSAGE_TOO_BIG), "Snapshot too large"))
+            .await;
+        return Err(());
+    }
     sink.send(Message::text(text)).await.map_err(|_| ())
 }
 

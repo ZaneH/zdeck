@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use zdeck_schema::theme_package::{
     parse_theme_package, CustomThemeReference, ThemePackage, MAX_THEME_PACKAGE_BYTES,
 };
@@ -59,30 +59,38 @@ pub enum ThemeStoreError {
     Conflict { message: String },
     InUse { message: String },
     NotFound { message: String },
+    Forbidden { message: String },
+    Unavailable { message: String },
     Io { message: String },
 }
 
 impl ThemeStoreError {
-    fn invalid_package(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid_package(message: impl Into<String>) -> Self {
         Self::InvalidPackage { message: message.into() }
     }
-    fn limit(message: impl Into<String>) -> Self {
+    pub(crate) fn limit(message: impl Into<String>) -> Self {
         Self::LimitReached { message: message.into() }
     }
-    fn invalid_catalog(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid_catalog(message: impl Into<String>) -> Self {
         Self::InvalidCatalog { message: message.into() }
     }
-    fn conflict(message: impl Into<String>) -> Self {
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict { message: message.into() }
     }
-    fn in_use(message: impl Into<String>) -> Self {
+    pub(crate) fn in_use(message: impl Into<String>) -> Self {
         Self::InUse { message: message.into() }
     }
-    fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound { message: message.into() }
     }
-    fn io(message: impl Into<String>) -> Self {
+    pub(crate) fn io(message: impl Into<String>) -> Self {
         Self::Io { message: message.into() }
+    }
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::Forbidden { message: message.into() }
+    }
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self::Unavailable { message: message.into() }
     }
 }
 
@@ -114,6 +122,8 @@ pub struct ThemeStore {
     /// Serializes every catalog read-modify-write.
     lock: Mutex<()>,
     temp_counter: AtomicU64,
+    /// Wakes the phone service after a successful catalog write. No I/O here.
+    changed: watch::Sender<()>,
     #[cfg(test)]
     fail_next_write: std::sync::atomic::AtomicBool,
 }
@@ -124,9 +134,16 @@ impl ThemeStore {
             path,
             lock: Mutex::new(()),
             temp_counter: AtomicU64::new(0),
+            changed: watch::channel(()).0,
             #[cfg(test)]
             fail_next_write: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Subscribe to successful catalog changes. This is a wake-up hint only;
+    /// readers still load the authoritative catalog from the store.
+    pub fn subscribe(&self) -> watch::Receiver<()> {
+        self.changed.subscribe()
     }
 
     /// Read and validate the persisted catalog, preserving its order.
@@ -187,6 +204,7 @@ impl ThemeStore {
             )));
         }
         self.write_atomic(&encoded)?;
+        let _ = self.changed.send(());
         Ok(incoming)
     }
 
@@ -227,7 +245,9 @@ impl ThemeStore {
         let encoded = serde_json::to_vec(&catalog).map_err(|_| {
             ThemeStoreError::invalid_catalog("The theme catalog could not be encoded.")
         })?;
-        self.write_atomic(&encoded)
+        self.write_atomic(&encoded)?;
+        let _ = self.changed.send(());
+        Ok(())
     }
 
     fn load_catalog(&self) -> Result<Catalog, ThemeStoreError> {

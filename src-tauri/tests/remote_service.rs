@@ -264,6 +264,7 @@ async fn env_with(
         assets,
         clock: clock.clone(),
         limits,
+        themes: None,
     };
     let service = start(config).await.expect("start service");
     let port = service.port();
@@ -546,7 +547,7 @@ async fn origin_validation_rejects_unsafe_origins() {
         let config = ServiceConfig {
             origin: origin.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
             actions: default_actions(), assets: default_assets(),
-            clock: default_clock(), limits: Limits::default(),
+            clock: default_clock(), limits: Limits::default(), themes: None,
         };
         let error = start(config).await.err().expect("origin must be rejected");
         assert!(
@@ -562,7 +563,7 @@ async fn origin_validation_rejects_unsafe_origins() {
     let config = ServiceConfig {
         origin: "https://deck.tailnet.ts.net:443".to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let service = start(config).await.expect(":443 origin is valid");
     assert_eq!(
@@ -575,7 +576,7 @@ async fn origin_validation_rejects_unsafe_origins() {
 fn transport_config(origin: &str, mode: ConnectionMode, deck: Arc<DeckStore>) -> ServiceConfig {
     ServiceConfig {
         origin: origin.into(), mode, port: 0, deck, actions: default_actions(),
-        assets: default_assets(), clock: default_clock(), limits: Limits::default(),
+        assets: default_assets(), clock: default_clock(), limits: Limits::default(), themes: None,
     }
 }
 
@@ -1134,7 +1135,7 @@ async fn deck_store_changes_are_published_over_the_socket() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store.clone(),
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let service = start(config).await.expect("start service");
     let port = service.port();
@@ -2427,7 +2428,7 @@ async fn admin_operations_are_native_only() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let status = admin.start(config).await.expect("admin start");
     assert!(status.running);
@@ -2439,7 +2440,7 @@ async fn admin_operations_are_native_only() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     assert!(matches!(
         admin.start(config).await,
@@ -2464,7 +2465,7 @@ async fn bind_failure_is_reported_without_panicking() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let error = start(config).await.err().expect("bind must fail");
     assert!(matches!(error, RemoteError::Bind { .. }));
@@ -2595,7 +2596,7 @@ async fn uninitialized_and_corrupt_deck_store_are_reported() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let service = start(config).await.expect("start");
     let port = service.port();
@@ -2641,7 +2642,7 @@ async fn uninitialized_and_corrupt_deck_store_are_reported() {
     let config = ServiceConfig {
         origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
         actions: default_actions(), assets: default_assets(),
-        clock: default_clock(), limits: Limits::default(),
+        clock: default_clock(), limits: Limits::default(), themes: None,
     };
     let service = start(config).await.expect("start");
     let port = service.port();
@@ -3043,7 +3044,7 @@ mod browser_smoke {
             actions: Arc::new(deck_lib::actions::ActionDispatcher::new(default_obs(), default_system(runner.clone()), Arc::new(deck_lib::plugin::PluginRegistry::default()))),
             assets: Arc::new(DiskAssets { root: dist }),
             clock: default_clock(),
-            limits: Limits::default(),
+            limits: Limits::default(), themes: None,
         };
         let service = start(config).await.expect("start browser smoke service");
         let port = service.port();
@@ -3110,4 +3111,124 @@ mod browser_smoke {
         service.stop().await;
         assert!(status.success(), "remote browser smoke reported failures");
     }
+}
+
+const THEME_FIXTURE: &[u8] = include_bytes!("../../tests/fixtures/theme-packages/midnight-maze.json");
+
+fn themed_package(id: &str) -> Vec<u8> {
+    let mut value: Value = serde_json::from_slice(THEME_FIXTURE).unwrap();
+    value["id"] = json!(id);
+    serde_json::to_vec(&value).unwrap()
+}
+
+#[tokio::test]
+async fn external_theme_sources_are_referenced_exact_and_missing_updates_live() {
+    use deck_lib::deck::Theme;
+    use deck_lib::theme_store::{ThemeStore, THEME_CATALOG_FILE_NAME};
+
+    let catalog_dir = TempDir::new("theme-catalog");
+    let themes = Arc::new(ThemeStore::new(catalog_dir.path.join(THEME_CATALOG_FILE_NAME)));
+    let installed = themes.install(THEME_FIXTURE).await.expect("install theme");
+    let trashed = themes.install(&themed_package("maze-trash")).await.expect("install trash theme");
+
+    let dir = TempDir::new("theme-deck");
+    let store = Arc::new(DeckStore::new(dir.path.join(DECK_FILE_NAME)));
+    let mut deck = default_deck();
+    deck.custom_theme = Some(installed.reference.clone());
+    deck.pages[0].sections[0].theme = Some(Theme::Glass);
+    deck.pages[0].sections[0].custom_theme = Some(installed.reference.clone());
+    let mut discarded = deck.pages[0].sections[0].clone();
+    discarded.id = "trash-theme-section".into();
+    discarded.custom_theme = Some(trashed.reference.clone());
+    let before_missing = store
+        .save(0, deck.clone(), vec![TrashEntry::Section {
+            id: discarded.id.clone(),
+            deleted_at: 1,
+            section: discarded,
+            location: TrashLocation {
+                page_id: "page_stream".into(),
+                page_name: "Stream".into(),
+                section_id: None,
+                section_name: None,
+                index: 0,
+            },
+        }])
+        .await
+        .expect("save themed deck");
+
+    // Missing definitions preserve the deck and report a fixed actionable error.
+    let missing_dir = TempDir::new("theme-empty");
+    let missing_store = Arc::new(ThemeStore::new(missing_dir.path.join(THEME_CATALOG_FILE_NAME)));
+    let missing_config = ServiceConfig {
+        origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store.clone(),
+        actions: default_actions(), assets: default_assets(),
+        clock: default_clock(), limits: Limits::default(), themes: Some(missing_store.clone()),
+    };
+    let missing_service = start(missing_config).await.expect("start missing theme service");
+    let missing_port = missing_service.port();
+    let invitation = missing_service.create_invitation().await.expect("invitation");
+    let response = http_request(
+        missing_port, "POST", "/api/v1/pair", PUBLIC_HOST, Some(ORIGIN), None,
+        Some(&json!({ "invitation": invitation.invitation, "name": "Theme" }).to_string()),
+    ).await;
+    assert_eq!(response.status, 200);
+    let request_id = response.json()["requestId"].as_str().unwrap().to_string();
+    missing_service.approve_device(&request_id).await.expect("approve");
+    let token = response.cookie_token().expect("cookie");
+    let state = http_request(
+        missing_port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None,
+    ).await;
+    assert_eq!(state.status, 200);
+    assert_eq!(state.json()["revision"], before_missing.revision);
+    assert_eq!(state.json()["deck"]["customTheme"]["id"], installed.reference.id);
+    assert_eq!(state.json()["externalThemes"], json!([]));
+    assert!(state.json()["themeError"].as_str().unwrap().contains("Reinstall"));
+
+    let host = format!("127.0.0.1:{missing_port}");
+    let mut websocket = ws_connect(missing_port, &host, ORIGIN, Some(&token))
+        .await
+        .expect("websocket");
+    let initial = read_json(&mut websocket).await;
+    assert_eq!(initial["externalThemes"], json!([]));
+    assert!(initial.get("themeError").is_some());
+
+    // Installing the missing package refreshes the live appearance without a deck edit.
+    missing_store.install(THEME_FIXTURE).await.expect("install missing theme");
+    let update = read_json(&mut websocket).await;
+    assert_eq!(update["type"], "snapshot");
+    assert_eq!(update["revision"], before_missing.revision);
+    assert_eq!(update["externalThemes"].as_array().unwrap().len(), 1);
+    assert_eq!(update["externalThemes"][0]["reference"], json!(installed.reference));
+    assert_eq!(update["externalThemes"][0]["source"].as_str().unwrap().as_bytes(), THEME_FIXTURE);
+    assert_eq!(update["externalThemes"][0].get("package"), None);
+    assert!(update.get("themeError").is_none());
+    close_websocket(&mut websocket).await;
+    missing_service.stop().await;
+
+    // A full catalog delivers only the referenced source, never an unused Trash definition.
+    let config = ServiceConfig {
+        origin: ORIGIN.to_string(), mode: ConnectionMode::default(), port: 0, deck: store,
+        actions: default_actions(), assets: default_assets(),
+        clock: default_clock(), limits: Limits::default(), themes: Some(themes),
+    };
+    let service = start(config).await.expect("start themed service");
+    let port = service.port();
+    let invitation = service.create_invitation().await.expect("invitation");
+    let response = http_request(
+        port, "POST", "/api/v1/pair", PUBLIC_HOST, Some(ORIGIN), None,
+        Some(&json!({ "invitation": invitation.invitation, "name": "Themed" }).to_string()),
+    ).await;
+    assert_eq!(response.status, 200);
+    let request_id = response.json()["requestId"].as_str().unwrap().to_string();
+    service.approve_device(&request_id).await.expect("approve");
+    let token = response.cookie_token().expect("cookie");
+    let state = http_request(port, "GET", "/api/v1/state", PUBLIC_HOST, None, Some(&token), None).await;
+    assert_eq!(state.status, 200);
+    assert_eq!(state.json()["revision"], before_missing.revision);
+    assert_eq!(state.json()["deck"]["customTheme"], json!(installed.reference));
+    let definitions = state.json()["externalThemes"].as_array().unwrap().clone();
+    assert_eq!(definitions.len(), 1, "Trash-only and duplicate references are omitted");
+    assert_eq!(definitions[0]["reference"], json!(installed.reference));
+    assert_eq!(definitions[0]["source"].as_str().unwrap().as_bytes(), THEME_FIXTURE);
+    service.stop().await;
 }

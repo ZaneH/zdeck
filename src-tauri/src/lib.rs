@@ -14,6 +14,7 @@ mod plugin_registry;
 pub mod remote;
 pub use zdeck_system as system;
 pub mod theme_store;
+mod theme_commands;
 mod tray;
 
 use std::sync::Arc;
@@ -81,6 +82,7 @@ pub struct AppState {
     actions: Arc<ActionDispatcher>,
     desktop: DesktopActions,
     assets: Arc<dyn AssetProvider>,
+    themes: Option<Arc<theme_store::ThemeStore>>,
 }
 
 impl AppState {
@@ -92,6 +94,7 @@ impl AppState {
             })?.clone(),
             actions: self.actions.clone(), assets: self.assets.clone(),
             clock: Arc::new(SystemClock), limits: Limits::default(),
+            themes: self.themes.clone(),
         })
     }
 
@@ -524,6 +527,9 @@ pub fn run() {
                     "Could not resolve the app data directory: {error}."
                 ))),
             };
+            let themes = app_data_directory(app.handle()).ok().map(|directory| {
+                Arc::new(theme_store::ThemeStore::new(directory.join(theme_store::THEME_CATALOG_FILE_NAME)))
+            });
             let assets: Arc<dyn AssetProvider> = Arc::new(TauriAssets {
                 resolver: app.asset_resolver(),
             });
@@ -537,7 +543,7 @@ pub fn run() {
                 let config = ServiceConfig {
                     origin: String::new(), mode: ConnectionMode::default(), port: DEFAULT_PORT,
                     deck: deck.clone(), actions: actions.clone(), assets: assets.clone(),
-                    clock: Arc::new(SystemClock), limits: Limits::default(),
+                    clock: Arc::new(SystemClock), limits: Limits::default(), themes: themes.clone(),
                 };
                 tauri::async_runtime::block_on(admin.restore(config));
             }
@@ -549,7 +555,7 @@ pub fn run() {
                 install?.restore(&restoring).await
             });
             app.manage(PluginStartupState(tokio::sync::Mutex::new(PluginStartup { task: Some(task), error: None })));
-            app.manage(AppState { store, obs, system, plugin, actions, desktop, assets });
+            app.manage(AppState { store, obs, system, plugin, actions, desktop, assets, themes });
             tray::setup(app.handle());
             plugin_registry::setup_links(app.handle());
             #[cfg(feature = "native-smoke")]
@@ -585,6 +591,10 @@ pub fn run() {
             system_media_permission_request,
             native_deck_load,
             native_deck_save,
+            theme_commands::theme_list,
+            theme_commands::theme_pick,
+            theme_commands::theme_install,
+            theme_commands::theme_remove,
             desktop_run_control,
             plugin_catalog,
             plugin_registry::plugin_registry_website_status,
