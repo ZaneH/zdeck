@@ -79,7 +79,7 @@ export const PresentationStates: Story = { render: () => <div style={{ display: 
 </div> };
 export const BriefCommandGating: Story = {
   render: () => <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, maxWidth: 700 }}>
-    {([controls[0], { ...controls[3], presentation: "dial" },
+    {([controls[0], { ...controls[3], id: "blocked-slider", presentation: "slider" }, { ...controls[3], presentation: "dial" },
       { id: "power", action: "plugin", label: "Power", pluginId: "mixer", pluginAction: "power", pluginArgs: { enabled: false }, presentation: "toggle-switch" },
     ] as Control[]).map(control => <ControlTile key={control.id} control={control} plugins={presentationPlugins}
       variant="phone" semantics="remote" volume={50} disabled transientDisabled />)}
@@ -91,6 +91,9 @@ export const BriefCommandGating: Story = {
       for (const tile of canvasElement.querySelectorAll(".control-tile")) expect(getComputedStyle(tile).opacity).toBe("1");
     });
     expect(canvasElement.querySelector<HTMLButtonElement>("button.tile-primary")!.disabled).toBe(true);
+    const slider = canvasElement.querySelector<HTMLInputElement>('input[type="range"]:not([hidden])')!;
+    expect(slider.disabled).toBe(true);
+    expect(getComputedStyle(slider).opacity).toBe("1");
     const dial = canvasElement.querySelector<HTMLElement>(".dial-face")!;
     expect(dial.getAttribute("aria-disabled")).toBe("true");
     expect(getComputedStyle(dial).opacity).toBe("1");
