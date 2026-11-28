@@ -1175,11 +1175,18 @@ impl AppearanceSnapshot {
     }
 
     /// Merge only appearance fields; the deck and revision stay untouched.
-    fn merge_into(&self, payload: &mut serde_json::Value) {
+    fn merge_into(&self, payload: &mut serde_json::Value, max_bytes: usize) {
         payload["externalThemes"] = serde_json::to_value(&self.external_themes)
             .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
         if let Some(error) = self.theme_error {
             payload["themeError"] = serde_json::Value::String(error.into());
+        }
+        // Optional appearance data must not disconnect a phone whose deck already fits.
+        if !self.external_themes.is_empty()
+            && serde_json::to_vec(payload).map_or(true, |bytes| bytes.len() > max_bytes)
+        {
+            payload["externalThemes"] = serde_json::json!([]);
+            payload["themeError"] = THEME_TOO_LARGE.into();
         }
     }
 }
@@ -1240,6 +1247,24 @@ mod theme_payload_tests {
     use super::*;
     use crate::deck::{default_deck, Theme};
 
+    #[test]
+    fn combined_snapshot_overflow_drops_only_optional_appearance_data() {
+        let fixture = include_str!("../../tests/fixtures/theme-packages/midnight-maze.json");
+        let reference = CustomThemeReference { id: "midnight-maze".into(), version: "0.1.0".into(), digest: "a".repeat(64) };
+        let mut payload = json!({"deck": {"customTheme": reference}, "plugins": "x".repeat(4096 - 400)});
+        let deck = payload["deck"].clone();
+        let plugins = payload["plugins"].clone();
+        let appearance = AppearanceSnapshot { external_themes: vec![ExternalThemeDefinition {
+            reference, source: fixture.into(),
+        }], theme_error: None };
+        appearance.merge_into(&mut payload, 4096);
+        assert_eq!(payload["externalThemes"], json!([]));
+        assert_eq!(payload["themeError"], THEME_TOO_LARGE);
+        assert_eq!(payload["deck"], deck);
+        assert_eq!(payload["plugins"], plugins);
+        assert!(serde_json::to_vec(&payload).unwrap().len() <= 4096);
+    }
+
     #[tokio::test]
     async fn oversized_appearance_payload_is_visible_and_does_not_mutate_the_deck() {
         let path = std::env::temp_dir().join(format!("zdeck-theme-payload-{}-{}.json",
@@ -1282,7 +1307,7 @@ async fn state(State(inner): State<Arc<Inner>>, headers: HeaderMap) -> Result<Re
         "deck": snapshot.deck,
         "plugins": inner.actions.presentation_plugins().await,
     });
-    appearance.merge_into(&mut payload);
+    appearance.merge_into(&mut payload, inner.limits.max_socket_payload);
     Ok(json_response(StatusCode::OK, &payload))
 }
 
@@ -1310,7 +1335,7 @@ async fn refresh_reading(State(inner): State<Arc<Inner>>, headers: HeaderMap, Pa
     let mut payload = json!({ "protocolVersion": PROTOCOL_VERSION,
         "revision": snapshot.revision, "deck": snapshot.deck, "plugins": plugins,
         "readingFailed": result.is_err() });
-    appearance.merge_into(&mut payload);
+    appearance.merge_into(&mut payload, inner.limits.max_socket_payload);
     Ok(json_response(StatusCode::OK, &payload))
 }
 
@@ -1524,7 +1549,7 @@ where
         "deck": snapshot.deck,
         "plugins": inner.actions.presentation_plugins().await,
     });
-    appearance.merge_into(&mut payload);
+    appearance.merge_into(&mut payload, inner.limits.max_socket_payload);
     let text = serde_json::to_string(&payload).map_err(|_| ())?;
     if text.len() > inner.limits.max_socket_payload {
         let _ = sink
